@@ -46,7 +46,8 @@ if [[ -z $agent ]]; then
   exit 1
 fi
 
-if omarchy-cmd-missing "$agent"; then
+execution_mode=$(omarchy-agent-mode)
+if [[ $execution_mode == "host" ]] && omarchy-cmd-missing "$agent"; then
   echo "$agent is not installed. Choose an installed agent with: omarchy default agent <name>" >&2
   exit 1
 fi
@@ -157,6 +158,10 @@ if [[ -n $home_env ]]; then
     [[ -n $home ]] && account_env+=("$home_env=$home")
     command=("${account_env[@]}" "${command[@]}")
   fi
+fi
+
+if [[ $execution_mode == "container" ]]; then
+  command=(omarchy-agent-exec "$agent" -- "${command[@]}")
 fi
 
 if [[ $inline == "true" ]]; then

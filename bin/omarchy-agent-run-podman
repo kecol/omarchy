@@ -1,0 +1,93 @@
+#!/bin/bash
+
+# omarchy:summary=Run a configured coding agent in its rootless Podman harness
+# omarchy:args=<agent> <harness> -- <command...>
+# omarchy:hidden=true
+
+set -euo pipefail
+
+usage() {
+  echo "Usage: omarchy-agent-run-podman <agent> <harness> -- <command...>" >&2
+}
+
+if (( $# < 4 )) || [[ $3 != "--" ]]; then
+  usage
+  exit 1
+fi
+
+agent=$1
+harness=$2
+shift 3
+command=("$@")
+
+for value in "$agent" "$harness"; do
+  if [[ ! $value =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
+    echo "Invalid agent or harness name: $value" >&2
+    exit 1
+  fi
+done
+
+if omarchy-cmd-missing podman; then
+  echo "Podman is not installed. Install it with: omarchy pkg add podman" >&2
+  exit 1
+fi
+
+if ! rootless=$(podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null); then
+  echo "Podman is installed but is not responding." >&2
+  exit 1
+fi
+if [[ $rootless != "true" ]]; then
+  echo "Agent containers require rootless Podman." >&2
+  exit 1
+fi
+
+image="localhost/omarchy-harness-$harness:latest"
+if ! podman image exists "$image"; then
+  echo "Harness image is missing. Build it with: omarchy harness build $harness" >&2
+  exit 1
+fi
+
+image_harness=$(podman image inspect --format '{{ index .Labels "org.omarchy.harness" }}' "$image")
+if [[ $image_harness != "$harness" ]]; then
+  echo "Harness image label mismatch for $image: ${image_harness:-<missing>}" >&2
+  exit 1
+fi
+
+home_volume="omarchy-agent-$agent-home"
+if ! podman volume exists "$home_volume"; then
+  podman volume create \
+    --label "org.omarchy.agent=$agent" \
+    --label "org.omarchy.harness=$harness" \
+    "$home_volume" >/dev/null
+fi
+
+workspace=$(realpath -e "$PWD")
+workspace_hash=$(printf '%s' "$workspace" | sha256sum)
+container_workspace="/workspace/${workspace_hash:0:16}"
+
+podman_args=(
+  run
+  --rm
+  --interactive
+  --userns=keep-id
+  --cap-drop=all
+  --security-opt=no-new-privileges
+  --workdir="$container_workspace"
+  --hostname="agent-$agent"
+  --env=OMARCHY_AGENT_IN_CONTAINER=1
+  --volume="$workspace:$container_workspace"
+  --volume="$home_volume:/home/agent:U"
+  --entrypoint="${command[0]}"
+)
+
+if [[ -t 0 && -t 1 ]]; then
+  podman_args+=(--tty)
+fi
+if [[ -n ${TERM:-} ]]; then
+  podman_args+=(--env=TERM)
+fi
+if [[ -n ${COLORTERM:-} ]]; then
+  podman_args+=(--env=COLORTERM)
+fi
+
+exec podman "${podman_args[@]}" "$image" "${command[@]:1}"

@@ -1,0 +1,6 @@
+{
+  "name": "pi",
+  "harness": "pi",
+  "runtime": "podman",
+  "command": ["pi"]
+}
