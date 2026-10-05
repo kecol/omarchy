@@ -1,0 +1,25 @@
+#!/bin/bash
+
+# omarchy:summary=List managed coding tasks
+# omarchy:args=[--json]
+
+set -euo pipefail
+
+json=false
+if (( $# == 1 )) && [[ $1 == "--json" ]]; then
+  json=true
+elif (( $# != 0 )); then
+  echo "Usage: omarchy task list [--json]" >&2
+  exit 1
+fi
+
+records=$(omarchy-agent-state task-list)
+if [[ $json == "true" ]]; then
+  jq . <<<"$records"
+else
+  printf '%-14s %-20s %-10s %-12s %s\n' TASK PROJECT STATUS ASSIGNMENTS GOAL
+  jq -r '.[] | [(.id[0:12]), .project_name, .status, (.assignment_count | tostring), .goal] | @tsv' <<<"$records" |
+    while IFS=$'\t' read -r task project status assignments goal; do
+      printf '%-14s %-20s %-10s %-12s %s\n' "$task" "$project" "$status" "$assignments" "$goal"
+    done
+fi

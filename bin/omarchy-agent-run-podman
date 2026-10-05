@@ -53,18 +53,48 @@ if [[ $image_harness != "$harness" ]]; then
   exit 1
 fi
 
-home_volume="omarchy-agent-$agent-home"
-if ! podman volume exists "$home_volume"; then
-  podman volume create \
-    --label "org.omarchy.agent=$agent" \
-    --label "org.omarchy.harness=$harness" \
-    "$home_volume" >/dev/null
-fi
-
 workspace=$(realpath -e "$PWD")
 workspace_hash=$(printf '%s' "$workspace" | sha256sum)
-project_id=${workspace_hash:0:16}
-container_workspace="/workspace/$project_id"
+managed=${OMARCHY_AGENT_MANAGED:-false}
+if [[ $managed == "true" ]]; then
+  for variable in OMARCHY_AGENT_PROJECT_ID OMARCHY_AGENT_TASK_ID OMARCHY_AGENT_ASSIGNMENT_ID OMARCHY_AGENT_ROLE OMARCHY_AGENT_WORKSPACE; do
+    if [[ -z ${!variable:-} ]]; then
+      echo "Managed agent launch is missing $variable." >&2
+      exit 1
+    fi
+  done
+  if [[ $workspace != "$(realpath -e "$OMARCHY_AGENT_WORKSPACE")" ]]; then
+    echo "Managed agent launch does not match its assignment workspace." >&2
+    exit 1
+  fi
+  project_id=$OMARCHY_AGENT_PROJECT_ID
+  task_id=$OMARCHY_AGENT_TASK_ID
+  assignment_id=$OMARCHY_AGENT_ASSIGNMENT_ID
+  role=$OMARCHY_AGENT_ROLE
+  project_compact=${project_id//-/}
+  assignment_compact=${assignment_id//-/}
+  container_workspace="/workspace/${project_compact:0:12}/${assignment_compact:0:12}"
+  home_volume="omarchy-agent-$agent-${assignment_compact:0:12}-home"
+else
+  project_id=${workspace_hash:0:16}
+  task_id=
+  assignment_id=
+  role=
+  container_workspace="/workspace/$project_id"
+  home_volume="omarchy-agent-$agent-home"
+fi
+
+if ! podman volume exists "$home_volume"; then
+  volume_args=(
+    --label "org.omarchy.agent=$agent"
+    --label "org.omarchy.harness=$harness"
+  )
+  if [[ $managed == "true" ]]; then
+    volume_args+=(--label "org.omarchy.assignment=$assignment_id")
+  fi
+  podman volume create "${volume_args[@]}" "$home_volume" >/dev/null
+fi
+
 instance_id=$(< /proc/sys/kernel/random/uuid)
 instance_compact=${instance_id//-/}
 container_name="omarchy-agent-$agent-${instance_compact:0:12}"
@@ -81,6 +111,7 @@ podman_args=(
   --label=org.omarchy.runtime=podman
   --label="org.omarchy.project=$project_id"
   --label="org.omarchy.workspace.target=$container_workspace"
+  --label="org.omarchy.workspace.managed=$managed"
   --userns=keep-id
   --cap-drop=all
   --security-opt=no-new-privileges
@@ -91,6 +122,14 @@ podman_args=(
   --volume="$home_volume:/home/agent:U"
   --entrypoint="${command[0]}"
 )
+
+if [[ $managed == "true" ]]; then
+  podman_args+=(
+    --label="org.omarchy.task=$task_id"
+    --label="org.omarchy.assignment=$assignment_id"
+    --label="org.omarchy.role=$role"
+  )
+fi
 
 if [[ -t 0 && -t 1 ]]; then
   podman_args+=(--tty)

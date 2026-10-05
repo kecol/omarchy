@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # omarchy:summary=Maintain the local coding-agent instance registry
-# omarchy:args=<initialize|start|finish|get|list> [arguments...]
+# omarchy:args=<action> [arguments...]
 # omarchy:hidden=true
 
 set -euo pipefail
@@ -43,6 +43,31 @@ CREATE TABLE IF NOT EXISTS instance_events (
   occurred_at TEXT NOT NULL,
   detail TEXT
 ) STRICT;
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  source_path TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL
+) STRICT;
+CREATE TABLE IF NOT EXISTS tasks (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  goal TEXT NOT NULL,
+  base_commit TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL
+) STRICT;
+CREATE TABLE IF NOT EXISTS assignments (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES tasks(id),
+  agent TEXT NOT NULL,
+  role TEXT NOT NULL,
+  workspace_path TEXT NOT NULL UNIQUE,
+  branch_name TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL
+) STRICT;
+CREATE INDEX IF NOT EXISTS assignments_task_created ON assignments(task_id, created_at);
 SQL
   chmod 600 "$database"
 }
@@ -99,8 +124,71 @@ SQL
     initialize
     sqlite3 -json "$database" 'SELECT * FROM instances ORDER BY created_at DESC;'
     ;;
+  project-register)
+    (( $# == 3 )) || { echo "Usage: omarchy-agent-state project-register <id> <name> <source-path>" >&2; exit 1; }
+    initialize
+    id=$(sql_value "$1")
+    name=$(sql_value "$2")
+    source_path=$(sql_value "$3")
+    sqlite3 "$database" <<SQL
+INSERT INTO projects (id, name, source_path, created_at)
+VALUES ($id, $name, $source_path, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+ON CONFLICT(source_path) DO NOTHING;
+SQL
+    sqlite3 "$database" "SELECT id FROM projects WHERE source_path = $source_path;"
+    ;;
+  project-get)
+    (( $# == 1 )) || { echo "Usage: omarchy-agent-state project-get <id-prefix>" >&2; exit 1; }
+    initialize
+    selector=$(sql_value "$1")
+    sqlite3 -json "$database" "SELECT * FROM projects WHERE id LIKE $selector || '%' ORDER BY created_at DESC;"
+    ;;
+  task-create)
+    (( $# == 5 )) || { echo "Usage: omarchy-agent-state task-create <id> <project-id> <goal> <base-commit> <status>" >&2; exit 1; }
+    initialize
+    values=()
+    for value in "$@"; do values+=("$(sql_value "$value")"); done
+    sqlite3 "$database" "INSERT INTO tasks (id, project_id, goal, base_commit, status, created_at) VALUES (${values[0]}, ${values[1]}, ${values[2]}, ${values[3]}, ${values[4]}, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));"
+    ;;
+  task-get)
+    (( $# == 1 )) || { echo "Usage: omarchy-agent-state task-get <id-prefix>" >&2; exit 1; }
+    initialize
+    selector=$(sql_value "$1")
+    sqlite3 -json "$database" "SELECT tasks.*, projects.name AS project_name, projects.source_path AS project_path FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id LIKE $selector || '%' ORDER BY tasks.created_at DESC;"
+    ;;
+  task-list)
+    (( $# == 0 )) || { echo "Usage: omarchy-agent-state task-list" >&2; exit 1; }
+    initialize
+    sqlite3 -json "$database" 'SELECT tasks.*, projects.name AS project_name, (SELECT count(*) FROM assignments WHERE assignments.task_id = tasks.id) AS assignment_count FROM tasks JOIN projects ON projects.id = tasks.project_id ORDER BY tasks.created_at DESC;'
+    ;;
+  assignment-create)
+    (( $# == 7 )) || { echo "Usage: omarchy-agent-state assignment-create <id> <task-id> <agent> <role> <workspace> <branch> <status>" >&2; exit 1; }
+    initialize
+    values=()
+    for value in "$@"; do values+=("$(sql_value "$value")"); done
+    sqlite3 "$database" "INSERT INTO assignments (id, task_id, agent, role, workspace_path, branch_name, status, created_at) VALUES (${values[0]}, ${values[1]}, ${values[2]}, ${values[3]}, ${values[4]}, ${values[5]}, ${values[6]}, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));"
+    ;;
+  task-assignments)
+    (( $# == 1 )) || { echo "Usage: omarchy-agent-state task-assignments <task-id>" >&2; exit 1; }
+    initialize
+    task_id=$(sql_value "$1")
+    sqlite3 -json "$database" "SELECT id, agent, role, workspace_path, branch_name, status, created_at FROM assignments WHERE task_id = $task_id ORDER BY created_at;"
+    ;;
+  assignment-get)
+    (( $# == 1 )) || { echo "Usage: omarchy-agent-state assignment-get <id-prefix>" >&2; exit 1; }
+    initialize
+    selector=$(sql_value "$1")
+    sqlite3 -json "$database" "SELECT assignments.*, tasks.project_id, tasks.goal, tasks.base_commit, projects.name AS project_name, projects.source_path AS project_path FROM assignments JOIN tasks ON tasks.id = assignments.task_id JOIN projects ON projects.id = tasks.project_id WHERE assignments.id LIKE $selector || '%' ORDER BY assignments.created_at DESC;"
+    ;;
+  assignment-status)
+    (( $# == 2 )) || { echo "Usage: omarchy-agent-state assignment-status <id> <status>" >&2; exit 1; }
+    initialize
+    id=$(sql_value "$1")
+    status=$(sql_value "$2")
+    sqlite3 "$database" "UPDATE assignments SET status = $status WHERE id = $id;"
+    ;;
   *)
-    echo "Usage: omarchy-agent-state <initialize|start|finish|get|list> [arguments...]" >&2
+    echo "Usage: omarchy-agent-state <action> [arguments...]" >&2
     exit 1
     ;;
 esac

@@ -7,6 +7,7 @@
 inline=false
 pick=false
 session_action=
+selected_agent=
 
 # Flags only. A bare prompt would shadow the subcommands under this group, so
 # prompts go through omarchy-agent-prompt, which passes one here as --prompt.
@@ -32,6 +33,10 @@ while (($#)); do
       session_action=continue
       shift
       ;;
+    --agent-internal)
+      selected_agent=${2:?--agent-internal needs a value}
+      shift 2
+      ;;
     *)
       echo "Unexpected argument: $1" >&2
       echo "To pass a prompt: omarchy agent prompt \"$*\"" >&2
@@ -44,7 +49,7 @@ done
 # menu start in the work directory instead of re-asking on every session.
 [[ $PWD == "$HOME" && -d $HOME/Work ]] && cd "$HOME/Work"
 
-agent=$(omarchy-default-agent)
+agent=${selected_agent:-$(omarchy-default-agent)}
 
 # Omarchy ships without a default, so there is nothing to launch until one is
 # picked. --pick offers the choice instead of the error, which is what the

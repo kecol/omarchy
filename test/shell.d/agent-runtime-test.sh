@@ -173,6 +173,34 @@ grep -Fq $'start\t' "$state_log" || fail "Podman adapter records instance start"
 grep -Fq $'finish\t' "$state_log" || fail "Podman adapter records instance finish"
 pass "Podman adapter records the managed instance lifecycle"
 
+managed_project="11111111-2222-3333-4444-555555555555"
+managed_task="22222222-3333-4444-5555-666666666666"
+managed_assignment="33333333-4444-5555-6666-777777777777"
+(
+  cd "$workspace"
+  env "${common_env[@]}" PATH="$mock_bin:/usr/bin" \
+    OMARCHY_AGENT_MANAGED=true \
+    OMARCHY_AGENT_PROJECT_ID="$managed_project" \
+    OMARCHY_AGENT_TASK_ID="$managed_task" \
+    OMARCHY_AGENT_ASSIGNMENT_ID="$managed_assignment" \
+    OMARCHY_AGENT_ROLE=coder \
+    OMARCHY_AGENT_WORKSPACE="$workspace" \
+    "$ROOT/bin/omarchy-agent-run-podman" pi pi -- pi --version
+)
+mapfile -d '' -t run_args <"$podman_run_log"
+run_joined=$(printf '%s\n' "${run_args[@]}")
+for expected in \
+  "--label=org.omarchy.workspace.managed=true" \
+  "--label=org.omarchy.task=$managed_task" \
+  "--label=org.omarchy.assignment=$managed_assignment" \
+  "--label=org.omarchy.role=coder" \
+  "--workdir=/workspace/111111112222/333333334444" \
+  "--volume=$workspace:/workspace/111111112222/333333334444" \
+  "--volume=omarchy-agent-pi-333333334444-home:/home/agent:U"; do
+  grep -Fxq -- "$expected" <<<"$run_joined" || fail "managed Podman launch includes $expected" "$run_joined"
+done
+pass "Podman adapter gives managed assignments task-scoped state and identity"
+
 if (
   cd "$workspace"
   env "${common_env[@]}" PATH="$mock_bin:/usr/bin" OMARCHY_TEST_IMAGE_EXISTS=false \
