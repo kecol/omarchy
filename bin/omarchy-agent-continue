@@ -1,0 +1,7 @@
+#!/bin/bash
+
+# omarchy:summary=Continue the latest session for the default coding agent
+# omarchy:args=[--inline]
+# omarchy:examples=omarchy agent continue | omarchy agent continue --inline
+
+exec omarchy-agent --continue-session "$@"

@@ -1,0 +1,7 @@
+#!/bin/bash
+
+# omarchy:summary=Choose a saved session for the default coding agent
+# omarchy:args=[--inline]
+# omarchy:examples=omarchy agent resume | omarchy agent resume --inline
+
+exec omarchy-agent --resume-session "$@"

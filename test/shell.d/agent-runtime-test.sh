@@ -180,3 +180,28 @@ for expected in \
 done
 [[ $(grep -Fxc 'pi' <<<"$launch_joined") == 2 ]] || fail "agent launcher preserves both Pi identity and command" "$launch_joined"
 pass "the desktop agent launcher routes Pi through container execution"
+
+for action in resume continue; do
+  : >"$launch_log"
+  (
+    cd "$workspace"
+    env "${common_env[@]}" PATH="$mock_bin:$ROOT/bin:/usr/bin" \
+      OMARCHY_TEST_AGENT_MODE=container OMARCHY_TEST_COMMAND_MISSING=true \
+      "$ROOT/bin/omarchy-agent-$action"
+  )
+  mapfile -d '' -t launch_args <"$launch_log"
+  launch_joined=$(printf '%s\n' "${launch_args[@]}")
+  grep -Fxq -- "--$action" <<<"$launch_joined" ||
+    fail "agent $action passes Pi's session flag through the container dispatcher" "$launch_joined"
+done
+pass "Pi sessions can be resumed or continued through the agent command group"
+
+printf 'claude\n' >"$test_home/.config/omarchy/defaults/agent"
+if env "${common_env[@]}" PATH="$mock_bin:$ROOT/bin:/usr/bin" \
+  OMARCHY_TEST_AGENT_MODE=host OMARCHY_TEST_COMMAND_MISSING=false \
+  "$ROOT/bin/omarchy-agent-resume" >"$test_tmp/unsupported-resume" 2>&1; then
+  fail "session resume rejects harnesses without a defined resume interface"
+fi
+grep -Fq 'currently supported only for Pi' "$test_tmp/unsupported-resume" ||
+  fail "unsupported session resume explains its Pi limitation"
+pass "session routes fail explicitly for unsupported harnesses"

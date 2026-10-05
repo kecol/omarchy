@@ -6,6 +6,7 @@
 
 inline=false
 pick=false
+session_action=
 
 # Flags only. A bare prompt would shadow the subcommands under this group, so
 # prompts go through omarchy-agent-prompt, which passes one here as --prompt.
@@ -22,6 +23,14 @@ while (($#)); do
     --prompt)
       prompt=${2:?--prompt needs a value}
       shift 2
+      ;;
+    --resume-session)
+      session_action=resume
+      shift
+      ;;
+    --continue-session)
+      session_action=continue
+      shift
       ;;
     *)
       echo "Unexpected argument: $1" >&2
@@ -129,6 +138,7 @@ ori)
   ;;
 pi)
   command=(pi)
+  [[ -n $session_action ]] && command+=("--$session_action")
   [[ -n ${prompt:-} ]] && command+=("$prompt")
   ;;
 *)
@@ -136,6 +146,11 @@ pi)
   exit 1
   ;;
 esac
+
+if [[ -n $session_action && $agent != "pi" ]]; then
+  echo "Session resume commands are currently supported only for Pi." >&2
+  exit 1
+fi
 
 # A new session uses the current selection rather than its parent's account
 # pin. Explicit provider homes still override the selection. Carry the new pin
