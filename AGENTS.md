@@ -22,6 +22,7 @@ Three documentation trees, split by genre and audience:
 # Style
 
 - In markdown documents (`plans/`, `docs/`, `manual/`), write full lines — no hard wrapping at 80 columns; break only at structural boundaries like headings and list items
+- Write technical documentation in controlled English inspired by ASD-STE100, but do not claim formal compliance. Use active voice, short sentences, one action per procedural step, and one consistent term for each concept. Define acronyms before use. Avoid idioms, ambiguous pronouns, unnecessary synonyms, and subjective words such as "easy", "simple", and "obvious". Use `must`, `should`, and `may` consistently. Put each warning before the action to which it applies. Code, command output, quotations, and external names may keep their original form.
 - Two spaces for indentation, no tabs
 - Use bash 5 conditionals: use `[[ ]]` for string/file tests and `(( ))` for numeric tests
 - In `[[ ]]`, don't quote variables, but do quote string literals when comparing values (e.g., `[[ $branch == "dev" ]]`)
