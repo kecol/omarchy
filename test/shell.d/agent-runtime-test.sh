@@ -14,6 +14,7 @@ exec_log="$test_tmp/exec-log"
 podman_run_log="$test_tmp/podman-run-log"
 podman_volume_log="$test_tmp/podman-volume-log"
 launch_log="$test_tmp/launch-log"
+state_log="$test_tmp/state-log"
 mkdir -p "$mock_bin" "$test_home" "$workspace"
 
 cat >"$mock_bin/omarchy-agent-mode" <<'SH'
@@ -69,6 +70,12 @@ cat >"$mock_bin/omarchy-launch-tui" <<'SH'
 printf '%s\0' "$@" >"$OMARCHY_TEST_LAUNCH_LOG"
 SH
 
+cat >"$mock_bin/omarchy-agent-state" <<'SH'
+#!/bin/bash
+printf '%s\t' "$@" >>"$OMARCHY_TEST_STATE_LOG"
+printf '\n' >>"$OMARCHY_TEST_STATE_LOG"
+SH
+
 chmod +x "$mock_bin"/*
 
 common_env=(
@@ -78,6 +85,7 @@ common_env=(
   OMARCHY_TEST_PODMAN_RUN_LOG="$podman_run_log"
   OMARCHY_TEST_PODMAN_VOLUME_LOG="$podman_volume_log"
   OMARCHY_TEST_LAUNCH_LOG="$launch_log"
+  OMARCHY_TEST_STATE_LOG="$state_log"
 )
 
 (
@@ -136,6 +144,12 @@ for expected in \
   "--rm" \
   "--interactive" \
   "--userns=keep-id" \
+  "--label=org.omarchy.managed=agent" \
+  "--label=org.omarchy.agent=pi" \
+  "--label=org.omarchy.harness=pi" \
+  "--label=org.omarchy.runtime=podman" \
+  "--label=org.omarchy.project=${workspace_hash:0:16}" \
+  "--label=org.omarchy.workspace.target=$container_workspace" \
   "--cap-drop=all" \
   "--security-opt=no-new-privileges" \
   "--workdir=$container_workspace" \
@@ -148,7 +162,16 @@ for expected in \
   "--version"; do
   grep -Fxq -- "$expected" <<<"$run_joined" || fail "Podman adapter launches with $expected" "$run_joined"
 done
+grep -Eq '^--name=omarchy-agent-pi-[0-9a-f]{12}$' <<<"$run_joined" ||
+  fail "Podman adapter assigns a unique managed container name" "$run_joined"
+grep -Eq '^--label=org.omarchy.instance=[0-9a-f-]{36}$' <<<"$run_joined" ||
+  fail "Podman adapter labels the instance identifier" "$run_joined"
 pass "Podman adapter isolates Pi while preserving its workspace and arguments"
+
+[[ $(wc -l <"$state_log") == 2 ]] || fail "Podman adapter records instance start and finish" "$(<"$state_log")"
+grep -Fq $'start\t' "$state_log" || fail "Podman adapter records instance start"
+grep -Fq $'finish\t' "$state_log" || fail "Podman adapter records instance finish"
+pass "Podman adapter records the managed instance lifecycle"
 
 if (
   cd "$workspace"

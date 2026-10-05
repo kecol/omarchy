@@ -1,0 +1,106 @@
+#!/bin/bash
+
+# omarchy:summary=Maintain the local coding-agent instance registry
+# omarchy:args=<initialize|start|finish|get|list> [arguments...]
+# omarchy:hidden=true
+
+set -euo pipefail
+
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/agents"
+database="$state_dir/control.db"
+
+sql_value() {
+  printf "'%s'" "${1//\'/\'\'}"
+}
+
+initialize() {
+  umask 077
+  mkdir -p "$state_dir"
+  chmod 700 "$state_dir"
+  sqlite3 "$database" >/dev/null <<'SQL'
+PRAGMA journal_mode = WAL;
+PRAGMA foreign_keys = ON;
+CREATE TABLE IF NOT EXISTS instances (
+  id TEXT PRIMARY KEY,
+  agent TEXT NOT NULL,
+  harness TEXT NOT NULL,
+  runtime TEXT NOT NULL,
+  status TEXT NOT NULL,
+  container_name TEXT,
+  project_id TEXT NOT NULL,
+  workspace_host TEXT NOT NULL,
+  workspace_container TEXT NOT NULL,
+  image TEXT,
+  created_at TEXT NOT NULL,
+  stopped_at TEXT,
+  exit_code INTEGER
+) STRICT;
+CREATE INDEX IF NOT EXISTS instances_agent_created ON instances(agent, created_at DESC);
+CREATE TABLE IF NOT EXISTS instance_events (
+  sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+  instance_id TEXT NOT NULL REFERENCES instances(id),
+  event TEXT NOT NULL,
+  occurred_at TEXT NOT NULL,
+  detail TEXT
+) STRICT;
+SQL
+  chmod 600 "$database"
+}
+
+command=${1:-}
+[[ -n $command ]] && shift
+
+case "$command" in
+  initialize)
+    initialize
+    printf '%s\n' "$database"
+    ;;
+  start)
+    (( $# == 10 )) || { echo "Usage: omarchy-agent-state start <id> <agent> <harness> <runtime> <container> <project> <host-workspace> <container-workspace> <image> <status>" >&2; exit 1; }
+    initialize
+    values=()
+    for value in "$@"; do
+      values+=("$(sql_value "$value")")
+    done
+    sqlite3 "$database" <<SQL
+BEGIN IMMEDIATE;
+INSERT INTO instances (id, agent, harness, runtime, container_name, project_id, workspace_host, workspace_container, image, status, created_at)
+VALUES (${values[0]}, ${values[1]}, ${values[2]}, ${values[3]}, ${values[4]}, ${values[5]}, ${values[6]}, ${values[7]}, ${values[8]}, ${values[9]}, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+INSERT INTO instance_events (instance_id, event, occurred_at)
+VALUES (${values[0]}, ${values[9]}, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+COMMIT;
+SQL
+    ;;
+  finish)
+    (( $# == 3 )) || { echo "Usage: omarchy-agent-state finish <id> <status> <exit-code>" >&2; exit 1; }
+    initialize
+    id=$(sql_value "$1")
+    status=$(sql_value "$2")
+    exit_code=$3
+    [[ $exit_code =~ ^[0-9]+$ ]] || { echo "Invalid exit code: $exit_code" >&2; exit 1; }
+    sqlite3 "$database" <<SQL
+BEGIN IMMEDIATE;
+UPDATE instances
+SET status = $status, stopped_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), exit_code = $exit_code
+WHERE id = $id;
+INSERT INTO instance_events (instance_id, event, occurred_at, detail)
+VALUES ($id, $status, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'exit_code=$exit_code');
+COMMIT;
+SQL
+    ;;
+  get)
+    (( $# == 1 )) || { echo "Usage: omarchy-agent-state get <id-prefix-or-agent>" >&2; exit 1; }
+    initialize
+    selector=$(sql_value "$1")
+    sqlite3 -json "$database" "SELECT * FROM instances WHERE id LIKE $selector || '%' OR agent = $selector ORDER BY created_at DESC;"
+    ;;
+  list)
+    (( $# == 0 )) || { echo "Usage: omarchy-agent-state list" >&2; exit 1; }
+    initialize
+    sqlite3 -json "$database" 'SELECT * FROM instances ORDER BY created_at DESC;'
+    ;;
+  *)
+    echo "Usage: omarchy-agent-state <initialize|start|finish|get|list> [arguments...]" >&2
+    exit 1
+    ;;
+esac

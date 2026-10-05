@@ -1,0 +1,53 @@
+#!/bin/bash
+
+# omarchy:summary=Report observed state for active managed agent runtimes
+# omarchy:args=
+# omarchy:hidden=true
+
+set -euo pipefail
+
+if omarchy-cmd-missing podman || ! podman info >/dev/null 2>&1; then
+  printf '[]\n'
+  exit 0
+fi
+
+mapfile -t container_ids < <(podman ps --filter label=org.omarchy.managed=agent --format '{{.ID}}')
+if (( ${#container_ids[@]} == 0 )); then
+  printf '[]\n'
+  exit 0
+fi
+
+podman inspect "${container_ids[@]}" | jq '[.[] | {
+  instance: .Config.Labels["org.omarchy.instance"],
+  agent: .Config.Labels["org.omarchy.agent"],
+  harness: .Config.Labels["org.omarchy.harness"],
+  runtime: .Config.Labels["org.omarchy.runtime"],
+  project_id: .Config.Labels["org.omarchy.project"],
+  container: .Name,
+  container_id: .Id,
+  status: .State.Status,
+  pid: .State.Pid,
+  image: .ImageName,
+  image_digest: .ImageDigest,
+  started_at: .State.StartedAt,
+  workspace: .Config.Labels["org.omarchy.workspace.target"],
+  mounts: [.Mounts[] | {
+    type: .Type,
+    source: .Source,
+    destination: .Destination,
+    read_write: .RW,
+    options: (.Options // [])
+  }],
+  network: {
+    mode: .HostConfig.NetworkMode,
+    ports: (.NetworkSettings.Ports // {}),
+    networks: ((.NetworkSettings.Networks // {}) | keys)
+  },
+  security: {
+    user: .Config.User,
+    userns: .HostConfig.UsernsMode,
+    capabilities_add: (.HostConfig.CapAdd // []),
+    capabilities_drop: (.HostConfig.CapDrop // []),
+    security_options: (.HostConfig.SecurityOpt // [])
+  }
+}]'

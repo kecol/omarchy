@@ -1,0 +1,27 @@
+#!/bin/bash
+
+# omarchy:summary=List active coding-agent instances
+# omarchy:args=[--json]
+# omarchy:examples=omarchy agent ps | omarchy agent ps --json
+
+set -euo pipefail
+
+json=false
+if (( $# == 1 )) && [[ $1 == "--json" ]]; then
+  json=true
+elif (( $# != 0 )); then
+  echo "Usage: omarchy agent ps [--json]" >&2
+  exit 1
+fi
+
+snapshot=$(omarchy-agent-runtime-snapshot)
+
+if [[ $json == "true" ]]; then
+  jq . <<<"$snapshot"
+else
+  printf '%-14s %-16s %-12s %-10s %-10s %s\n' INSTANCE AGENT HARNESS RUNTIME STATUS WORKSPACE
+  jq -r '.[] | [(.instance[0:12]), .agent, .harness, .runtime, .status, .workspace] | @tsv' <<<"$snapshot" |
+    while IFS=$'\t' read -r instance agent harness runtime status workspace; do
+      printf '%-14s %-16s %-12s %-10s %-10s %s\n' "$instance" "$agent" "$harness" "$runtime" "$status" "$workspace"
+    done
+fi

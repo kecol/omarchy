@@ -63,12 +63,24 @@ fi
 
 workspace=$(realpath -e "$PWD")
 workspace_hash=$(printf '%s' "$workspace" | sha256sum)
-container_workspace="/workspace/${workspace_hash:0:16}"
+project_id=${workspace_hash:0:16}
+container_workspace="/workspace/$project_id"
+instance_id=$(< /proc/sys/kernel/random/uuid)
+instance_compact=${instance_id//-/}
+container_name="omarchy-agent-$agent-${instance_compact:0:12}"
 
 podman_args=(
   run
   --rm
   --interactive
+  --name="$container_name"
+  --label=org.omarchy.managed=agent
+  --label="org.omarchy.instance=$instance_id"
+  --label="org.omarchy.agent=$agent"
+  --label="org.omarchy.harness=$harness"
+  --label=org.omarchy.runtime=podman
+  --label="org.omarchy.project=$project_id"
+  --label="org.omarchy.workspace.target=$container_workspace"
   --userns=keep-id
   --cap-drop=all
   --security-opt=no-new-privileges
@@ -90,4 +102,27 @@ if [[ -n ${COLORTERM:-} ]]; then
   podman_args+=(--env=COLORTERM)
 fi
 
-exec podman "${podman_args[@]}" "$image" "${command[@]:1}"
+omarchy-agent-state start \
+  "$instance_id" \
+  "$agent" \
+  "$harness" \
+  podman \
+  "$container_name" \
+  "$project_id" \
+  "$workspace" \
+  "$container_workspace" \
+  "$image" \
+  running
+
+set +e
+podman "${podman_args[@]}" "$image" "${command[@]:1}"
+exit_code=$?
+set -e
+
+if (( exit_code == 0 || exit_code == 130 || exit_code == 143 )); then
+  final_status=stopped
+else
+  final_status=failed
+fi
+omarchy-agent-state finish "$instance_id" "$final_status" "$exit_code"
+exit "$exit_code"

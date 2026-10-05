@@ -1,0 +1,70 @@
+#!/bin/bash
+
+# omarchy:summary=List configured coding agents
+# omarchy:args=[--json]
+# omarchy:examples=omarchy agent list | omarchy agent list --json
+
+set -euo pipefail
+
+json=false
+if (( $# == 1 )) && [[ $1 == "--json" ]]; then
+  json=true
+elif (( $# != 0 )); then
+  echo "Usage: omarchy agent list [--json]" >&2
+  exit 1
+fi
+
+declare -A definitions=()
+shopt -s nullglob
+for path in "$OMARCHY_PATH"/default/agents/definitions/*.json; do
+  definitions["$(basename "$path" .json)"]=$path
+done
+for path in "$HOME"/.config/omarchy/agents/*.json; do
+  definitions["$(basename "$path" .json)"]=$path
+done
+
+snapshot=$(omarchy-agent-runtime-snapshot)
+mode=$(omarchy-agent-mode)
+records='[]'
+for agent in "${!definitions[@]}"; do
+  definition=${definitions[$agent]}
+  if ! jq -e --arg agent "$agent" \
+    'type == "object" and .name == $agent and (.harness | type == "string") and (.runtime | type == "string")' \
+    "$definition" >/dev/null; then
+    echo "Invalid agent definition: $definition" >&2
+    exit 1
+  fi
+  harness=$(jq -r '.harness' "$definition")
+  configured_runtime=$(jq -r '.runtime' "$definition")
+  if [[ $mode == "host" ]]; then
+    runtime=host
+  else
+    runtime=$configured_runtime
+  fi
+  running=$(jq --arg agent "$agent" '[.[] | select(.agent == $agent)] | length' <<<"$snapshot")
+  if [[ $definition == "$HOME/.config/omarchy/agents/"* ]]; then
+    source=user
+  else
+    source=builtin
+  fi
+  records=$(jq \
+    --arg agent "$agent" \
+    --arg harness "$harness" \
+    --arg runtime "$runtime" \
+    --arg configured_runtime "$configured_runtime" \
+    --arg source "$source" \
+    --argjson running "$running" \
+    '. + [{agent: $agent, harness: $harness, runtime: $runtime, configured_runtime: $configured_runtime, source: $source, running_instances: $running}]' \
+    <<<"$records")
+done
+records=$(jq 'sort_by(.agent)' <<<"$records")
+
+if [[ $json == "true" ]]; then
+  jq . <<<"$records"
+else
+  printf '%-20s %-14s %-12s %-8s %s\n' AGENT HARNESS RUNTIME RUNNING SOURCE
+  jq -r '.[] | [.agent, .harness, .runtime, (.running_instances | tostring), .source] | @tsv' <<<"$records" |
+    while IFS=$'\t' read -r agent harness runtime running source; do
+      printf '%-20s %-14s %-12s %-8s %s\n' "$agent" "$harness" "$runtime" "$running" "$source"
+    done
+fi
