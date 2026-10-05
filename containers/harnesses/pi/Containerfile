@@ -1,0 +1,40 @@
+FROM docker.io/library/archlinux:base AS pi-installer
+
+ARG PI_VERSION
+
+ENV MISE_DATA_DIR=/opt/mise
+ENV MISE_CACHE_DIR=/var/cache/mise
+
+RUN pacman -Sy --noconfirm --needed ca-certificates mise \
+    && mise install "pi@$PI_VERSION" \
+    && pi_dir=$(mise where "pi@$PI_VERSION") \
+    && cp -a "$pi_dir/pi" /opt/pi
+
+FROM docker.io/library/archlinux:base
+
+ARG HARNESS_UID=1000
+ARG HARNESS_GID=1000
+
+RUN pacman -Syu --noconfirm --needed \
+      ca-certificates \
+      curl \
+      fd \
+      git \
+      jq \
+      openssh \
+      ripgrep \
+    && rm -rf /var/cache/pacman/pkg/* /var/lib/pacman/sync/* \
+    && ln -s /opt/pi/pi /usr/local/bin/pi
+
+COPY --from=pi-installer /opt/pi /opt/pi
+
+RUN pi --version \
+    && groupadd --gid "$HARNESS_GID" agent \
+    && useradd --uid "$HARNESS_UID" --gid "$HARNESS_GID" --create-home --shell /bin/bash agent \
+    && install -d -o agent -g agent /workspace
+
+ENV HOME=/home/agent
+USER agent
+WORKDIR /workspace
+
+ENTRYPOINT ["pi"]
