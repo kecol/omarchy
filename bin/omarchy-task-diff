@@ -1,0 +1,70 @@
+#!/bin/bash
+
+# omarchy:summary=Show changes in an assignment workspace
+# omarchy:args=<assignment> [--stat|--name-only|--patch]
+# omarchy:examples=omarchy task diff 019abc | omarchy task diff 019abc --stat
+
+set -euo pipefail
+
+if (( $# == 0 )); then
+  echo "Usage: omarchy task diff <assignment> [--stat|--name-only|--patch]" >&2
+  exit 1
+fi
+selector=$1
+shift
+
+mode=patch
+while (($#)); do
+  case "$1" in
+    --stat)
+      mode=stat
+      ;;
+    --name-only)
+      mode=name-only
+      ;;
+    --patch)
+      mode=patch
+      ;;
+    *)
+      echo "Unexpected argument: $1" >&2
+      exit 1
+      ;;
+  esac
+  shift
+done
+
+matches=$(omarchy-agent-state assignment-get "$selector")
+match_count=$(jq 'length' <<<"$matches")
+if (( match_count == 0 )); then
+  echo "No assignment matches: $selector" >&2
+  exit 1
+elif (( match_count > 1 )); then
+  echo "More than one assignment matches: $selector" >&2
+  exit 1
+fi
+
+workspace=$(jq -r '.[0].workspace_path' <<<"$matches")
+if [[ ! -d $workspace/.git ]]; then
+  echo "Assignment workspace is missing or is not a Git repository: $workspace" >&2
+  exit 1
+fi
+
+case "$mode" in
+  stat)
+    git -C "$workspace" diff --stat HEAD
+    ;;
+  name-only)
+    git -C "$workspace" diff --name-only HEAD
+    git -C "$workspace" ls-files --others --exclude-standard
+    ;;
+  patch)
+    git -C "$workspace" diff HEAD
+    untracked=$(git -C "$workspace" ls-files --others --exclude-standard)
+    if [[ -n $untracked ]]; then
+      printf '\nUntracked files:\n'
+      while IFS= read -r file; do
+        printf '  %s\n' "$file"
+      done <<<"$untracked"
+    fi
+    ;;
+esac

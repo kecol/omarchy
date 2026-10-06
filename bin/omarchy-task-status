@@ -1,0 +1,79 @@
+#!/bin/bash
+
+# omarchy:summary=Show an assignment workspace and runtime status
+# omarchy:args=<assignment> [--json]
+# omarchy:examples=omarchy task status 019abc | omarchy task status 019abc --json
+
+set -euo pipefail
+
+json=false
+selector=
+for argument in "$@"; do
+  if [[ $argument == "--json" ]]; then
+    json=true
+  elif [[ -z $selector ]]; then
+    selector=$argument
+  else
+    echo "Usage: omarchy task status <assignment> [--json]" >&2
+    exit 1
+  fi
+done
+if [[ -z $selector ]]; then
+  echo "Usage: omarchy task status <assignment> [--json]" >&2
+  exit 1
+fi
+
+matches=$(omarchy-agent-state assignment-get "$selector")
+match_count=$(jq 'length' <<<"$matches")
+if (( match_count == 0 )); then
+  echo "No assignment matches: $selector" >&2
+  exit 1
+elif (( match_count > 1 )); then
+  echo "More than one assignment matches: $selector" >&2
+  exit 1
+fi
+
+assignment=$(jq '.[0]' <<<"$matches")
+assignment_id=$(jq -r '.id' <<<"$assignment")
+workspace=$(jq -r '.workspace_path' <<<"$assignment")
+
+active_instances=$(omarchy-agent-runtime-snapshot | jq --arg assignment "$assignment_id" '[.[] | select(.assignment_id == $assignment)]')
+if [[ -d $workspace/.git ]]; then
+  status_lines=$(git -C "$workspace" status --porcelain=v1)
+  branch=$(git -C "$workspace" branch --show-current)
+  head=$(git -C "$workspace" rev-parse HEAD)
+  diff_stat=$(git -C "$workspace" diff --stat HEAD)
+else
+  status_lines=
+  branch=
+  head=
+  diff_stat=
+fi
+
+record=$(jq -n \
+  --argjson assignment "$assignment" \
+  --argjson active_instances "$active_instances" \
+  --arg branch "$branch" \
+  --arg head "$head" \
+  --arg status_lines "$status_lines" \
+  --arg diff_stat "$diff_stat" \
+  '{assignment: $assignment, active_instances: $active_instances, git: {branch: $branch, head: $head, clean: ($status_lines == ""), status: ($status_lines | split("\n") | map(select(. != ""))), diff_stat: $diff_stat}}')
+
+if [[ $json == "true" ]]; then
+  jq . <<<"$record"
+else
+  jq -r '
+    "Assignment",
+    "  ID:        \(.assignment.id)",
+    "  Task:      \(.assignment.task_id)",
+    "  Agent:     \(.assignment.agent)",
+    "  Role:      \(.assignment.role)",
+    "  Status:    \(.assignment.status)",
+    "  Workspace: \(.assignment.workspace_path)",
+    "  Branch:    \(.git.branch)",
+    "  Running:   \(.active_instances | length)",
+    "  Clean:     \(.git.clean)",
+    (if (.git.status | length) == 0 then empty else "", "Changes", (.git.status[] | "  " + .) end),
+    (if .git.diff_stat == "" then empty else "", "Diff", .git.diff_stat end)
+  ' <<<"$record"
+fi

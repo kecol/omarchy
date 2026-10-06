@@ -1,0 +1,46 @@
+#!/bin/bash
+
+# omarchy:summary=Stop active agent instances for an assignment
+# omarchy:args=<assignment>
+# omarchy:examples=omarchy task stop 019abc
+
+set -euo pipefail
+
+if (( $# != 1 )); then
+  echo "Usage: omarchy task stop <assignment>" >&2
+  exit 1
+fi
+selector=$1
+
+matches=$(omarchy-agent-state assignment-get "$selector")
+match_count=$(jq 'length' <<<"$matches")
+if (( match_count == 0 )); then
+  echo "No assignment matches: $selector" >&2
+  exit 1
+elif (( match_count > 1 )); then
+  echo "More than one assignment matches: $selector" >&2
+  exit 1
+fi
+
+assignment_id=$(jq -r '.[0].id' <<<"$matches")
+active_instances=$(omarchy-agent-runtime-snapshot | jq --arg assignment "$assignment_id" '[.[] | select(.assignment_id == $assignment)]')
+active_count=$(jq 'length' <<<"$active_instances")
+if (( active_count == 0 )); then
+  echo "No active instance for assignment: $assignment_id" >&2
+  exit 1
+fi
+
+unsupported=$(jq -r '.[] | select(.runtime != "podman") | .runtime' <<<"$active_instances" | sort -u)
+if [[ -n $unsupported ]]; then
+  echo "Cannot stop assignment with unsupported runtime: $unsupported" >&2
+  exit 1
+fi
+
+omarchy-agent-state assignment-status "$assignment_id" stopping
+jq -r '.[].container' <<<"$active_instances" | while IFS= read -r container; do
+  if [[ -n $container && $container != "null" ]]; then
+    podman stop "$container" >/dev/null
+    printf 'Stopped %s\n' "$container"
+  fi
+done
+omarchy-agent-state assignment-status "$assignment_id" stopped

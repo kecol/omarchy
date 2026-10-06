@@ -11,6 +11,8 @@ mock_bin="$test_tmp/bin"
 test_home="$test_tmp/home"
 source_repo="$test_tmp/source project"
 launch_log="$test_tmp/launch-log"
+runtime_snapshot="$test_tmp/runtime-snapshot.json"
+podman_log="$test_tmp/podman-log"
 mkdir -p "$mock_bin" "$test_home" "$source_repo"
 
 git -C "$source_repo" init --quiet
@@ -28,7 +30,19 @@ SH
 
 cat >"$mock_bin/omarchy-agent-runtime-snapshot" <<'SH'
 #!/bin/bash
-printf '[]\n'
+if [[ -n ${OMARCHY_TEST_RUNTIME_SNAPSHOT:-} && -f $OMARCHY_TEST_RUNTIME_SNAPSHOT ]]; then
+  cat "$OMARCHY_TEST_RUNTIME_SNAPSHOT"
+else
+  printf '[]\n'
+fi
+SH
+
+cat >"$mock_bin/podman" <<'SH'
+#!/bin/bash
+printf '%s\n' "$*" >>"$OMARCHY_TEST_PODMAN_LOG"
+if [[ ${1:-} == "stop" ]]; then
+  printf '%s\n' "${2:-}"
+fi
 SH
 
 cat >"$mock_bin/omarchy-agent" <<'SH'
@@ -53,6 +67,8 @@ export XDG_STATE_HOME="$test_tmp/state"
 export XDG_DATA_HOME="$test_tmp/data"
 export OMARCHY_PATH="$ROOT"
 export OMARCHY_TEST_LAUNCH_LOG="$launch_log"
+export OMARCHY_TEST_RUNTIME_SNAPSHOT="$runtime_snapshot"
+export OMARCHY_TEST_PODMAN_LOG="$podman_log"
 export PATH="$mock_bin:$ROOT/bin:/usr/bin"
 
 create_json=$(cd "$source_repo" && "$ROOT/bin/omarchy-task-create" --json "Implement isolated workspaces")
@@ -104,6 +120,37 @@ pass "task inventory reports private assignments"
 [[ $(jq -r '.assignment' "$launch_log") == "$assignment_id" ]] || fail "task start passes the assignment identity"
 [[ $(jq -r '.role' "$launch_log") == "coder" ]] || fail "task start passes the assignment role"
 pass "task start launches the assigned agent with managed workspace context"
+
+printf 'coder change\nsecond line\n' >"$workspace/file.txt"
+printf 'new note\n' >"$workspace/new.txt"
+status_json=$("$ROOT/bin/omarchy-task-status" "$assignment_id" --json)
+[[ $(jq -r '.git.clean' <<<"$status_json") == "false" ]] || fail "task status reports dirty workspaces"
+[[ $(jq -r '.git.status[]' <<<"$status_json" | grep -Fxc ' M file.txt') == "1" ]] || fail "task status includes modified files"
+[[ $(jq -r '.git.status[]' <<<"$status_json" | grep -Fxc '?? new.txt') == "1" ]] || fail "task status includes untracked files"
+"$ROOT/bin/omarchy-task-status" "$assignment_id" >"$test_tmp/status-output"
+grep -Fq 'Clean:     false' "$test_tmp/status-output" || fail "text task status reports cleanliness"
+pass "task status summarizes workspace changes"
+
+"$ROOT/bin/omarchy-task-diff" "$assignment_id" --name-only >"$test_tmp/diff-names"
+grep -Fxq 'file.txt' "$test_tmp/diff-names" || fail "task diff names modified files"
+grep -Fxq 'new.txt' "$test_tmp/diff-names" || fail "task diff names untracked files"
+"$ROOT/bin/omarchy-task-diff" "$assignment_id" --stat >"$test_tmp/diff-stat"
+grep -Fq 'file.txt' "$test_tmp/diff-stat" || fail "task diff stat reports modified files"
+pass "task diff reports assignment workspace changes"
+
+jq -n --arg assignment "$assignment_id" '[{assignment_id: $assignment, runtime: "podman", container: "omarchy-agent-pi-test", status: "running"}]' >"$runtime_snapshot"
+"$ROOT/bin/omarchy-task-stop" "$assignment_id" >"$test_tmp/stop-output"
+grep -Fq 'Stopped omarchy-agent-pi-test' "$test_tmp/stop-output" || fail "task stop reports stopped containers"
+grep -Fxq 'stop omarchy-agent-pi-test' "$podman_log" || fail "task stop asks Podman to stop the active container"
+[[ $(omarchy-agent-state assignment-get "$assignment_id" | jq -r '.[0].status') == "stopped" ]] || fail "task stop records stopped assignment status"
+printf '[]\n' >"$runtime_snapshot"
+pass "task stop stops active assignment containers"
+
+if "$ROOT/bin/omarchy-task-stop" "$assignment_id" >"$test_tmp/no-active-output" 2>&1; then
+  fail "task stop rejects assignments without active instances"
+fi
+grep -Fq 'No active instance' "$test_tmp/no-active-output" || fail "task stop explains when nothing is running"
+pass "task stop fails clearly when the assignment is idle"
 
 if OMARCHY_TEST_AGENT_MODE=host "$ROOT/bin/omarchy-task-start" "$assignment_id" --inline >"$test_tmp/host-output" 2>&1; then
   fail "managed task start rejects host execution"
