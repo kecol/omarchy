@@ -129,6 +129,12 @@ SQL
     selector=$(sql_value "$1")
     sqlite_json "SELECT * FROM instances WHERE id LIKE $selector || '%' OR agent = $selector ORDER BY created_at DESC;"
     ;;
+  events)
+    (( $# == 1 )) || { echo "Usage: omarchy-agent-state events <instance-id>" >&2; exit 1; }
+    initialize
+    instance_id=$(sql_value "$1")
+    sqlite_json "SELECT sequence, instance_id, event, occurred_at, detail FROM instance_events WHERE instance_id = $instance_id ORDER BY sequence;"
+    ;;
   list)
     (( $# == 0 )) || { echo "Usage: omarchy-agent-state list" >&2; exit 1; }
     initialize

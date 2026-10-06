@@ -136,6 +136,16 @@ launch_args=$(jq -r '.args' "$launch_log")
 [[ $(jq -r '.role' "$launch_log") == "coder" ]] || fail "task start passes the assignment role"
 pass "task start launches the assigned agent with managed workspace context"
 
+instance_id=11111111-1111-4111-8111-111111111111
+omarchy-agent-state start "$instance_id" pi pi podman omarchy-agent-pi-test "$project_id" "$workspace" /workspace/test localhost/omarchy-harness-pi:latest running
+omarchy-agent-state finish "$instance_id" stopped 0
+log_json=$("$ROOT/bin/omarchy-task-log" "$assignment_id" --json)
+[[ $(jq -r '.instances[0].id' <<<"$log_json") == "$instance_id" ]] || fail "task log includes assignment runtime instances" "$log_json"
+[[ $(jq -r '.instances[0].events[-1].event' <<<"$log_json") == "stopped" ]] || fail "task log includes instance lifecycle events" "$log_json"
+"$ROOT/bin/omarchy-task-log" "$assignment_id" >"$test_tmp/task-log-output"
+grep -Fq "$instance_id" "$test_tmp/task-log-output" || fail "task log text includes instance identifiers"
+pass "task log reports assignment runtime history"
+
 preflight_json=$("$ROOT/bin/omarchy-task-preflight" "$assignment_id" --json)
 [[ $(jq -r '.ok' <<<"$preflight_json") == "true" ]] || fail "task preflight passes a safe assignment" "$preflight_json"
 [[ $(jq -r '.checks[] | select(.name == "workspace_remote") | .status' <<<"$preflight_json") == "pass" ]] || fail "task preflight checks workspace remotes"
