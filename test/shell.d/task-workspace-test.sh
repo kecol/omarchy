@@ -138,6 +138,29 @@ grep -Fxq 'new.txt' "$test_tmp/diff-names" || fail "task diff names untracked fi
 grep -Fq 'file.txt' "$test_tmp/diff-stat" || fail "task diff stat reports modified files"
 pass "task diff reports assignment workspace changes"
 
+"$ROOT/bin/omarchy-task-patch" "$assignment_id" "$test_tmp/assignment.patch" >"$test_tmp/patch-output"
+grep -Fq "Wrote patch: $test_tmp/assignment.patch" "$test_tmp/patch-output" || fail "task patch reports its output path"
+grep -Eq '^diff --git .*file\.txt' "$test_tmp/assignment.patch" || fail "task patch includes modified files"
+grep -Eq '^diff --git .*new\.txt' "$test_tmp/assignment.patch" || fail "task patch includes untracked files"
+git -C "$source_repo" apply --check "$test_tmp/assignment.patch" || fail "task patch can apply to the canonical base"
+pass "task patch exports reviewable assignment changes"
+
+(cd "$source_repo" && "$ROOT/bin/omarchy-task-apply" "$assignment_id") >"$test_tmp/apply-output"
+grep -Fq "Applied assignment $assignment_id" "$test_tmp/apply-output" || fail "task apply reports the assignment it applied"
+[[ $(<"$source_repo/file.txt") == $'coder change\nsecond line' ]] || fail "task apply updates modified files in the canonical checkout"
+[[ $(<"$source_repo/new.txt") == "new note" ]] || fail "task apply creates untracked assignment files in the canonical checkout"
+[[ $(omarchy-agent-state assignment-get "$assignment_id" | jq -r '.[0].status') == "applied" ]] || fail "task apply records applied assignment status"
+pass "task apply applies assignment changes to the clean source checkout"
+
+if (cd "$source_repo" && "$ROOT/bin/omarchy-task-apply" "$assignment_id") >"$test_tmp/apply-dirty-output" 2>&1; then
+  fail "task apply rejects dirty source checkouts"
+fi
+grep -Fq 'uncommitted changes' "$test_tmp/apply-dirty-output" || fail "task apply explains dirty source rejection"
+pass "task apply fails clearly when the source checkout is dirty"
+
+git -C "$source_repo" checkout --quiet -- file.txt
+rm -f "$source_repo/new.txt"
+
 jq -n --arg assignment "$assignment_id" '[{assignment_id: $assignment, runtime: "podman", container: "omarchy-agent-pi-test", status: "running"}]' >"$runtime_snapshot"
 "$ROOT/bin/omarchy-task-stop" "$assignment_id" >"$test_tmp/stop-output"
 grep -Fq 'Stopped omarchy-agent-pi-test' "$test_tmp/stop-output" || fail "task stop reports stopped containers"

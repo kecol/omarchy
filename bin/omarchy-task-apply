@@ -1,0 +1,66 @@
+#!/bin/bash
+
+# omarchy:summary=Apply an assignment patch to its source checkout
+# omarchy:args=<assignment>
+# omarchy:examples=omarchy task apply 019abc
+
+set -euo pipefail
+
+if (( $# != 1 )); then
+  echo "Usage: omarchy task apply <assignment>" >&2
+  exit 1
+fi
+selector=$1
+
+matches=$(omarchy-agent-state assignment-get "$selector")
+match_count=$(jq 'length' <<<"$matches")
+if (( match_count == 0 )); then
+  echo "No assignment matches: $selector" >&2
+  exit 1
+elif (( match_count > 1 )); then
+  echo "More than one assignment matches: $selector" >&2
+  exit 1
+fi
+
+assignment_id=$(jq -r '.[0].id' <<<"$matches")
+project_path=$(jq -r '.[0].project_path' <<<"$matches")
+base_commit=$(jq -r '.[0].base_commit' <<<"$matches")
+
+if ! current_project=$(git rev-parse --show-toplevel 2>/dev/null); then
+  echo "Apply a task from its source Git repository." >&2
+  exit 1
+fi
+current_project=$(realpath -e "$current_project")
+project_path=$(realpath -e "$project_path")
+if [[ $current_project != "$project_path" ]]; then
+  echo "This assignment belongs to: $project_path" >&2
+  echo "Run from that checkout before applying it." >&2
+  exit 1
+fi
+
+if [[ -n $(git -C "$project_path" status --porcelain) ]]; then
+  echo "The source checkout has uncommitted changes. Commit or store them before applying a task." >&2
+  exit 1
+fi
+
+current_head=$(git -C "$project_path" rev-parse HEAD)
+if [[ $current_head != "$base_commit" ]]; then
+  echo "The source checkout is not at the task base commit." >&2
+  echo "Expected: $base_commit" >&2
+  echo "Current:  $current_head" >&2
+  exit 1
+fi
+
+patch_file=$(mktemp)
+trap 'rm -f "$patch_file"' EXIT
+omarchy-task-patch "$assignment_id" "$patch_file" >/dev/null
+
+if [[ ! -s $patch_file ]]; then
+  echo "Assignment has no changes to apply: $assignment_id" >&2
+  exit 1
+fi
+
+git -C "$project_path" apply --check "$patch_file"
+git -C "$project_path" apply "$patch_file"
+omarchy-agent-state assignment-status "$assignment_id" applied
+printf 'Applied assignment %s to %s\n' "$assignment_id" "$project_path"
