@@ -12,6 +12,7 @@ test_home="$test_tmp/home"
 source_repo="$test_tmp/source project"
 launch_log="$test_tmp/launch-log"
 runtime_snapshot="$test_tmp/runtime-snapshot.json"
+audit_fail_file="$test_tmp/audit-fail"
 podman_log="$test_tmp/podman-log"
 mkdir -p "$mock_bin" "$test_home" "$source_repo"
 
@@ -35,6 +36,15 @@ if [[ -n ${OMARCHY_TEST_RUNTIME_SNAPSHOT:-} && -f $OMARCHY_TEST_RUNTIME_SNAPSHOT
 else
   printf '[]\n'
 fi
+SH
+
+cat >"$mock_bin/omarchy-agent-audit" <<'SH'
+#!/bin/bash
+if [[ -f ${OMARCHY_TEST_AUDIT_FAIL:-} ]]; then
+  echo "fail: drift - simulated runtime drift"
+  exit 1
+fi
+echo "No active managed agent instances."
 SH
 
 cat >"$mock_bin/podman" <<'SH'
@@ -79,6 +89,7 @@ export XDG_DATA_HOME="$test_tmp/data"
 export OMARCHY_PATH="$ROOT"
 export OMARCHY_TEST_LAUNCH_LOG="$launch_log"
 export OMARCHY_TEST_RUNTIME_SNAPSHOT="$runtime_snapshot"
+export OMARCHY_TEST_AUDIT_FAIL="$audit_fail_file"
 export OMARCHY_TEST_PODMAN_LOG="$podman_log"
 export PATH="$mock_bin:$ROOT/bin:/usr/bin"
 
@@ -267,6 +278,14 @@ if OMARCHY_TEST_CONTAINER_DOCTOR_FAIL=true "$ROOT/bin/omarchy-task-start" "$assi
 fi
 grep -Fq 'fail: container_doctor' "$test_tmp/doctor-output" || fail "task start reports container doctor preflight failure"
 pass "task start runs preflight before launching agents"
+
+touch "$audit_fail_file"
+if "$ROOT/bin/omarchy-task-start" "$assignment_id" --inline >"$test_tmp/audit-output" 2>&1; then
+  fail "task start rejects failed active runtime audit"
+fi
+grep -Fq 'runtime audit failed' "$test_tmp/audit-output" || fail "task start reports active runtime audit failure"
+rm -f "$audit_fail_file"
+pass "task start runs active runtime audit before launching agents"
 
 "$ROOT/bin/omarchy-task-archive" "$task_id" >"$test_tmp/archive-output"
 grep -Fq "Archived task: $task_id" "$test_tmp/archive-output" || fail "task archive reports archived tasks"

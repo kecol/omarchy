@@ -38,6 +38,11 @@ if ! omarchy-task-preflight "$assignment_selector"; then
   exit 1
 fi
 
+if ! omarchy-agent-audit; then
+  echo "Active managed agent runtime audit failed. Inspect or stop unsafe containers before starting another task agent." >&2
+  exit 1
+fi
+
 matches=$(omarchy-agent-state assignment-get "$assignment_selector")
 match_count=$(jq 'length' <<<"$matches")
 if (( match_count == 0 )); then
