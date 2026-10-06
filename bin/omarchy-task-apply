@@ -1,16 +1,32 @@
 #!/bin/bash
 
 # omarchy:summary=Apply an assignment patch to its source checkout
-# omarchy:args=<assignment>
-# omarchy:examples=omarchy task apply 019abc
+# omarchy:args=<assignment> [--3way]
+# omarchy:examples=omarchy task apply 019abc | omarchy task apply 019abc --3way
 
 set -euo pipefail
 
-if (( $# != 1 )); then
-  echo "Usage: omarchy task apply <assignment>" >&2
+if (( $# == 0 )); then
+  echo "Usage: omarchy task apply <assignment> [--3way]" >&2
   exit 1
 fi
-selector=$1
+
+three_way=false
+selector=
+for argument in "$@"; do
+  if [[ $argument == "--3way" ]]; then
+    three_way=true
+  elif [[ -z $selector ]]; then
+    selector=$argument
+  else
+    echo "Usage: omarchy task apply <assignment> [--3way]" >&2
+    exit 1
+  fi
+done
+if [[ -z $selector ]]; then
+  echo "Usage: omarchy task apply <assignment> [--3way]" >&2
+  exit 1
+fi
 
 matches=$(omarchy-agent-state assignment-get "$selector")
 match_count=$(jq 'length' <<<"$matches")
@@ -44,10 +60,11 @@ if [[ -n $(git -C "$project_path" status --porcelain) ]]; then
 fi
 
 current_head=$(git -C "$project_path" rev-parse HEAD)
-if [[ $current_head != "$base_commit" ]]; then
+if [[ $current_head != "$base_commit" && $three_way == "false" ]]; then
   echo "The source checkout is not at the task base commit." >&2
   echo "Expected: $base_commit" >&2
   echo "Current:  $current_head" >&2
+  echo "Use --3way to apply against the current clean checkout." >&2
   exit 1
 fi
 
@@ -60,7 +77,16 @@ if [[ ! -s $patch_file ]]; then
   exit 1
 fi
 
-git -C "$project_path" apply --check "$patch_file"
-git -C "$project_path" apply "$patch_file"
+if [[ $three_way == "true" ]]; then
+  if ! git -C "$project_path" apply --3way "$patch_file"; then
+    echo "Could not apply assignment cleanly with --3way." >&2
+    echo "Resolve conflicts in $project_path, or abort with: git reset --hard HEAD" >&2
+    omarchy-agent-state assignment-status "$assignment_id" conflict
+    exit 1
+  fi
+else
+  git -C "$project_path" apply --check "$patch_file"
+  git -C "$project_path" apply "$patch_file"
+fi
 omarchy-agent-state assignment-status "$assignment_id" applied
 printf 'Applied assignment %s to %s\n' "$assignment_id" "$project_path"

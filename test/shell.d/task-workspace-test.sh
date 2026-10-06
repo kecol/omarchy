@@ -180,6 +180,21 @@ pass "task apply fails clearly when the source checkout is dirty"
 
 git -C "$source_repo" checkout --quiet -- file.txt
 rm -f "$source_repo/new.txt"
+printf 'unrelated\n' >"$source_repo/other.txt"
+git -C "$source_repo" add other.txt
+git -C "$source_repo" commit --quiet -m 'Unrelated source change'
+if (cd "$source_repo" && "$ROOT/bin/omarchy-task-apply" "$assignment_id") >"$test_tmp/apply-old-base-output" 2>&1; then
+  fail "task apply without --3way rejects advanced source checkouts"
+fi
+grep -Fq 'Use --3way' "$test_tmp/apply-old-base-output" || fail "task apply suggests --3way for advanced source checkouts"
+(cd "$source_repo" && "$ROOT/bin/omarchy-task-apply" "$assignment_id" --3way) >"$test_tmp/apply-3way-output"
+[[ $(<"$source_repo/file.txt") == $'coder change\nsecond line' ]] || fail "task apply --3way updates modified files"
+[[ $(<"$source_repo/new.txt") == "new note" ]] || fail "task apply --3way creates new files"
+[[ $(<"$source_repo/other.txt") == "unrelated" ]] || fail "task apply --3way preserves unrelated current changes"
+pass "task apply can apply assignment changes onto a newer clean checkout"
+
+git -C "$source_repo" reset --hard --quiet HEAD
+git -C "$source_repo" clean -fd --quiet
 
 jq -n --arg assignment "$assignment_id" '[{assignment_id: $assignment, runtime: "podman", container: "omarchy-agent-pi-test", status: "running"}]' >"$runtime_snapshot"
 "$ROOT/bin/omarchy-task-stop" "$assignment_id" >"$test_tmp/stop-output"
