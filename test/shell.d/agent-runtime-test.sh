@@ -55,6 +55,8 @@ case "$1 ${2:-}" in
   "volume create")
     printf '%s\0' "$@" >"$OMARCHY_TEST_PODMAN_VOLUME_LOG"
     ;;
+  "volume rm")
+    ;;
   "run --rm")
     printf '%s\0' "$@" >"$OMARCHY_TEST_PODMAN_RUN_LOG"
     ;;
@@ -78,9 +80,28 @@ SH
 
 chmod +x "$mock_bin"/*
 
+(
+  cd "$workspace"
+  env HOME="$test_home" OMARCHY_PATH="$ROOT" OMARCHY_TEST_PODMAN_VOLUME_LOG="$podman_volume_log" OMARCHY_AGENT_CONTAINER_DOCTOR_SKIP_JOURNAL=true PATH="$mock_bin:$ROOT/bin:/usr/bin" \
+    "$ROOT/bin/omarchy-agent-container-doctor" --quick >"$test_tmp/doctor-output"
+)
+grep -Fq 'Agent container doctor passed.' "$test_tmp/doctor-output" || fail "container doctor reports success"
+pass "container doctor validates writable storage and rootless Podman"
+
+if (
+  cd "$workspace"
+  env HOME="$test_home" OMARCHY_PATH="$ROOT" OMARCHY_TEST_PODMAN_VOLUME_LOG="$podman_volume_log" OMARCHY_AGENT_CONTAINER_DOCTOR_SKIP_JOURNAL=true PATH="$mock_bin:$ROOT/bin:/usr/bin" \
+    OMARCHY_TEST_PODMAN_ROOTLESS=false "$ROOT/bin/omarchy-agent-container-doctor" --quick
+) >"$test_tmp/doctor-fail" 2>&1; then
+  fail "container doctor rejects non-rootless Podman"
+fi
+grep -Fq 'Podman is not rootless' "$test_tmp/doctor-fail" || fail "container doctor explains non-rootless Podman"
+pass "container doctor fails closed when Podman is unsafe"
+
 common_env=(
   HOME="$test_home"
   OMARCHY_PATH="$ROOT"
+  OMARCHY_AGENT_CONTAINER_DOCTOR_SKIP_JOURNAL=true
   OMARCHY_TEST_EXEC_LOG="$exec_log"
   OMARCHY_TEST_PODMAN_RUN_LOG="$podman_run_log"
   OMARCHY_TEST_PODMAN_VOLUME_LOG="$podman_volume_log"

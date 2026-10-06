@@ -27,17 +27,10 @@ for value in "$agent" "$harness"; do
   fi
 done
 
-if omarchy-cmd-missing podman; then
-  echo "Podman is not installed. Install it with: omarchy pkg add podman" >&2
-  exit 1
-fi
-
-if ! rootless=$(podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null); then
-  echo "Podman is installed but is not responding." >&2
-  exit 1
-fi
-if [[ $rootless != "true" ]]; then
-  echo "Agent containers require rootless Podman." >&2
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+if ! "$script_dir/omarchy-agent-container-doctor" --quick >/dev/null; then
+  echo "Agent container mode is not safe to start." >&2
+  echo "Run: omarchy agent container doctor" >&2
   exit 1
 fi
 
