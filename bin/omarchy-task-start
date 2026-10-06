@@ -33,9 +33,8 @@ while (($#)); do
   shift
 done
 
-if [[ $(omarchy-agent-mode) != "container" ]]; then
-  echo "Managed task assignments require container mode." >&2
-  echo "Enable it with: omarchy agent mode container" >&2
+if ! omarchy-task-preflight "$assignment_selector"; then
+  echo "Task assignment preflight failed." >&2
   exit 1
 fi
 

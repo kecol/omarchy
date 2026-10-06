@@ -40,9 +40,20 @@ SH
 cat >"$mock_bin/podman" <<'SH'
 #!/bin/bash
 printf '%s\n' "$*" >>"$OMARCHY_TEST_PODMAN_LOG"
+if [[ ${1:-} == "image" && ${2:-} == "exists" ]]; then
+  exit 0
+fi
 if [[ ${1:-} == "stop" ]]; then
   printf '%s\n' "${2:-}"
 fi
+SH
+
+cat >"$mock_bin/omarchy-agent-container-doctor" <<'SH'
+#!/bin/bash
+if [[ ${OMARCHY_TEST_CONTAINER_DOCTOR_FAIL:-false} == "true" ]]; then
+  exit 1
+fi
+exit 0
 SH
 
 cat >"$mock_bin/omarchy-agent" <<'SH'
@@ -121,6 +132,15 @@ pass "task inventory reports private assignments"
 [[ $(jq -r '.role' "$launch_log") == "coder" ]] || fail "task start passes the assignment role"
 pass "task start launches the assigned agent with managed workspace context"
 
+preflight_json=$("$ROOT/bin/omarchy-task-preflight" "$assignment_id" --json)
+[[ $(jq -r '.ok' <<<"$preflight_json") == "true" ]] || fail "task preflight passes a safe assignment" "$preflight_json"
+[[ $(jq -r '.checks[] | select(.name == "workspace_remote") | .status' <<<"$preflight_json") == "pass" ]] || fail "task preflight checks workspace remotes"
+if OMARCHY_TEST_AGENT_MODE=host "$ROOT/bin/omarchy-task-preflight" "$assignment_id" >"$test_tmp/preflight-host-output" 2>&1; then
+  fail "task preflight rejects host mode"
+fi
+grep -Fq 'fail: mode' "$test_tmp/preflight-host-output" || fail "task preflight explains host mode rejection"
+pass "task preflight validates assignment launch requirements"
+
 printf 'coder change\nsecond line\n' >"$workspace/file.txt"
 printf 'new note\n' >"$workspace/new.txt"
 status_json=$("$ROOT/bin/omarchy-task-status" "$assignment_id" --json)
@@ -178,5 +198,11 @@ pass "task stop fails clearly when the assignment is idle"
 if OMARCHY_TEST_AGENT_MODE=host "$ROOT/bin/omarchy-task-start" "$assignment_id" --inline >"$test_tmp/host-output" 2>&1; then
   fail "managed task start rejects host execution"
 fi
-grep -Fq 'require container mode' "$test_tmp/host-output" || fail "host rejection explains the runtime requirement"
+grep -Fq 'fail: mode' "$test_tmp/host-output" || fail "host rejection explains the runtime requirement"
 pass "managed assignments cannot run directly on the host"
+
+if OMARCHY_TEST_CONTAINER_DOCTOR_FAIL=true "$ROOT/bin/omarchy-task-start" "$assignment_id" --inline >"$test_tmp/doctor-output" 2>&1; then
+  fail "task start rejects failed container doctor preflight"
+fi
+grep -Fq 'fail: container_doctor' "$test_tmp/doctor-output" || fail "task start reports container doctor preflight failure"
+pass "task start runs preflight before launching agents"
