@@ -56,9 +56,23 @@ if (( match_count == 1 )); then
   task_id=$(jq -r '.task_id' <<<"$assignment")
   project_id=$(jq -r '.project_id' <<<"$assignment")
   agent=$(jq -r '.agent' <<<"$assignment")
+  assignment_status=$(jq -r '.status' <<<"$assignment")
   workspace=$(jq -r '.workspace_path' <<<"$assignment")
   project_path=$(jq -r '.project_path' <<<"$assignment")
+  base_commit=$(jq -r '.base_commit' <<<"$assignment")
   expected_root="${XDG_DATA_HOME:-$HOME/.local/share}/omarchy/agent-workspaces/$project_id/$task_id/$assignment_id"
+
+  case "$assignment_status" in
+    ready|stopped|failed)
+      add_check assignment_status pass "Assignment status permits start: $assignment_status"
+      ;;
+    launched)
+      add_check assignment_status warn "Assignment status is launched but no active instance may remain"
+      ;;
+    *)
+      add_check assignment_status fail "Assignment status does not permit start: $assignment_status"
+      ;;
+  esac
 
   if [[ $(omarchy-agent-mode) == "container" ]]; then
     add_check mode pass "Agent mode is container"
@@ -127,10 +141,31 @@ if (( match_count == 1 )); then
   fi
 
   if [[ -d $workspace/.git ]]; then
+    if git -C "$workspace" merge-base --is-ancestor "$base_commit" HEAD; then
+      add_check workspace_base pass "Assignment workspace descends from the task base commit"
+    else
+      add_check workspace_base fail "Assignment workspace does not descend from the task base commit"
+    fi
+
+    if [[ $assignment_status == "ready" && -n $(git -C "$workspace" status --porcelain) ]]; then
+      add_check workspace_clean fail "Ready assignment workspace has uncommitted changes"
+    else
+      add_check workspace_clean pass "Assignment workspace cleanliness is valid for status $assignment_status"
+    fi
+
     if [[ -z $(git -C "$workspace" remote) ]]; then
       add_check workspace_remote pass "Assignment workspace has no Git remote"
     else
       add_check workspace_remote fail "Assignment workspace has an unexpected Git remote"
+    fi
+  fi
+
+  if [[ -d $project_path/.git ]]; then
+    source_head=$(git -C "$project_path" rev-parse HEAD)
+    if [[ $source_head == "$base_commit" ]]; then
+      add_check source_head pass "Source checkout is still at the task base commit"
+    else
+      add_check source_head warn "Source checkout moved from task base; apply may require --3way"
     fi
   fi
 

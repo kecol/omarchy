@@ -53,6 +53,8 @@ task_id=$(jq -r '.[0].task_id' <<<"$matches")
 project_id=$(jq -r '.[0].project_id' <<<"$matches")
 agent=$(jq -r '.[0].agent' <<<"$matches")
 role=$(jq -r '.[0].role' <<<"$matches")
+goal=$(jq -r '.[0].goal' <<<"$matches")
+base_commit=$(jq -r '.[0].base_commit' <<<"$matches")
 workspace=$(jq -r '.[0].workspace_path' <<<"$matches")
 expected_root="${XDG_DATA_HOME:-$HOME/.local/share}/omarchy/agent-workspaces/$project_id/$task_id/$assignment_id"
 
@@ -77,6 +79,26 @@ export OMARCHY_AGENT_TASK_ID="$task_id"
 export OMARCHY_AGENT_ASSIGNMENT_ID="$assignment_id"
 export OMARCHY_AGENT_ROLE="$role"
 export OMARCHY_AGENT_WORKSPACE="$workspace"
+task_prompt=$(cat <<PROMPT
+You are working on an Omarchy managed coding task.
+
+Task ID: $task_id
+Assignment ID: $assignment_id
+Role: $role
+Base commit: $base_commit
+
+Goal:
+$goal
+
+Rules:
+- Work only in this private assignment workspace.
+- Do not push changes.
+- Do not edit the source checkout directly.
+- Keep changes focused on the task goal.
+- When finished, summarize what changed and stop.
+PROMPT
+)
+
 omarchy-agent-state assignment-status "$assignment_id" launched
 cd "$workspace"
-exec omarchy-agent --agent-internal "$agent" "${agent_args[@]}"
+exec omarchy-agent --agent-internal "$agent" "${agent_args[@]}" --prompt "$task_prompt"

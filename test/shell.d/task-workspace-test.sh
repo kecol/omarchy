@@ -114,6 +114,7 @@ second_workspace=$(jq -r '.workspace' <<<"$second_json")
 printf 'coder change\n' >"$workspace/file.txt"
 [[ $(<"$second_workspace/file.txt") == "original" ]] || fail "one assignment cannot modify another assignment workspace"
 [[ $(<"$source_repo/file.txt") == "original" ]] || fail "an assignment cannot modify the canonical checkout through its workspace"
+git -C "$workspace" checkout --quiet -- file.txt
 pass "assignment workspaces do not share checkout changes"
 
 task_json=$("$ROOT/bin/omarchy-task-inspect" "$task_id" --json)
@@ -124,7 +125,10 @@ pass "task inventory reports private assignments"
 
 "$ROOT/bin/omarchy-task-start" "${assignment_id:0:12}" --inline --continue
 [[ $(jq -r '.cwd' "$launch_log") == "$workspace" ]] || fail "task start enters the private workspace"
-[[ $(jq -r '.args' "$launch_log") == "--agent-internal pi --inline --continue-session" ]] || fail "task start selects the assigned agent and session action"
+launch_args=$(jq -r '.args' "$launch_log")
+[[ $launch_args == *"--agent-internal pi --inline --continue-session --prompt"* ]] || fail "task start selects the assigned agent and session action" "$launch_args"
+[[ $launch_args == *"Goal:"* && $launch_args == *"Implement isolated workspaces"* ]] || fail "task start passes the task goal to the agent" "$launch_args"
+[[ $launch_args == *"Do not edit the source checkout directly"* ]] || fail "task start passes workspace safety rules to the agent" "$launch_args"
 [[ $(jq -r '.managed' "$launch_log") == "true" ]] || fail "task start marks the launch as managed"
 [[ $(jq -r '.project' "$launch_log") == "$project_id" ]] || fail "task start passes the project identity"
 [[ $(jq -r '.task' "$launch_log") == "$task_id" ]] || fail "task start passes the task identity"
@@ -135,6 +139,7 @@ pass "task start launches the assigned agent with managed workspace context"
 preflight_json=$("$ROOT/bin/omarchy-task-preflight" "$assignment_id" --json)
 [[ $(jq -r '.ok' <<<"$preflight_json") == "true" ]] || fail "task preflight passes a safe assignment" "$preflight_json"
 [[ $(jq -r '.checks[] | select(.name == "workspace_remote") | .status' <<<"$preflight_json") == "pass" ]] || fail "task preflight checks workspace remotes"
+[[ $(jq -r '.checks[] | select(.name == "workspace_base") | .status' <<<"$preflight_json") == "pass" ]] || fail "task preflight checks task base ancestry"
 if OMARCHY_TEST_AGENT_MODE=host "$ROOT/bin/omarchy-task-preflight" "$assignment_id" >"$test_tmp/preflight-host-output" 2>&1; then
   fail "task preflight rejects host mode"
 fi
