@@ -226,6 +226,30 @@ for expected in \
 done
 pass "Podman adapter gives managed assignments task-scoped state and identity"
 
+mkdir -p "$test_home/.config/omarchy/agents"
+printf '%s\n' '{"resources":{"memory":"6g","pids":512,"cpus":2}}' >"$test_home/.config/omarchy/agents/policy.json"
+(
+  cd "$workspace"
+  env "${common_env[@]}" PATH="$mock_bin:$ROOT/bin:/usr/bin" \
+    "$ROOT/bin/omarchy-agent-run-podman" pi pi -- pi --version
+)
+mapfile -d '' -t run_args <"$podman_run_log"
+run_joined=$(printf '%s\n' "${run_args[@]}")
+for expected in \
+  "--label=org.omarchy.resources.memory=6g" \
+  "--label=org.omarchy.resources.pids=512" \
+  "--label=org.omarchy.resources.cpus=2" \
+  "--memory=6g" \
+  "--pids-limit=512" \
+  "--cpus=2"; do
+  grep -Fxq -- "$expected" <<<"$run_joined" || fail "Podman adapter honors configured resource policy with $expected" "$run_joined"
+done
+policy_json=$(env HOME="$test_home" PATH="$mock_bin:$ROOT/bin:/usr/bin" "$ROOT/bin/omarchy-agent-policy" --json)
+[[ $(jq -r '.resources.memory' <<<"$policy_json") == "6g" ]] || fail "agent policy reads configured memory limits" "$policy_json"
+[[ $(env HOME="$test_home" OMARCHY_AGENT_MEMORY_LIMIT=8g PATH="$mock_bin:$ROOT/bin:/usr/bin" "$ROOT/bin/omarchy-agent-policy" --json | jq -r '.resources.memory') == "8g" ]] || fail "agent policy lets environment override config"
+rm -f "$test_home/.config/omarchy/agents/policy.json"
+pass "Podman adapter reads configurable resource policy"
+
 if (
   cd "$workspace"
   env "${common_env[@]}" PATH="$mock_bin:/usr/bin" OMARCHY_TEST_IMAGE_EXISTS=false \

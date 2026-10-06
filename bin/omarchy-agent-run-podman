@@ -91,9 +91,10 @@ fi
 instance_id=$(< /proc/sys/kernel/random/uuid)
 instance_compact=${instance_id//-/}
 container_name="omarchy-agent-$agent-${instance_compact:0:12}"
-memory_limit=${OMARCHY_AGENT_MEMORY_LIMIT:-4g}
-pids_limit=${OMARCHY_AGENT_PIDS_LIMIT:-1024}
-cpus_limit=${OMARCHY_AGENT_CPUS_LIMIT:-}
+policy=$("$script_dir/omarchy-agent-policy" --json)
+memory_limit=$(jq -r '.resources.memory' <<<"$policy")
+pids_limit=$(jq -r '.resources.pids' <<<"$policy")
+cpus_limit=$(jq -r '.resources.cpus // ""' <<<"$policy")
 
 podman_args=(
   run

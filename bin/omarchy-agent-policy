@@ -1,0 +1,68 @@
+#!/bin/bash
+
+# omarchy:summary=Show the managed coding-agent runtime policy
+# omarchy:args=[--json]
+# omarchy:examples=omarchy agent policy | omarchy agent policy --json
+
+set -euo pipefail
+
+json=false
+if (( $# == 1 )) && [[ $1 == "--json" ]]; then
+  json=true
+elif (( $# != 0 )); then
+  echo "Usage: omarchy agent policy [--json]" >&2
+  exit 1
+fi
+
+config=${OMARCHY_AGENT_POLICY:-$HOME/.config/omarchy/agents/policy.json}
+default_policy=$(jq -n '{filesystem: {workspace: "read-write", source: "unmounted", home: "isolated persistent agent volume"}, network: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, credentials: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, resources: {mode: "podman", memory: "4g", pids: "1024", cpus: null}}')
+
+if [[ -f $config ]]; then
+  if ! jq -e 'type == "object"' "$config" >/dev/null; then
+    echo "Agent policy must be a JSON object: $config" >&2
+    exit 1
+  fi
+  policy=$(jq -s '.[0] * .[1]' <(printf '%s\n' "$default_policy") "$config")
+else
+  policy=$default_policy
+fi
+
+policy=$(jq \
+  --arg memory "${OMARCHY_AGENT_MEMORY_LIMIT:-}" \
+  --arg pids "${OMARCHY_AGENT_PIDS_LIMIT:-}" \
+  --arg cpus "${OMARCHY_AGENT_CPUS_LIMIT:-}" \
+  'if $memory != "" then .resources.memory = $memory else . end
+   | if $pids != "" then .resources.pids = $pids else . end
+   | if $cpus != "" then .resources.cpus = $cpus else . end
+   | .resources.memory |= tostring
+   | .resources.pids |= tostring
+   | .resources.cpus = (if .resources.cpus == null then null else (.resources.cpus | tostring) end)' \
+  <<<"$policy")
+
+if ! jq -e '
+  .filesystem.workspace == "read-write"
+  and .filesystem.source == "unmounted"
+  and (.filesystem.home | type == "string" and length > 0)
+  and (.network.mode | type == "string" and length > 0)
+  and (.credentials.mode | type == "string" and length > 0)
+  and .resources.mode == "podman"
+  and (.resources.memory | test("^[0-9]+[bBkKmMgG]?$"))
+  and (.resources.pids | test("^[0-9]+$"))
+  and (.resources.cpus == null or (.resources.cpus | test("^[0-9]+([.][0-9]+)?$")))' \
+  <<<"$policy" >/dev/null; then
+  echo "Agent policy is invalid: $config" >&2
+  exit 1
+fi
+
+if [[ $json == "true" ]]; then
+  jq . <<<"$policy"
+else
+  jq -r --arg config "$config" '
+    "Agent runtime policy",
+    "  Config:       " + $config,
+    "  Filesystem:   workspace=\(.filesystem.workspace), source=\(.filesystem.source), home=\(.filesystem.home)",
+    "  Network:      \(.network.mode)",
+    "  Credentials:  \(.credentials.mode)",
+    "  Resources:    memory=\(.resources.memory), pids=\(.resources.pids)\(if .resources.cpus then ", cpus=" + .resources.cpus else "" end)"
+  ' <<<"$policy"
+fi
