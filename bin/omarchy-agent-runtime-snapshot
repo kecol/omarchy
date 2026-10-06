@@ -1,7 +1,6 @@
 #!/bin/bash
 
 # omarchy:summary=Report observed state for active managed agent runtimes
-# omarchy:args=
 # omarchy:hidden=true
 
 set -euo pipefail
