@@ -51,7 +51,7 @@ _omarchy_complete() {
           done < <(omarchy-agent-state task-list 2>/dev/null | jq -r '.[].id' 2>/dev/null)
         fi
         ;;
-      apply|diff|patch|preflight|start|status|stop)
+      apply|diff|patch|preflight|reconcile|start|status|stop)
         if command -v omarchy-agent-state >/dev/null && command -v jq >/dev/null; then
           while IFS= read -r value; do
             [[ -n $value && -z ${seen[$value]:-} ]] || continue

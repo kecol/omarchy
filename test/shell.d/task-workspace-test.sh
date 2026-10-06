@@ -163,6 +163,10 @@ grep -Fxq 'new.txt' "$test_tmp/diff-names" || fail "task diff names untracked fi
 grep -Fq 'file.txt' "$test_tmp/diff-stat" || fail "task diff stat reports modified files"
 pass "task diff reports assignment workspace changes"
 
+reconcile_json=$("$ROOT/bin/omarchy-task-reconcile" "$assignment_id" --json)
+[[ $(jq -r '.status' <<<"$reconcile_json") == "ready-to-apply" ]] || fail "task reconcile detects cleanly applicable assignment changes" "$reconcile_json"
+pass "task reconcile reports unapplied assignment changes"
+
 "$ROOT/bin/omarchy-task-patch" "$assignment_id" "$test_tmp/assignment.patch" >"$test_tmp/patch-output"
 grep -Fq "Wrote patch: $test_tmp/assignment.patch" "$test_tmp/patch-output" || fail "task patch reports its output path"
 grep -Eq '^diff --git .*file\.txt' "$test_tmp/assignment.patch" || fail "task patch includes modified files"
@@ -175,6 +179,8 @@ grep -Fq "Applied assignment $assignment_id" "$test_tmp/apply-output" || fail "t
 [[ $(<"$source_repo/file.txt") == $'coder change\nsecond line' ]] || fail "task apply updates modified files in the canonical checkout"
 [[ $(<"$source_repo/new.txt") == "new note" ]] || fail "task apply creates untracked assignment files in the canonical checkout"
 [[ $(omarchy-agent-state assignment-get "$assignment_id" | jq -r '.[0].status') == "applied" ]] || fail "task apply records applied assignment status"
+reconcile_json=$("$ROOT/bin/omarchy-task-reconcile" "$assignment_id" --json)
+[[ $(jq -r '.status' <<<"$reconcile_json") == "applied" ]] || fail "task reconcile detects assignment changes already in source" "$reconcile_json"
 pass "task apply applies assignment changes to the clean source checkout"
 
 if (cd "$source_repo" && "$ROOT/bin/omarchy-task-apply" "$assignment_id") >"$test_tmp/apply-dirty-output" 2>&1; then
