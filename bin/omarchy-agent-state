@@ -177,6 +177,13 @@ SQL
     initialize
     sqlite_json 'SELECT tasks.*, projects.name AS project_name, (SELECT count(*) FROM assignments WHERE assignments.task_id = tasks.id) AS assignment_count FROM tasks JOIN projects ON projects.id = tasks.project_id ORDER BY tasks.created_at DESC;'
     ;;
+  task-status)
+    (( $# == 2 )) || { echo "Usage: omarchy-agent-state task-status <id> <status>" >&2; exit 1; }
+    initialize
+    id=$(sql_value "$1")
+    status=$(sql_value "$2")
+    sqlite3 "$database" "UPDATE tasks SET status = $status WHERE id = $id;"
+    ;;
   assignment-create)
     (( $# == 7 )) || { echo "Usage: omarchy-agent-state assignment-create <id> <task-id> <agent> <role> <workspace> <branch> <status>" >&2; exit 1; }
     initialize

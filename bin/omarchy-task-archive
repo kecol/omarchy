@@ -1,0 +1,93 @@
+#!/bin/bash
+
+# omarchy:summary=Archive a managed coding task
+# omarchy:args=<task> [--force]
+# omarchy:examples=omarchy task archive 019abc | omarchy task archive 019abc --force
+
+set -euo pipefail
+
+force=false
+selector=
+for argument in "$@"; do
+  if [[ $argument == "--force" ]]; then
+    force=true
+  elif [[ -z $selector ]]; then
+    selector=$argument
+  else
+    echo "Usage: omarchy task archive <task> [--force]" >&2
+    exit 1
+  fi
+done
+if [[ -z $selector ]]; then
+  echo "Usage: omarchy task archive <task> [--force]" >&2
+  exit 1
+fi
+
+tasks=$(omarchy-agent-state task-get "$selector")
+count=$(jq 'length' <<<"$tasks")
+if (( count == 0 )); then
+  echo "No task matches: $selector" >&2
+  exit 1
+elif (( count > 1 )); then
+  echo "More than one task matches: $selector" >&2
+  exit 1
+fi
+
+task=$(jq '.[0]' <<<"$tasks")
+task_id=$(jq -r '.id' <<<"$task")
+assignments=$(omarchy-agent-state task-assignments "$task_id")
+active=$(omarchy-agent-runtime-snapshot | jq --argjson assignments "$assignments" '[.[] as $instance | select(any($assignments[]; .id == $instance.assignment_id))]')
+active_count=$(jq 'length' <<<"$active")
+if (( active_count > 0 )); then
+  echo "Task has active assignment instances and cannot be archived:" >&2
+  jq -r '.[] | "  \(.assignment_id)  \(.container)  \(.status)"' <<<"$active" >&2
+  exit 1
+fi
+
+unsafe='[]'
+while IFS= read -r assignment; do
+  [[ -n $assignment ]] || continue
+  assignment_id=$(jq -r '.id' <<<"$assignment")
+  assignment_status=$(jq -r '.status' <<<"$assignment")
+  reconcile_status=missing
+  if [[ $assignment_status == "cleaned" ]]; then
+    reconcile_status=cleaned
+  elif reconcile_json=$(omarchy-task-reconcile "$assignment_id" --json 2>/dev/null); then
+    reconcile_status=$(jq -r '.status' <<<"$reconcile_json")
+  fi
+
+  case "$reconcile_status" in
+    applied|empty|cleaned)
+      ;;
+    *)
+      unsafe=$(jq \
+        --arg id "$assignment_id" \
+        --arg status "$assignment_status" \
+        --arg source_state "$reconcile_status" \
+        '. + [{id: $id, status: $status, source_state: $source_state}]' \
+        <<<"$unsafe")
+      ;;
+  esac
+done < <(jq -c '.[]' <<<"$assignments")
+
+unsafe_count=$(jq 'length' <<<"$unsafe")
+if (( unsafe_count > 0 )) && [[ $force != "true" ]]; then
+  echo "Task has assignments that are not safely applied or empty. Use --force to archive anyway:" >&2
+  jq -r '.[] | "  \(.id)  status=\(.status)  source=\(.source_state)"' <<<"$unsafe" >&2
+  exit 1
+fi
+
+while IFS= read -r assignment; do
+  [[ -n $assignment ]] || continue
+  assignment_id=$(jq -r '.id' <<<"$assignment")
+  assignment_status=$(jq -r '.status' <<<"$assignment")
+  [[ $assignment_status == "cleaned" ]] && continue
+  if [[ $force == "true" ]]; then
+    omarchy-task-cleanup "$assignment_id" --force >/dev/null || true
+  else
+    omarchy-task-cleanup "$assignment_id" >/dev/null || true
+  fi
+done < <(jq -c '.[]' <<<"$assignments")
+
+omarchy-agent-state task-status "$task_id" archived
+printf 'Archived task: %s\n' "$task_id"

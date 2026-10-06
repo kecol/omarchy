@@ -42,7 +42,7 @@ _omarchy_complete() {
 
   if [[ ${COMP_WORDS[1]:-} == "task" ]] && (( COMP_CWORD == 3 )); then
     case "${COMP_WORDS[2]:-}" in
-      assign|inspect)
+      archive|assign|inspect)
         if command -v omarchy-agent-state >/dev/null && command -v jq >/dev/null; then
           while IFS= read -r value; do
             [[ -n $value && -z ${seen[$value]:-} ]] || continue

@@ -260,3 +260,10 @@ if OMARCHY_TEST_CONTAINER_DOCTOR_FAIL=true "$ROOT/bin/omarchy-task-start" "$assi
 fi
 grep -Fq 'fail: container_doctor' "$test_tmp/doctor-output" || fail "task start reports container doctor preflight failure"
 pass "task start runs preflight before launching agents"
+
+"$ROOT/bin/omarchy-task-archive" "$task_id" >"$test_tmp/archive-output"
+grep -Fq "Archived task: $task_id" "$test_tmp/archive-output" || fail "task archive reports archived tasks"
+[[ $(omarchy-agent-state task-get "$task_id" | jq -r '.[0].status') == "archived" ]] || fail "task archive records archived task status"
+[[ $(omarchy-agent-state assignment-get "$assignment_id" | jq -r '.[0].status') == "cleaned" ]] || fail "task archive cleans safe assignment workspaces"
+[[ ! -e $workspace ]] || fail "task archive removes safe assignment workspaces"
+pass "task archive closes tasks with safe assignments"
