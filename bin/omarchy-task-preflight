@@ -24,7 +24,7 @@ if [[ -z $selector ]]; then
 fi
 
 checks='[]'
-policy=$(jq -n '{filesystem: {workspace: "read-write", source: "unmounted", home: "isolated persistent agent volume"}, network: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, credentials: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, resources: {mode: "not-enforced"}}')
+policy=$(jq -n --arg memory "${OMARCHY_AGENT_MEMORY_LIMIT:-4g}" --arg pids "${OMARCHY_AGENT_PIDS_LIMIT:-1024}" --arg cpus "${OMARCHY_AGENT_CPUS_LIMIT:-}" '{filesystem: {workspace: "read-write", source: "unmounted", home: "isolated persistent agent volume"}, network: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, credentials: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, resources: {mode: "podman", memory: $memory, pids: $pids, cpus: (if $cpus == "" then null else $cpus end)}}')
 failed=0
 add_check() {
   local name=$1
@@ -191,7 +191,7 @@ if (( match_count == 1 )); then
     add_check container_doctor fail "Container doctor failed. Run: omarchy agent container doctor"
   fi
 
-  add_check runtime_policy warn "Network, credentials, and resource limits are policy declarations; OpenShell or the runtime must enforce delegated controls"
+  add_check runtime_policy warn "Network and credentials are delegated to OpenShell; Podman enforces declared resource limits"
 fi
 
 if [[ $json == "true" ]]; then

@@ -43,7 +43,7 @@ if reconcile_json=$(omarchy-task-reconcile "$assignment_id" --json 2>/dev/null);
   reconcile_detail=$(jq -r '.detail' <<<"$reconcile_json")
 fi
 
-policy=$(jq -n '{filesystem: {workspace: "read-write", source: "unmounted", home: "isolated persistent agent volume"}, network: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, credentials: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, resources: {mode: "not-enforced"}}')
+policy=$(jq -n --arg memory "${OMARCHY_AGENT_MEMORY_LIMIT:-4g}" --arg pids "${OMARCHY_AGENT_PIDS_LIMIT:-1024}" --arg cpus "${OMARCHY_AGENT_CPUS_LIMIT:-}" '{filesystem: {workspace: "read-write", source: "unmounted", home: "isolated persistent agent volume"}, network: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, credentials: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, resources: {mode: "podman", memory: $memory, pids: $pids, cpus: (if $cpus == "" then null else $cpus end)}}')
 active_instances=$(omarchy-agent-runtime-snapshot | jq --arg assignment "$assignment_id" '[.[] | select(.assignment_id == $assignment)]')
 if [[ -d $workspace/.git ]]; then
   status_lines=$(git -C "$workspace" status --porcelain=v1)
@@ -90,7 +90,7 @@ else
     "  Filesystem:     workspace=\(.policy.filesystem.workspace), source=\(.policy.filesystem.source), home=\(.policy.filesystem.home)",
     "  Network:        \(.policy.network.mode)",
     "  Credentials:    \(.policy.credentials.mode)",
-    "  Resources:      \(.policy.resources.mode)",
+    "  Resources:      memory=\(.policy.resources.memory), pids=\(.policy.resources.pids)\(if .policy.resources.cpus then ", cpus=" + .policy.resources.cpus else "" end)",
     (if (.git.status | length) == 0 then empty else "", "Assignment workspace changes", (.git.status[] | "  " + .) end),
     (if .git.diff_stat == "" then empty else "", "Assignment workspace diff", .git.diff_stat end)
   ' <<<"$record"

@@ -91,6 +91,9 @@ fi
 instance_id=$(< /proc/sys/kernel/random/uuid)
 instance_compact=${instance_id//-/}
 container_name="omarchy-agent-$agent-${instance_compact:0:12}"
+memory_limit=${OMARCHY_AGENT_MEMORY_LIMIT:-4g}
+pids_limit=${OMARCHY_AGENT_PIDS_LIMIT:-1024}
+cpus_limit=${OMARCHY_AGENT_CPUS_LIMIT:-}
 
 podman_args=(
   run
@@ -105,6 +108,10 @@ podman_args=(
   --label="org.omarchy.project=$project_id"
   --label="org.omarchy.workspace.target=$container_workspace"
   --label="org.omarchy.workspace.managed=$managed"
+  --label="org.omarchy.resources.memory=$memory_limit"
+  --label="org.omarchy.resources.pids=$pids_limit"
+  --memory="$memory_limit"
+  --pids-limit="$pids_limit"
   --userns=keep-id
   --cap-drop=all
   --security-opt=no-new-privileges
@@ -115,6 +122,13 @@ podman_args=(
   --volume="$home_volume:/home/agent:U"
   --entrypoint="${command[0]}"
 )
+
+if [[ -n $cpus_limit ]]; then
+  podman_args+=(
+    --label="org.omarchy.resources.cpus=$cpus_limit"
+    --cpus="$cpus_limit"
+  )
+fi
 
 if [[ $managed == "true" ]]; then
   podman_args+=(

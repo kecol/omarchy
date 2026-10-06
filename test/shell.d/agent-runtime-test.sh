@@ -171,6 +171,10 @@ for expected in \
   "--label=org.omarchy.runtime=podman" \
   "--label=org.omarchy.project=${workspace_hash:0:16}" \
   "--label=org.omarchy.workspace.target=$container_workspace" \
+  "--label=org.omarchy.resources.memory=4g" \
+  "--label=org.omarchy.resources.pids=1024" \
+  "--memory=4g" \
+  "--pids-limit=1024" \
   "--cap-drop=all" \
   "--security-opt=no-new-privileges" \
   "--workdir=$container_workspace" \

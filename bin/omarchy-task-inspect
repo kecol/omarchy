@@ -30,7 +30,7 @@ elif (( count > 1 )); then
 fi
 task_id=$(jq -r '.[0].id' <<<"$tasks")
 assignments=$(omarchy-agent-state task-assignments "$task_id")
-policy=$(jq -n '{filesystem: {workspace: "read-write", source: "unmounted", home: "isolated persistent agent volume"}, network: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, credentials: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, resources: {mode: "not-enforced"}}')
+policy=$(jq -n --arg memory "${OMARCHY_AGENT_MEMORY_LIMIT:-4g}" --arg pids "${OMARCHY_AGENT_PIDS_LIMIT:-1024}" --arg cpus "${OMARCHY_AGENT_CPUS_LIMIT:-}" '{filesystem: {workspace: "read-write", source: "unmounted", home: "isolated persistent agent volume"}, network: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, credentials: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, resources: {mode: "podman", memory: $memory, pids: $pids, cpus: (if $cpus == "" then null else $cpus end)}}')
 record=$(jq --argjson assignments "$assignments" --argjson policy "$policy" '.[0] + {assignments: $assignments, policy: $policy}' <<<"$tasks")
 
 if [[ $json == "true" ]]; then
@@ -49,7 +49,7 @@ else
     "  Filesystem:   workspace=\(.policy.filesystem.workspace), source=\(.policy.filesystem.source), home=\(.policy.filesystem.home)",
     "  Network:      \(.policy.network.mode)",
     "  Credentials:  \(.policy.credentials.mode)",
-    "  Resources:    \(.policy.resources.mode)",
+    "  Resources:    memory=\(.policy.resources.memory), pids=\(.policy.resources.pids)\(if .policy.resources.cpus then ", cpus=" + .policy.resources.cpus else "" end)",
     "",
     "Assignments",
     (if (.assignments | length) == 0 then "  None" else (.assignments[] | "  \(.id[0:12])  \(.agent)  \(.role)  \(.status)\n    \(.workspace_path)") end)
