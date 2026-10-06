@@ -153,7 +153,8 @@ status_json=$("$ROOT/bin/omarchy-task-status" "$assignment_id" --json)
 [[ $(jq -r '.git.status[]' <<<"$status_json" | grep -Fxc ' M file.txt') == "1" ]] || fail "task status includes modified files"
 [[ $(jq -r '.git.status[]' <<<"$status_json" | grep -Fxc '?? new.txt') == "1" ]] || fail "task status includes untracked files"
 "$ROOT/bin/omarchy-task-status" "$assignment_id" >"$test_tmp/status-output"
-grep -Fq 'Clean:     false' "$test_tmp/status-output" || fail "text task status reports cleanliness"
+grep -Fq 'Workspace clean: false' "$test_tmp/status-output" || fail "text task status reports workspace cleanliness"
+grep -Fq 'Source state:    ready-to-apply' "$test_tmp/status-output" || fail "text task status reports source reconciliation state"
 pass "task status summarizes workspace changes"
 
 "$ROOT/bin/omarchy-task-diff" "$assignment_id" --name-only >"$test_tmp/diff-names"
@@ -181,6 +182,8 @@ grep -Fq "Applied assignment $assignment_id" "$test_tmp/apply-output" || fail "t
 [[ $(omarchy-agent-state assignment-get "$assignment_id" | jq -r '.[0].status') == "applied" ]] || fail "task apply records applied assignment status"
 reconcile_json=$("$ROOT/bin/omarchy-task-reconcile" "$assignment_id" --json)
 [[ $(jq -r '.status' <<<"$reconcile_json") == "applied" ]] || fail "task reconcile detects assignment changes already in source" "$reconcile_json"
+"$ROOT/bin/omarchy-task-status" "$assignment_id" >"$test_tmp/status-applied-output"
+grep -Fq 'Source state:    applied' "$test_tmp/status-applied-output" || fail "task status reports applied source reconciliation state"
 pass "task apply applies assignment changes to the clean source checkout"
 
 if (cd "$source_repo" && "$ROOT/bin/omarchy-task-apply" "$assignment_id") >"$test_tmp/apply-dirty-output" 2>&1; then
