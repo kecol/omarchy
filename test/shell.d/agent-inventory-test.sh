@@ -38,6 +38,15 @@ cat >"$snapshot_file" <<'JSON'
     "harness": "pi",
     "runtime": "podman",
     "project_id": "project123",
+    "filesystem": {
+      "workspace": "read-write",
+      "source": "unmounted"
+    },
+    "resources": {
+      "memory": "4g",
+      "pids": "1024",
+      "cpus": null
+    },
     "container": "omarchy-agent-pi-019abcde1111",
     "container_id": "container123",
     "status": "running",
@@ -125,6 +134,8 @@ pass "agent ps reports observed active instances"
 inspect_json=$("$ROOT/bin/omarchy-agent-inspect" 019abcde --json)
 [[ $(jq -r '.record_source' <<<"$inspect_json") == "observed" ]] || fail "agent inspect prefers observed runtime state"
 [[ $(jq -r '.filesystem_policy.host_root_mounted' <<<"$inspect_json") == "false" ]] || fail "agent inspect detects that host root is not mounted"
+[[ $(jq -r '.filesystem_policy.source_unmounted' <<<"$inspect_json") == "true" ]] || fail "agent inspect reports source checkout is unmounted"
+[[ $(jq -r '.filesystem_policy.workspace_access' <<<"$inspect_json") == "read-write" ]] || fail "agent inspect reports workspace access policy"
 [[ $(jq -r '.credential_policy.readable_by_agent' <<<"$inspect_json") == "true" ]] || fail "agent inspect reports credential exposure"
 [[ $(jq -r '.network_policy.egress_verified' <<<"$inspect_json") == "false" ]] || fail "agent inspect does not claim unverified network enforcement"
 pass "agent inspect reports filesystem, credential, and network security state"

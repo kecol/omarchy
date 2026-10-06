@@ -171,6 +171,8 @@ for expected in \
   "--label=org.omarchy.runtime=podman" \
   "--label=org.omarchy.project=${workspace_hash:0:16}" \
   "--label=org.omarchy.workspace.target=$container_workspace" \
+  "--label=org.omarchy.filesystem.workspace=read-write" \
+  "--label=org.omarchy.filesystem.source=unmounted" \
   "--label=org.omarchy.resources.memory=4g" \
   "--label=org.omarchy.resources.pids=1024" \
   "--memory=4g" \

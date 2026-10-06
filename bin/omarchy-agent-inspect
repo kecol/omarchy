@@ -38,7 +38,9 @@ if (( match_count == 1 )); then
   record=$(jq '.[0] | . + {
     record_source: "observed",
     filesystem_policy: {
-      workspace_access: "read-write",
+      workspace_access: (.filesystem.workspace // "unknown"),
+      source_access: (.filesystem.source // "unknown"),
+      source_unmounted: ((.filesystem.source // "unknown") == "unmounted"),
       host_root_mounted: ([.mounts[] | select(.source == "/")] | length > 0),
       host_home_mounted: ([.mounts[] | select(.destination == "/home/agent" and .type == "bind")] | length > 0)
     },
@@ -72,6 +74,9 @@ if (( match_count == 1 )); then
     "",
     "Filesystem",
     (.mounts[] | "  \(.destination): \(.source) (\(if .read_write then "read-write" else "read-only" end), \(.type))"),
+    "  Workspace access:      \(.filesystem_policy.workspace_access)",
+    "  Source access:         \(.filesystem_policy.source_access)",
+    "  Source unmounted:      \(.filesystem_policy.source_unmounted)",
     "  Host root mounted:     \(.filesystem_policy.host_root_mounted)",
     "  Host home mounted:     \(.filesystem_policy.host_home_mounted)",
     "",

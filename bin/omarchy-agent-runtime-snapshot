@@ -27,6 +27,15 @@ podman inspect "${container_ids[@]}" | jq '[.[] | {
   assignment_id: .Config.Labels["org.omarchy.assignment"],
   role: .Config.Labels["org.omarchy.role"],
   managed_workspace: (.Config.Labels["org.omarchy.workspace.managed"] == "true"),
+  filesystem: {
+    workspace: (.Config.Labels["org.omarchy.filesystem.workspace"] // "unknown"),
+    source: (.Config.Labels["org.omarchy.filesystem.source"] // "unknown")
+  },
+  resources: {
+    memory: (.Config.Labels["org.omarchy.resources.memory"] // "unknown"),
+    pids: (.Config.Labels["org.omarchy.resources.pids"] // "unknown"),
+    cpus: (.Config.Labels["org.omarchy.resources.cpus"] // null)
+  },
   container: .Name,
   container_id: .Id,
   status: .State.Status,

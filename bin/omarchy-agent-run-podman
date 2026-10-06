@@ -109,6 +109,8 @@ podman_args=(
   --label="org.omarchy.project=$project_id"
   --label="org.omarchy.workspace.target=$container_workspace"
   --label="org.omarchy.workspace.managed=$managed"
+  --label=org.omarchy.filesystem.workspace=read-write
+  --label=org.omarchy.filesystem.source=unmounted
   --label="org.omarchy.resources.memory=$memory_limit"
   --label="org.omarchy.resources.pids=$pids_limit"
   --memory="$memory_limit"
