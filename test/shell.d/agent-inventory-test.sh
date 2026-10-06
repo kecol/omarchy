@@ -131,6 +131,30 @@ ps_json=$("$ROOT/bin/omarchy-agent-ps" --json)
 [[ $(jq -r '.[0].workspace' <<<"$ps_json") == "/workspace/project123" ]] || fail "agent ps reports the runtime workspace"
 pass "agent ps reports observed active instances"
 
+audit_json=$("$ROOT/bin/omarchy-agent-audit" --json)
+[[ $(jq -r '.ok' <<<"$audit_json") == "true" ]] || fail "agent audit passes safe active instances" "$audit_json"
+[[ $(jq -r '.checks[] | select(.name == "source_unmounted") | .status' <<<"$audit_json") == "pass" ]] || fail "agent audit checks source mount policy" "$audit_json"
+[[ $(jq -r '.checks[] | select(.name == "resources") | .status' <<<"$audit_json") == "pass" ]] || fail "agent audit checks resource policy" "$audit_json"
+python - "$snapshot_file" <<'PY'
+import json, sys
+path = sys.argv[1]
+data = json.load(open(path))
+data[0]["filesystem"]["source"] = "mounted"
+json.dump(data, open(path, "w"))
+PY
+if "$ROOT/bin/omarchy-agent-audit" >"$test_tmp/audit-fail" 2>&1; then
+  fail "agent audit rejects runtime policy drift"
+fi
+grep -Fq 'source_unmounted' "$test_tmp/audit-fail" || fail "agent audit names source mount drift"
+python - "$snapshot_file" <<'PY'
+import json, sys
+path = sys.argv[1]
+data = json.load(open(path))
+data[0]["filesystem"]["source"] = "unmounted"
+json.dump(data, open(path, "w"))
+PY
+pass "agent audit detects active runtime drift"
+
 inspect_json=$("$ROOT/bin/omarchy-agent-inspect" 019abcde --json)
 [[ $(jq -r '.record_source' <<<"$inspect_json") == "observed" ]] || fail "agent inspect prefers observed runtime state"
 [[ $(jq -r '.filesystem_policy.host_root_mounted' <<<"$inspect_json") == "false" ]] || fail "agent inspect detects that host root is not mounted"

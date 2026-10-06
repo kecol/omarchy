@@ -1,0 +1,126 @@
+#!/bin/bash
+
+# omarchy:summary=Audit active managed coding-agent runtime safety
+# omarchy:args=[--json]
+# omarchy:examples=omarchy agent audit | omarchy agent audit --json
+
+set -euo pipefail
+
+json=false
+if (( $# == 1 )) && [[ $1 == "--json" ]]; then
+  json=true
+elif (( $# != 0 )); then
+  echo "Usage: omarchy agent audit [--json]" >&2
+  exit 1
+fi
+
+snapshot=$(omarchy-agent-runtime-snapshot)
+policy=$(omarchy-agent-policy --json)
+checks='[]'
+failed=0
+
+add_check() {
+  local instance=$1
+  local name=$2
+  local status=$3
+  local detail=$4
+  checks=$(jq \
+    --arg instance "$instance" \
+    --arg name "$name" \
+    --arg status "$status" \
+    --arg detail "$detail" \
+    '. + [{instance: $instance, name: $name, status: $status, detail: $detail}]' \
+    <<<"$checks")
+  if [[ $status == "fail" ]]; then
+    failed=1
+  fi
+}
+
+while IFS= read -r instance_json; do
+  [[ -n $instance_json ]] || continue
+  instance=$(jq -r '.instance // "unknown"' <<<"$instance_json")
+  container=$(jq -r '.container // "unknown"' <<<"$instance_json")
+
+  source_access=$(jq -r '.filesystem.source // "unknown"' <<<"$instance_json")
+  if [[ $source_access == "unmounted" ]]; then
+    add_check "$instance" source_unmounted pass "$container labels source checkout as unmounted"
+  else
+    add_check "$instance" source_unmounted fail "$container source policy is $source_access"
+  fi
+
+  workspace_access=$(jq -r '.filesystem.workspace // "unknown"' <<<"$instance_json")
+  if [[ $workspace_access == "read-write" ]]; then
+    add_check "$instance" workspace_access pass "$container labels workspace read-write"
+  else
+    add_check "$instance" workspace_access fail "$container workspace policy is $workspace_access"
+  fi
+
+  host_root_mounted=$(jq '[.mounts[]? | select(.source == "/")] | length' <<<"$instance_json")
+  if (( host_root_mounted == 0 )); then
+    add_check "$instance" host_root pass "$container does not mount host root"
+  else
+    add_check "$instance" host_root fail "$container mounts host root"
+  fi
+
+  host_home_bind=$(jq '[.mounts[]? | select(.destination == "/home/agent" and .type == "bind")] | length' <<<"$instance_json")
+  if (( host_home_bind == 0 )); then
+    add_check "$instance" host_home pass "$container does not bind host home as agent home"
+  else
+    add_check "$instance" host_home fail "$container binds host home as agent home"
+  fi
+
+  cap_add_count=$(jq '[.security.capabilities_add[]?] | length' <<<"$instance_json")
+  cap_drop_count=$(jq '[.security.capabilities_drop[]?] | length' <<<"$instance_json")
+  if (( cap_add_count == 0 && cap_drop_count > 0 )); then
+    add_check "$instance" capabilities pass "$container drops capabilities and adds none"
+  else
+    add_check "$instance" capabilities fail "$container capability policy drifted"
+  fi
+
+  if jq -e 'any(.security.security_options[]?; . == "no-new-privileges")' <<<"$instance_json" >/dev/null; then
+    add_check "$instance" no_new_privileges pass "$container sets no-new-privileges"
+  else
+    add_check "$instance" no_new_privileges fail "$container does not set no-new-privileges"
+  fi
+
+  expected_memory=$(jq -r '.resources.memory' <<<"$policy")
+  expected_pids=$(jq -r '.resources.pids' <<<"$policy")
+  expected_cpus=$(jq -r '.resources.cpus // ""' <<<"$policy")
+  actual_memory=$(jq -r '.resources.memory // "unknown"' <<<"$instance_json")
+  actual_pids=$(jq -r '.resources.pids // "unknown"' <<<"$instance_json")
+  actual_cpus=$(jq -r '.resources.cpus // ""' <<<"$instance_json")
+  if [[ $actual_memory == "$expected_memory" && $actual_pids == "$expected_pids" && $actual_cpus == "$expected_cpus" ]]; then
+    add_check "$instance" resources pass "$container resource labels match current policy"
+  else
+    add_check "$instance" resources fail "$container resources are memory=$actual_memory pids=$actual_pids cpus=${actual_cpus:-unset}; expected memory=$expected_memory pids=$expected_pids cpus=${expected_cpus:-unset}"
+  fi
+
+  managed_workspace=$(jq -r '.managed_workspace // false' <<<"$instance_json")
+  if [[ $managed_workspace == "true" ]]; then
+    if jq -e '(.task_id // "") != "" and (.assignment_id // "") != ""' <<<"$instance_json" >/dev/null; then
+      add_check "$instance" managed_labels pass "$container has managed task and assignment labels"
+    else
+      add_check "$instance" managed_labels fail "$container is managed but lacks task or assignment labels"
+    fi
+  fi
+done < <(jq -c '.[]' <<<"$snapshot")
+
+record=$(jq -n \
+  --argjson ok "$((1 - failed))" \
+  --argjson instances "$(jq 'length' <<<"$snapshot")" \
+  --argjson checks "$checks" \
+  '{ok: ($ok == 1), instances: $instances, checks: $checks}')
+
+if [[ $json == "true" ]]; then
+  jq . <<<"$record"
+else
+  if [[ $(jq -r '.instances' <<<"$record") == "0" ]]; then
+    echo "No active managed agent instances."
+  else
+    jq -r '.checks[] | "\(.status): \(.instance[0:12]) \(.name) - \(.detail)"' <<<"$record"
+  fi
+fi
+
+if (( failed )); then
+  exit 1
+fi
