@@ -10,6 +10,8 @@ trap 'rm -rf "$test_tmp"' EXIT
 mock_bin="$test_tmp/bin"
 test_home="$test_tmp/home"
 snapshot_file="$test_tmp/snapshot.json"
+podman_log="$test_tmp/podman-log"
+state_log="$test_tmp/state-log"
 mkdir -p "$mock_bin" "$test_home"
 
 cat >"$mock_bin/omarchy-agent-mode" <<'SH'
@@ -24,8 +26,28 @@ SH
 
 cat >"$mock_bin/omarchy-agent-state" <<'SH'
 #!/bin/bash
-[[ $1 == "get" ]] || exit 1
-cat "$OMARCHY_TEST_HISTORY"
+case "$1" in
+  get)
+    cat "$OMARCHY_TEST_HISTORY"
+    ;;
+  finish|assignment-status)
+    printf '%s\t' "$@" >>"$OMARCHY_TEST_STATE_LOG"
+    printf '\n' >>"$OMARCHY_TEST_STATE_LOG"
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+SH
+
+cat >"$mock_bin/podman" <<'SH'
+#!/bin/bash
+if [[ ${1:-} == "stop" ]]; then
+  printf 'stop %s\n' "${2:-}" >>"$OMARCHY_TEST_PODMAN_LOG"
+  exit 0
+fi
+echo "unexpected podman call: $*" >&2
+exit 1
 SH
 
 chmod +x "$mock_bin"/*
@@ -38,6 +60,9 @@ cat >"$snapshot_file" <<'JSON'
     "harness": "pi",
     "runtime": "podman",
     "project_id": "project123",
+    "managed_workspace": true,
+    "task_id": "task123",
+    "assignment_id": "assignment123",
     "filesystem": {
       "workspace": "read-write",
       "source": "unmounted"
@@ -112,6 +137,8 @@ export HOME="$test_home"
 export OMARCHY_PATH="$ROOT"
 export OMARCHY_TEST_SNAPSHOT="$snapshot_file"
 export OMARCHY_TEST_HISTORY="$history_file"
+export OMARCHY_TEST_PODMAN_LOG="$podman_log"
+export OMARCHY_TEST_STATE_LOG="$state_log"
 export PATH="$mock_bin:$ROOT/bin:/usr/bin"
 
 list_json=$("$ROOT/bin/omarchy-agent-list" --json)
@@ -146,6 +173,10 @@ if "$ROOT/bin/omarchy-agent-audit" >"$test_tmp/audit-fail" 2>&1; then
   fail "agent audit rejects runtime policy drift"
 fi
 grep -Fq 'source_unmounted' "$test_tmp/audit-fail" || fail "agent audit names source mount drift"
+"$ROOT/bin/omarchy-agent-audit" --fix >"$test_tmp/audit-fix"
+grep -Fxq 'stop omarchy-agent-pi-019abcde1111' "$podman_log" || fail "agent audit --fix stops drifted containers"
+grep -Fq $'assignment-status\tassignment123\tfailed' "$state_log" || fail "agent audit --fix marks managed assignments failed"
+grep -Fq 'fix: 019abcde-111 stopped omarchy-agent-pi-019abcde1111' "$test_tmp/audit-fix" || fail "agent audit --fix reports stopped containers"
 python - "$snapshot_file" <<'PY'
 import json, sys
 path = sys.argv[1]
