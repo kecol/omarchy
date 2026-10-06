@@ -119,6 +119,7 @@ pass "assignment workspaces do not share checkout changes"
 
 task_json=$("$ROOT/bin/omarchy-task-inspect" "$task_id" --json)
 [[ $(jq '.assignments | length' <<<"$task_json") == "2" ]] || fail "task inspection includes its assignments"
+[[ $(jq -r '.policy.network.mode' <<<"$task_json") == "delegated-to-openshell" ]] || fail "task inspection exposes delegated runtime policy"
 list_json=$("$ROOT/bin/omarchy-task-list" --json)
 [[ $(jq -r '.[0].assignment_count' <<<"$list_json") == "2" ]] || fail "task list counts assignments"
 pass "task inventory reports private assignments"
@@ -150,6 +151,8 @@ preflight_json=$("$ROOT/bin/omarchy-task-preflight" "$assignment_id" --json)
 [[ $(jq -r '.ok' <<<"$preflight_json") == "true" ]] || fail "task preflight passes a safe assignment" "$preflight_json"
 [[ $(jq -r '.checks[] | select(.name == "workspace_remote") | .status' <<<"$preflight_json") == "pass" ]] || fail "task preflight checks workspace remotes"
 [[ $(jq -r '.checks[] | select(.name == "workspace_base") | .status' <<<"$preflight_json") == "pass" ]] || fail "task preflight checks task base ancestry"
+[[ $(jq -r '.checks[] | select(.name == "runtime_policy") | .status' <<<"$preflight_json") == "warn" ]] || fail "task preflight declares delegated runtime policy"
+[[ $(jq -r '.policy.credentials.mode' <<<"$preflight_json") == "delegated-to-openshell" ]] || fail "task preflight exposes delegated credential policy"
 if OMARCHY_TEST_AGENT_MODE=host "$ROOT/bin/omarchy-task-preflight" "$assignment_id" >"$test_tmp/preflight-host-output" 2>&1; then
   fail "task preflight rejects host mode"
 fi
@@ -165,6 +168,7 @@ status_json=$("$ROOT/bin/omarchy-task-status" "$assignment_id" --json)
 "$ROOT/bin/omarchy-task-status" "$assignment_id" >"$test_tmp/status-output"
 grep -Fq 'Workspace clean: false' "$test_tmp/status-output" || fail "text task status reports workspace cleanliness"
 grep -Fq 'Source state:    ready-to-apply' "$test_tmp/status-output" || fail "text task status reports source reconciliation state"
+grep -Fq 'Network:        delegated-to-openshell' "$test_tmp/status-output" || fail "text task status reports delegated network policy"
 pass "task status summarizes workspace changes"
 
 "$ROOT/bin/omarchy-task-diff" "$assignment_id" --name-only >"$test_tmp/diff-names"

@@ -24,6 +24,7 @@ if [[ -z $selector ]]; then
 fi
 
 checks='[]'
+policy=$(jq -n '{filesystem: {workspace: "read-write", source: "unmounted", home: "isolated persistent agent volume"}, network: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, credentials: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, resources: {mode: "not-enforced"}}')
 failed=0
 add_check() {
   local name=$1
@@ -189,10 +190,12 @@ if (( match_count == 1 )); then
   else
     add_check container_doctor fail "Container doctor failed. Run: omarchy agent container doctor"
   fi
+
+  add_check runtime_policy warn "Network, credentials, and resource limits are policy declarations; OpenShell or the runtime must enforce delegated controls"
 fi
 
 if [[ $json == "true" ]]; then
-  jq -n --argjson checks "$checks" --argjson ok "$((1 - failed))" '{ok: ($ok == 1), checks: $checks}'
+  jq -n --argjson checks "$checks" --argjson policy "$policy" --argjson ok "$((1 - failed))" '{ok: ($ok == 1), checks: $checks, policy: $policy}'
 else
   jq -r '.[] | "\(.status): \(.name) - \(.detail)"' <<<"$checks"
 fi

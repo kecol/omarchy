@@ -43,6 +43,7 @@ if reconcile_json=$(omarchy-task-reconcile "$assignment_id" --json 2>/dev/null);
   reconcile_detail=$(jq -r '.detail' <<<"$reconcile_json")
 fi
 
+policy=$(jq -n '{filesystem: {workspace: "read-write", source: "unmounted", home: "isolated persistent agent volume"}, network: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, credentials: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, resources: {mode: "not-enforced"}}')
 active_instances=$(omarchy-agent-runtime-snapshot | jq --arg assignment "$assignment_id" '[.[] | select(.assignment_id == $assignment)]')
 if [[ -d $workspace/.git ]]; then
   status_lines=$(git -C "$workspace" status --porcelain=v1)
@@ -65,7 +66,8 @@ record=$(jq -n \
   --arg diff_stat "$diff_stat" \
   --arg reconcile_status "$reconcile_status" \
   --arg reconcile_detail "$reconcile_detail" \
-  '{assignment: $assignment, active_instances: $active_instances, reconciliation: {status: $reconcile_status, detail: $reconcile_detail}, git: {branch: $branch, head: $head, clean: ($status_lines == ""), status: ($status_lines | split("\n") | map(select(. != ""))), diff_stat: $diff_stat}}')
+  --argjson policy "$policy" \
+  '{assignment: $assignment, active_instances: $active_instances, reconciliation: {status: $reconcile_status, detail: $reconcile_detail}, policy: $policy, git: {branch: $branch, head: $head, clean: ($status_lines == ""), status: ($status_lines | split("\n") | map(select(. != ""))), diff_stat: $diff_stat}}')
 
 if [[ $json == "true" ]]; then
   jq . <<<"$record"
@@ -83,6 +85,12 @@ else
     "  Workspace clean: \(.git.clean)",
     "  Source state:    \(.reconciliation.status)",
     (if .reconciliation.detail == "" then empty else "  Source detail:   \(.reconciliation.detail)" end),
+    "",
+    "Runtime policy",
+    "  Filesystem:     workspace=\(.policy.filesystem.workspace), source=\(.policy.filesystem.source), home=\(.policy.filesystem.home)",
+    "  Network:        \(.policy.network.mode)",
+    "  Credentials:    \(.policy.credentials.mode)",
+    "  Resources:      \(.policy.resources.mode)",
     (if (.git.status | length) == 0 then empty else "", "Assignment workspace changes", (.git.status[] | "  " + .) end),
     (if .git.diff_stat == "" then empty else "", "Assignment workspace diff", .git.diff_stat end)
   ' <<<"$record"

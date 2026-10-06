@@ -30,7 +30,8 @@ elif (( count > 1 )); then
 fi
 task_id=$(jq -r '.[0].id' <<<"$tasks")
 assignments=$(omarchy-agent-state task-assignments "$task_id")
-record=$(jq --argjson assignments "$assignments" '.[0] + {assignments: $assignments}' <<<"$tasks")
+policy=$(jq -n '{filesystem: {workspace: "read-write", source: "unmounted", home: "isolated persistent agent volume"}, network: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, credentials: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, resources: {mode: "not-enforced"}}')
+record=$(jq --argjson assignments "$assignments" --argjson policy "$policy" '.[0] + {assignments: $assignments, policy: $policy}' <<<"$tasks")
 
 if [[ $json == "true" ]]; then
   jq . <<<"$record"
@@ -43,6 +44,12 @@ else
     "  Base commit: \(.base_commit)",
     "  Status:      \(.status)",
     "  Goal:        \(.goal)",
+    "",
+    "Runtime policy",
+    "  Filesystem:   workspace=\(.policy.filesystem.workspace), source=\(.policy.filesystem.source), home=\(.policy.filesystem.home)",
+    "  Network:      \(.policy.network.mode)",
+    "  Credentials:  \(.policy.credentials.mode)",
+    "  Resources:    \(.policy.resources.mode)",
     "",
     "Assignments",
     (if (.assignments | length) == 0 then "  None" else (.assignments[] | "  \(.id[0:12])  \(.agent)  \(.role)  \(.status)\n    \(.workspace_path)") end)
