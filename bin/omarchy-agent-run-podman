@@ -157,4 +157,7 @@ else
   final_status=failed
 fi
 omarchy-agent-state finish "$instance_id" "$final_status" "$exit_code"
+if [[ $managed == "true" ]]; then
+  omarchy-agent-state assignment-status "$assignment_id" "$final_status"
+fi
 exit "$exit_code"

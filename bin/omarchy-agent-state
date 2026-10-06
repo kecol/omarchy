@@ -13,6 +13,16 @@ sql_value() {
   printf "'%s'" "${1//\'/\'\'}"
 }
 
+sqlite_json() {
+  local output
+  output=$(sqlite3 -json "$database" "$1")
+  if [[ -z $output ]]; then
+    printf '[]\n'
+  else
+    printf '%s\n' "$output"
+  fi
+}
+
 initialize() {
   umask 077
   mkdir -p "$state_dir"
@@ -117,12 +127,12 @@ SQL
     (( $# == 1 )) || { echo "Usage: omarchy-agent-state get <id-prefix-or-agent>" >&2; exit 1; }
     initialize
     selector=$(sql_value "$1")
-    sqlite3 -json "$database" "SELECT * FROM instances WHERE id LIKE $selector || '%' OR agent = $selector ORDER BY created_at DESC;"
+    sqlite_json "SELECT * FROM instances WHERE id LIKE $selector || '%' OR agent = $selector ORDER BY created_at DESC;"
     ;;
   list)
     (( $# == 0 )) || { echo "Usage: omarchy-agent-state list" >&2; exit 1; }
     initialize
-    sqlite3 -json "$database" 'SELECT * FROM instances ORDER BY created_at DESC;'
+    sqlite_json 'SELECT * FROM instances ORDER BY created_at DESC;'
     ;;
   project-register)
     (( $# == 3 )) || { echo "Usage: omarchy-agent-state project-register <id> <name> <source-path>" >&2; exit 1; }
@@ -141,7 +151,7 @@ SQL
     (( $# == 1 )) || { echo "Usage: omarchy-agent-state project-get <id-prefix>" >&2; exit 1; }
     initialize
     selector=$(sql_value "$1")
-    sqlite3 -json "$database" "SELECT * FROM projects WHERE id LIKE $selector || '%' ORDER BY created_at DESC;"
+    sqlite_json "SELECT * FROM projects WHERE id LIKE $selector || '%' ORDER BY created_at DESC;"
     ;;
   task-create)
     (( $# == 5 )) || { echo "Usage: omarchy-agent-state task-create <id> <project-id> <goal> <base-commit> <status>" >&2; exit 1; }
@@ -154,12 +164,12 @@ SQL
     (( $# == 1 )) || { echo "Usage: omarchy-agent-state task-get <id-prefix>" >&2; exit 1; }
     initialize
     selector=$(sql_value "$1")
-    sqlite3 -json "$database" "SELECT tasks.*, projects.name AS project_name, projects.source_path AS project_path FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id LIKE $selector || '%' ORDER BY tasks.created_at DESC;"
+    sqlite_json "SELECT tasks.*, projects.name AS project_name, projects.source_path AS project_path FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id LIKE $selector || '%' ORDER BY tasks.created_at DESC;"
     ;;
   task-list)
     (( $# == 0 )) || { echo "Usage: omarchy-agent-state task-list" >&2; exit 1; }
     initialize
-    sqlite3 -json "$database" 'SELECT tasks.*, projects.name AS project_name, (SELECT count(*) FROM assignments WHERE assignments.task_id = tasks.id) AS assignment_count FROM tasks JOIN projects ON projects.id = tasks.project_id ORDER BY tasks.created_at DESC;'
+    sqlite_json 'SELECT tasks.*, projects.name AS project_name, (SELECT count(*) FROM assignments WHERE assignments.task_id = tasks.id) AS assignment_count FROM tasks JOIN projects ON projects.id = tasks.project_id ORDER BY tasks.created_at DESC;'
     ;;
   assignment-create)
     (( $# == 7 )) || { echo "Usage: omarchy-agent-state assignment-create <id> <task-id> <agent> <role> <workspace> <branch> <status>" >&2; exit 1; }
@@ -172,13 +182,18 @@ SQL
     (( $# == 1 )) || { echo "Usage: omarchy-agent-state task-assignments <task-id>" >&2; exit 1; }
     initialize
     task_id=$(sql_value "$1")
-    sqlite3 -json "$database" "SELECT id, agent, role, workspace_path, branch_name, status, created_at FROM assignments WHERE task_id = $task_id ORDER BY created_at;"
+    sqlite_json "SELECT id, agent, role, workspace_path, branch_name, status, created_at FROM assignments WHERE task_id = $task_id ORDER BY created_at;"
+    ;;
+  assignment-list)
+    (( $# == 0 )) || { echo "Usage: omarchy-agent-state assignment-list" >&2; exit 1; }
+    initialize
+    sqlite_json 'SELECT assignments.*, tasks.project_id, tasks.goal, tasks.base_commit, projects.name AS project_name, projects.source_path AS project_path FROM assignments JOIN tasks ON tasks.id = assignments.task_id JOIN projects ON projects.id = tasks.project_id ORDER BY assignments.created_at DESC;'
     ;;
   assignment-get)
     (( $# == 1 )) || { echo "Usage: omarchy-agent-state assignment-get <id-prefix>" >&2; exit 1; }
     initialize
     selector=$(sql_value "$1")
-    sqlite3 -json "$database" "SELECT assignments.*, tasks.project_id, tasks.goal, tasks.base_commit, projects.name AS project_name, projects.source_path AS project_path FROM assignments JOIN tasks ON tasks.id = assignments.task_id JOIN projects ON projects.id = tasks.project_id WHERE assignments.id LIKE $selector || '%' ORDER BY assignments.created_at DESC;"
+    sqlite_json "SELECT assignments.*, tasks.project_id, tasks.goal, tasks.base_commit, projects.name AS project_name, projects.source_path AS project_path FROM assignments JOIN tasks ON tasks.id = assignments.task_id JOIN projects ON projects.id = tasks.project_id WHERE assignments.id LIKE $selector || '%' ORDER BY assignments.created_at DESC;"
     ;;
   assignment-status)
     (( $# == 2 )) || { echo "Usage: omarchy-agent-state assignment-status <id> <status>" >&2; exit 1; }

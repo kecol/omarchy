@@ -40,6 +40,29 @@ _omarchy_complete() {
     candidates+=("--all" "--json" "--markdown" "--check")
   fi
 
+  if [[ ${COMP_WORDS[1]:-} == "task" ]] && (( COMP_CWORD == 3 )); then
+    case "${COMP_WORDS[2]:-}" in
+      assign|inspect)
+        if command -v omarchy-agent-state >/dev/null && command -v jq >/dev/null; then
+          while IFS= read -r value; do
+            [[ -n $value && -z ${seen[$value]:-} ]] || continue
+            seen[$value]=1
+            candidates+=("$value")
+          done < <(omarchy-agent-state task-list 2>/dev/null | jq -r '.[].id' 2>/dev/null)
+        fi
+        ;;
+      diff|start|status|stop)
+        if command -v omarchy-agent-state >/dev/null && command -v jq >/dev/null; then
+          while IFS= read -r value; do
+            [[ -n $value && -z ${seen[$value]:-} ]] || continue
+            seen[$value]=1
+            candidates+=("$value")
+          done < <(omarchy-agent-state assignment-list 2>/dev/null | jq -r '.[].id' 2>/dev/null)
+        fi
+        ;;
+    esac
+  fi
+
   if (( ${#candidates[@]} == 0 )); then
     local command_prefix command_path first_arg_index n j
     for ((n = COMP_CWORD - 1; n >= 0; n--)); do
