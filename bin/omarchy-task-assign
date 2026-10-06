@@ -1,0 +1,109 @@
+#!/bin/bash
+
+# omarchy:summary=Assign an agent to a private task workspace
+# omarchy:args=[--json] <task> <agent> [role]
+# omarchy:examples=omarchy task assign 019abc pi coder
+
+set -euo pipefail
+
+json=false
+if [[ ${1:-} == "--json" ]]; then
+  json=true
+  shift
+fi
+if (( $# < 2 || $# > 3 )); then
+  echo "Usage: omarchy task assign [--json] <task> <agent> [role]" >&2
+  exit 1
+fi
+
+task_selector=$1
+agent=$2
+role=${3:-coder}
+for value in "$agent" "$role"; do
+  if [[ ! $value =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
+    echo "Invalid agent or role name: $value" >&2
+    exit 1
+  fi
+done
+
+user_definition="$HOME/.config/omarchy/agents/$agent.json"
+builtin_definition="$OMARCHY_PATH/default/agents/definitions/$agent.json"
+if [[ ! -f $user_definition && ! -f $builtin_definition ]]; then
+  echo "No agent definition exists for: $agent" >&2
+  exit 1
+fi
+
+task_matches=$(omarchy-agent-state task-get "$task_selector")
+task_count=$(jq 'length' <<<"$task_matches")
+if (( task_count == 0 )); then
+  echo "No task matches: $task_selector" >&2
+  exit 1
+elif (( task_count > 1 )); then
+  echo "More than one task matches: $task_selector" >&2
+  exit 1
+fi
+
+task_id=$(jq -r '.[0].id' <<<"$task_matches")
+project_id=$(jq -r '.[0].project_id' <<<"$task_matches")
+project_name=$(jq -r '.[0].project_name' <<<"$task_matches")
+project_path=$(jq -r '.[0].project_path' <<<"$task_matches")
+base_commit=$(jq -r '.[0].base_commit' <<<"$task_matches")
+assignment_id=$(< /proc/sys/kernel/random/uuid)
+assignment_compact=${assignment_id//-/}
+task_compact=${task_id//-/}
+branch_name="omarchy/${task_compact:0:12}/${agent}-${assignment_compact:0:8}"
+workspace_root="${XDG_DATA_HOME:-$HOME/.local/share}/omarchy/agent-workspaces/$project_id/$task_id"
+workspace="$workspace_root/$assignment_id/repo"
+temporary_workspace="$workspace.tmp"
+
+umask 077
+mkdir -p "$workspace_root/$assignment_id"
+if ! git clone --quiet --no-local --no-checkout "$project_path" "$temporary_workspace"; then
+  rm -rf "$workspace_root/$assignment_id"
+  echo "Could not create the private workspace." >&2
+  exit 1
+fi
+
+if ! git -C "$temporary_workspace" checkout --quiet -b "$branch_name" "$base_commit"; then
+  rm -rf "$workspace_root/$assignment_id"
+  echo "Could not check out task base $base_commit." >&2
+  exit 1
+fi
+git -C "$temporary_workspace" remote remove origin
+
+git_name=$(git -C "$project_path" config --get user.name || true)
+git_email=$(git -C "$project_path" config --get user.email || true)
+git -C "$temporary_workspace" config user.name "${git_name:-Omarchy Agent ($agent)}"
+git -C "$temporary_workspace" config user.email "${git_email:-$agent@localhost}"
+mv "$temporary_workspace" "$workspace"
+
+if ! omarchy-agent-state assignment-create \
+  "$assignment_id" \
+  "$task_id" \
+  "$agent" \
+  "$role" \
+  "$workspace" \
+  "$branch_name" \
+  ready; then
+  rm -rf "$workspace_root/$assignment_id"
+  exit 1
+fi
+
+if [[ $json == "true" ]]; then
+  jq -n \
+    --arg assignment "$assignment_id" \
+    --arg task "$task_id" \
+    --arg project "$project_id" \
+    --arg project_name "$project_name" \
+    --arg agent "$agent" \
+    --arg role "$role" \
+    --arg workspace "$workspace" \
+    --arg branch "$branch_name" \
+    '{assignment: $assignment, task: $task, project: $project, project_name: $project_name, agent: $agent, role: $role, workspace: $workspace, branch: $branch, status: "ready"}'
+else
+  printf 'Created assignment %s\n' "$assignment_id"
+  printf 'Agent:     %s\n' "$agent"
+  printf 'Role:      %s\n' "$role"
+  printf 'Workspace: %s\n' "$workspace"
+  printf 'Branch:    %s\n' "$branch_name"
+fi

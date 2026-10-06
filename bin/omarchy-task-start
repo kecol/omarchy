@@ -1,0 +1,109 @@
+#!/bin/bash
+
+# omarchy:summary=Start an assigned agent in its private workspace
+# omarchy:args=<assignment> [--inline] [--continue|--resume]
+# omarchy:examples=omarchy task start 019abc | omarchy task start 019abc --continue
+
+set -euo pipefail
+
+if (( $# == 0 )); then
+  echo "Usage: omarchy task start <assignment> [--inline] [--continue|--resume]" >&2
+  exit 1
+fi
+assignment_selector=$1
+shift
+
+agent_args=()
+while (($#)); do
+  case "$1" in
+    --inline)
+      agent_args+=(--inline)
+      ;;
+    --continue)
+      agent_args+=(--continue-session)
+      ;;
+    --resume)
+      agent_args+=(--resume-session)
+      ;;
+    *)
+      echo "Unexpected argument: $1" >&2
+      exit 1
+      ;;
+  esac
+  shift
+done
+
+if ! omarchy-task-preflight "$assignment_selector"; then
+  echo "Task assignment preflight failed." >&2
+  exit 1
+fi
+
+if ! omarchy-agent-audit; then
+  echo "Active managed agent runtime audit failed. Inspect or stop unsafe containers before starting another task agent." >&2
+  exit 1
+fi
+
+matches=$(omarchy-agent-state assignment-get "$assignment_selector")
+match_count=$(jq 'length' <<<"$matches")
+if (( match_count == 0 )); then
+  echo "No assignment matches: $assignment_selector" >&2
+  exit 1
+elif (( match_count > 1 )); then
+  echo "More than one assignment matches: $assignment_selector" >&2
+  exit 1
+fi
+
+assignment_id=$(jq -r '.[0].id' <<<"$matches")
+task_id=$(jq -r '.[0].task_id' <<<"$matches")
+project_id=$(jq -r '.[0].project_id' <<<"$matches")
+agent=$(jq -r '.[0].agent' <<<"$matches")
+role=$(jq -r '.[0].role' <<<"$matches")
+goal=$(jq -r '.[0].goal' <<<"$matches")
+base_commit=$(jq -r '.[0].base_commit' <<<"$matches")
+workspace=$(jq -r '.[0].workspace_path' <<<"$matches")
+expected_root="${XDG_DATA_HOME:-$HOME/.local/share}/omarchy/agent-workspaces/$project_id/$task_id/$assignment_id"
+
+if [[ ! -d $workspace ]] || [[ $(realpath -e "$workspace") != "$(realpath -e "$expected_root")/repo" ]]; then
+  echo "Assignment workspace is missing or is outside its managed location: $workspace" >&2
+  exit 1
+fi
+if [[ -n $(git -C "$workspace" remote) ]]; then
+  echo "Assignment workspace has an unexpected Git remote. Refusing to start the agent." >&2
+  exit 1
+fi
+
+active=$(omarchy-agent-runtime-snapshot | jq --arg assignment "$assignment_id" '[.[] | select(.assignment_id == $assignment)] | length')
+if (( active > 0 )); then
+  echo "Assignment already has an active instance: $assignment_id" >&2
+  exit 1
+fi
+
+export OMARCHY_AGENT_MANAGED=true
+export OMARCHY_AGENT_PROJECT_ID="$project_id"
+export OMARCHY_AGENT_TASK_ID="$task_id"
+export OMARCHY_AGENT_ASSIGNMENT_ID="$assignment_id"
+export OMARCHY_AGENT_ROLE="$role"
+export OMARCHY_AGENT_WORKSPACE="$workspace"
+task_prompt=$(cat <<PROMPT
+You are working on an Omarchy managed coding task.
+
+Task ID: $task_id
+Assignment ID: $assignment_id
+Role: $role
+Base commit: $base_commit
+
+Goal:
+$goal
+
+Rules:
+- Work only in this private assignment workspace.
+- Do not push changes.
+- Do not edit the source checkout directly.
+- Keep changes focused on the task goal.
+- When finished, summarize what changed and stop.
+PROMPT
+)
+
+omarchy-agent-state assignment-status "$assignment_id" launched
+cd "$workspace"
+exec omarchy-agent --agent-internal "$agent" "${agent_args[@]}" --prompt "$task_prompt"

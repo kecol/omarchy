@@ -1,0 +1,84 @@
+#!/bin/bash
+
+# omarchy:summary=Build a coding harness container image
+# omarchy:group=harness
+# omarchy:args=<pi> [version]
+# omarchy:examples=omarchy harness build pi | omarchy harness build pi 0.99.1
+
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: omarchy harness build <pi> [version]
+
+Builds a rootless container image for the selected coding harness. When the Pi
+version is omitted, the latest version reported by mise is used.
+USAGE
+}
+
+if (( $# < 1 || $# > 2 )) || [[ ${1:-} == "-h" || ${1:-} == "--help" ]]; then
+  usage
+  exit $(( $# == 0 ? 1 : 0 ))
+fi
+
+harness=$1
+case "$harness" in
+  pi) ;;
+  *)
+    echo "Unsupported harness: $harness" >&2
+    usage >&2
+    exit 1
+    ;;
+esac
+
+if omarchy-cmd-missing podman; then
+  echo "Podman is not installed. Install it with: omarchy pkg add podman" >&2
+  exit 1
+fi
+
+if ! rootless=$(podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null); then
+  echo "Podman is installed but is not responding." >&2
+  exit 1
+fi
+if [[ $rootless != "true" ]]; then
+  echo "Harness images require rootless Podman." >&2
+  exit 1
+fi
+
+version=${2:-}
+if [[ -z $version ]]; then
+  if omarchy-cmd-missing mise; then
+    echo "Mise is required to resolve the latest Pi version." >&2
+    exit 1
+  fi
+  version=$(MISE_MINIMUM_RELEASE_AGE=0 mise latest pi)
+fi
+
+if [[ ! $version =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?([+-][A-Za-z0-9.-]+)?$ ]]; then
+  echo "Invalid Pi version: $version" >&2
+  exit 1
+fi
+
+context="$OMARCHY_PATH/containers/harnesses/$harness"
+containerfile="$context/Containerfile"
+image="localhost/omarchy-harness-$harness"
+
+if [[ ! -f $containerfile ]]; then
+  echo "Harness container definition not found: $containerfile" >&2
+  exit 1
+fi
+
+echo "Building $harness harness $version"
+podman build \
+  --pull=newer \
+  --build-arg "HARNESS_UID=$(id -u)" \
+  --build-arg "HARNESS_GID=$(id -g)" \
+  --build-arg "PI_VERSION=$version" \
+  --label "org.omarchy.harness=$harness" \
+  --label "org.omarchy.harness.version=$version" \
+  --tag "$image:$version" \
+  --tag "$image:latest" \
+  --file "$containerfile" \
+  "$context"
+
+echo "Built $image:$version and $image:latest"

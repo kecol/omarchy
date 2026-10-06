@@ -1,0 +1,103 @@
+#!/bin/bash
+
+# omarchy:summary=Reconcile assignment state with its workspace and source checkout
+# omarchy:args=<assignment> [--json]
+# omarchy:examples=omarchy task reconcile 019abc
+
+set -euo pipefail
+
+json=false
+selector=
+for argument in "$@"; do
+  if [[ $argument == "--json" ]]; then
+    json=true
+  elif [[ -z $selector ]]; then
+    selector=$argument
+  else
+    echo "Usage: omarchy task reconcile <assignment> [--json]" >&2
+    exit 1
+  fi
+done
+if [[ -z $selector ]]; then
+  echo "Usage: omarchy task reconcile <assignment> [--json]" >&2
+  exit 1
+fi
+
+matches=$(omarchy-agent-state assignment-get "$selector")
+match_count=$(jq 'length' <<<"$matches")
+if (( match_count == 0 )); then
+  echo "No assignment matches: $selector" >&2
+  exit 1
+elif (( match_count > 1 )); then
+  echo "More than one assignment matches: $selector" >&2
+  exit 1
+fi
+
+assignment_id=$(jq -r '.[0].id' <<<"$matches")
+workspace=$(jq -r '.[0].workspace_path' <<<"$matches")
+project_path=$(jq -r '.[0].project_path' <<<"$matches")
+
+if [[ ! -d $workspace/.git ]]; then
+  echo "Assignment workspace is missing or is not a Git repository: $workspace" >&2
+  exit 1
+fi
+if [[ ! -d $project_path/.git ]]; then
+  echo "Source checkout is missing or is not a Git repository: $project_path" >&2
+  exit 1
+fi
+
+status=unknown
+detail=
+patch_file=$(mktemp)
+apply_output=$(mktemp)
+trap 'rm -f "$patch_file" "$apply_output"' EXIT
+omarchy-task-patch "$assignment_id" "$patch_file" >/dev/null
+
+if [[ ! -s $patch_file ]]; then
+  status=empty
+  detail="Assignment has no workspace changes"
+  omarchy-agent-state assignment-status "$assignment_id" stopped
+else
+  source_matches=true
+  mapfile -t changed_paths < <({ git -C "$workspace" diff --name-only HEAD; git -C "$workspace" ls-files --others --exclude-standard; } | sort -u)
+  for path in "${changed_paths[@]}"; do
+    if [[ -e $workspace/$path ]]; then
+      if [[ ! -e $project_path/$path ]] || ! cmp -s "$workspace/$path" "$project_path/$path"; then
+        source_matches=false
+        break
+      fi
+    elif [[ -e $project_path/$path ]]; then
+      source_matches=false
+      break
+    fi
+  done
+
+  if [[ $source_matches == "true" ]]; then
+    status=applied
+    detail="Source checkout already contains the assignment result"
+    omarchy-agent-state assignment-status "$assignment_id" applied
+  elif [[ -n $(git -C "$project_path" status --porcelain) ]]; then
+    status=source-dirty
+    detail="Source checkout has uncommitted changes"
+  elif git -C "$project_path" apply --check "$patch_file" >"$apply_output" 2>&1; then
+    status=ready-to-apply
+    detail="Patch applies cleanly to the source checkout"
+  elif git -C "$project_path" apply --3way --check "$patch_file" >"$apply_output" 2>&1 && ! grep -Fq 'with conflicts' "$apply_output"; then
+    status=ready-to-apply-3way
+    detail="Patch can apply to the source checkout with --3way"
+  else
+    status=conflict
+    detail="Patch does not apply cleanly to the source checkout"
+    omarchy-agent-state assignment-status "$assignment_id" conflict
+  fi
+fi
+
+if [[ $json == "true" ]]; then
+  jq -n \
+    --arg assignment "$assignment_id" \
+    --arg status "$status" \
+    --arg detail "$detail" \
+    '{assignment: $assignment, status: $status, detail: $detail}'
+else
+  printf '%s: %s\n' "$status" "$detail"
+fi

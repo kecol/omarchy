@@ -1,0 +1,78 @@
+#!/bin/bash
+
+# omarchy:summary=Show runtime history for an assignment
+# omarchy:args=<assignment> [--json]
+# omarchy:examples=omarchy task log 019abc | omarchy task log 019abc --json
+
+set -euo pipefail
+
+json=false
+selector=
+for argument in "$@"; do
+  if [[ $argument == "--json" ]]; then
+    json=true
+  elif [[ -z $selector ]]; then
+    selector=$argument
+  else
+    echo "Usage: omarchy task log <assignment> [--json]" >&2
+    exit 1
+  fi
+done
+if [[ -z $selector ]]; then
+  echo "Usage: omarchy task log <assignment> [--json]" >&2
+  exit 1
+fi
+
+matches=$(omarchy-agent-state assignment-get "$selector")
+match_count=$(jq 'length' <<<"$matches")
+if (( match_count == 0 )); then
+  echo "No assignment matches: $selector" >&2
+  exit 1
+elif (( match_count > 1 )); then
+  echo "More than one assignment matches: $selector" >&2
+  exit 1
+fi
+
+assignment=$(jq '.[0]' <<<"$matches")
+workspace=$(jq -r '.workspace_path' <<<"$assignment")
+instances=$(omarchy-agent-state list | jq --arg workspace "$workspace" '[.[] | select(.workspace_host == $workspace)]')
+instances_with_events='[]'
+while IFS= read -r instance; do
+  [[ -n $instance ]] || continue
+  instance_id=$(jq -r '.id' <<<"$instance")
+  events=$(omarchy-agent-state events "$instance_id")
+  instances_with_events=$(jq \
+    --argjson instance "$instance" \
+    --argjson events "$events" \
+    '. + [$instance + {events: $events}]' \
+    <<<"$instances_with_events")
+done < <(jq -c '.[]' <<<"$instances")
+
+record=$(jq -n \
+  --argjson assignment "$assignment" \
+  --argjson instances "$instances_with_events" \
+  '{assignment: $assignment, instances: $instances}')
+
+if [[ $json == "true" ]]; then
+  jq . <<<"$record"
+else
+  jq -r '
+    "Assignment log",
+    "  Assignment: \(.assignment.id)",
+    "  Task:       \(.assignment.task_id)",
+    "  Agent:      \(.assignment.agent)",
+    "  Role:       \(.assignment.role)",
+    "  Status:     \(.assignment.status)",
+    "  Workspace:  \(.assignment.workspace_path)",
+    "",
+    "Instances",
+    (if (.instances | length) == 0 then "  None" else (.instances[] |
+      "  \(.id)  \(.status)  \(.runtime)  \(.created_at)",
+      "    Container: \(.container_name // "")",
+      "    Image:     \(.image // "")",
+      "    Stopped:   \(.stopped_at // "")",
+      "    Exit code: \(.exit_code // "")",
+      (if (.events | length) == 0 then "    Events:    none" else "    Events:", (.events[] | "      \(.occurred_at)  \(.event)\(if .detail then "  " + .detail else "" end)") end)
+    ) end)
+  ' <<<"$record"
+fi

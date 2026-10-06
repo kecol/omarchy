@@ -1,0 +1,71 @@
+#!/bin/bash
+
+# omarchy:summary=Execute a configured coding agent through its selected runtime
+# omarchy:args=<agent> -- <command...>
+# omarchy:hidden=true
+
+set -euo pipefail
+
+usage() {
+  echo "Usage: omarchy-agent-exec <agent> -- <command...>" >&2
+}
+
+if (( $# < 3 )) || [[ $2 != "--" ]]; then
+  usage
+  exit 1
+fi
+
+agent=$1
+shift 2
+command=("$@")
+
+if [[ ! $agent =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
+  echo "Invalid agent name: $agent" >&2
+  exit 1
+fi
+
+mode=$(omarchy-agent-mode)
+if [[ $mode == "host" ]]; then
+  exec "${command[@]}"
+fi
+
+user_definition="$HOME/.config/omarchy/agents/$agent.json"
+builtin_definition="$OMARCHY_PATH/default/agents/definitions/$agent.json"
+if [[ -f $user_definition ]]; then
+  definition=$user_definition
+elif [[ -f $builtin_definition ]]; then
+  definition=$builtin_definition
+else
+  echo "No container definition exists for agent: $agent" >&2
+  exit 1
+fi
+
+if ! jq -e \
+  --arg agent "$agent" \
+  'type == "object"
+   and .name == $agent
+   and (.harness | type == "string" and test("^[a-z0-9][a-z0-9._-]*$"))
+   and (.runtime | type == "string")
+   and (.command | type == "array" and length > 0 and all(.[]; type == "string" and length > 0))' \
+  "$definition" >/dev/null; then
+  echo "Invalid agent definition: $definition" >&2
+  exit 1
+fi
+
+harness=$(jq -r '.harness' "$definition")
+runtime=$(jq -r '.runtime' "$definition")
+expected_command=$(jq -r '.command[0]' "$definition")
+if [[ ${command[0]} != "$expected_command" ]]; then
+  echo "Agent $agent must run through $expected_command, not ${command[0]}" >&2
+  exit 1
+fi
+
+case "$runtime" in
+  podman)
+    exec omarchy-agent-run-podman "$agent" "$harness" -- "${command[@]}"
+    ;;
+  *)
+    echo "Unsupported runtime for agent $agent: $runtime" >&2
+    exit 1
+    ;;
+esac

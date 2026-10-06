@@ -1,0 +1,101 @@
+#!/bin/bash
+
+# omarchy:summary=Check whether agent container mode is safe to use
+# omarchy:args=[--quick]
+# omarchy:examples=omarchy agent container doctor | omarchy agent container doctor --quick
+
+set -euo pipefail
+
+quick=false
+if (( $# > 1 )) || [[ ${1:-} == "-h" || ${1:-} == "--help" ]]; then
+  cat <<USAGE
+Usage: omarchy agent container doctor [--quick]
+
+Checks the local host before agent container mode starts.
+
+The full check verifies Podman with a disposable volume and container.
+The quick check skips the disposable container and is used before launches.
+USAGE
+  exit 0
+elif [[ ${1:-} == "--quick" ]]; then
+  quick=true
+elif (( $# == 1 )); then
+  echo "Usage: omarchy agent container doctor [--quick]" >&2
+  exit 1
+fi
+
+failures=0
+
+check_ok() {
+  printf 'ok - %s\n' "$1"
+}
+
+check_fail() {
+  printf 'not ok - %s\n' "$1" >&2
+  failures=$((failures + 1))
+}
+
+check_writable_dir() {
+  local label=$1
+  local directory=$2
+  local probe
+
+  mkdir -p "$directory" 2>/dev/null || { check_fail "$label is not available: $directory"; return; }
+  probe=$(mktemp "$directory/.omarchy-agent-doctor.XXXXXX" 2>/dev/null) || { check_fail "$label is not writable: $directory"; return; }
+  printf 'ok\n' >"$probe" 2>/dev/null || { rm -f "$probe"; check_fail "$label is not writable: $directory"; return; }
+  rm -f "$probe"
+  check_ok "$label is writable"
+}
+
+check_writable_dir "home" "$HOME"
+check_writable_dir "current workspace" "$PWD"
+check_writable_dir "agent state" "${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/agents"
+
+if omarchy-cmd-missing podman; then
+  check_fail "Podman is not installed"
+else
+  if rootless=$(podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null); then
+    [[ $rootless == "true" ]] && check_ok "Podman is rootless" || check_fail "Podman is not rootless"
+  else
+    check_fail "Podman is not responding"
+  fi
+
+  if graph_root=$(podman info --format '{{.Store.GraphRoot}}' 2>/dev/null); then
+    check_writable_dir "Podman storage" "$graph_root"
+  else
+    check_fail "Podman storage path is not available"
+  fi
+
+  volume="omarchy-agent-doctor-$(< /proc/sys/kernel/random/uuid)"
+  if podman volume create "$volume" >/dev/null 2>&1; then
+    check_ok "Podman can create volumes"
+    podman volume rm "$volume" >/dev/null 2>&1 || check_fail "Podman could not remove its test volume"
+  else
+    check_fail "Podman cannot create volumes"
+  fi
+
+  if [[ $quick != "true" ]]; then
+    image=${OMARCHY_AGENT_CONTAINER_IMAGE:-docker.io/library/archlinux:base}
+    if podman run --rm --pull=missing --network=none "$image" bash -lc 'printf ok >/tmp/omarchy-agent-doctor'; then
+      check_ok "Podman can start a disposable container"
+    else
+      check_fail "Podman cannot start a disposable container"
+    fi
+  fi
+fi
+
+if [[ ${OMARCHY_AGENT_CONTAINER_DOCTOR_SKIP_JOURNAL:-false} != "true" ]] && command -v journalctl >/dev/null; then
+  if journalctl -b --since '-15 minutes' --no-pager 2>/dev/null |
+    grep -Eiq 'read-only|readonly|remount.*ro|I/O error|BTRFS error|EXT4-fs error|XFS.*error'; then
+    check_fail "recent kernel or system logs contain filesystem I/O or read-only warnings"
+  else
+    check_ok "recent logs do not show filesystem read-only errors"
+  fi
+fi
+
+if (( failures > 0 )); then
+  echo "Agent container doctor failed. Keep agent mode on host until this is fixed." >&2
+  exit 1
+fi
+
+echo "Agent container doctor passed."

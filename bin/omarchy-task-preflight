@@ -1,0 +1,205 @@
+#!/bin/bash
+
+# omarchy:summary=Check whether an assignment can start safely
+# omarchy:args=<assignment> [--json]
+# omarchy:examples=omarchy task preflight 019abc
+
+set -euo pipefail
+
+json=false
+selector=
+for argument in "$@"; do
+  if [[ $argument == "--json" ]]; then
+    json=true
+  elif [[ -z $selector ]]; then
+    selector=$argument
+  else
+    echo "Usage: omarchy task preflight <assignment> [--json]" >&2
+    exit 1
+  fi
+done
+if [[ -z $selector ]]; then
+  echo "Usage: omarchy task preflight <assignment> [--json]" >&2
+  exit 1
+fi
+
+checks='[]'
+policy=$(omarchy-agent-policy --json)
+failed=0
+add_check() {
+  local name=$1
+  local status=$2
+  local detail=$3
+  checks=$(jq \
+    --arg name "$name" \
+    --arg status "$status" \
+    --arg detail "$detail" \
+    '. + [{name: $name, status: $status, detail: $detail}]' \
+    <<<"$checks")
+  if [[ $status == "fail" ]]; then
+    failed=1
+  fi
+}
+
+matches=$(omarchy-agent-state assignment-get "$selector")
+match_count=$(jq 'length' <<<"$matches")
+if (( match_count == 0 )); then
+  add_check assignment fail "No assignment matches: $selector"
+elif (( match_count > 1 )); then
+  add_check assignment fail "More than one assignment matches: $selector"
+else
+  add_check assignment pass "Assignment selector resolves uniquely"
+fi
+
+if (( match_count == 1 )); then
+  assignment=$(jq '.[0]' <<<"$matches")
+  assignment_id=$(jq -r '.id' <<<"$assignment")
+  task_id=$(jq -r '.task_id' <<<"$assignment")
+  project_id=$(jq -r '.project_id' <<<"$assignment")
+  agent=$(jq -r '.agent' <<<"$assignment")
+  assignment_status=$(jq -r '.status' <<<"$assignment")
+  workspace=$(jq -r '.workspace_path' <<<"$assignment")
+  project_path=$(jq -r '.project_path' <<<"$assignment")
+  base_commit=$(jq -r '.base_commit' <<<"$assignment")
+  expected_root="${XDG_DATA_HOME:-$HOME/.local/share}/omarchy/agent-workspaces/$project_id/$task_id/$assignment_id"
+
+  case "$assignment_status" in
+    ready|stopped|failed)
+      add_check assignment_status pass "Assignment status permits start: $assignment_status"
+      ;;
+    launched)
+      add_check assignment_status warn "Assignment status is launched but no active instance may remain"
+      ;;
+    *)
+      add_check assignment_status fail "Assignment status does not permit start: $assignment_status"
+      ;;
+  esac
+
+  if [[ $(omarchy-agent-mode) == "container" ]]; then
+    add_check mode pass "Agent mode is container"
+  else
+    add_check mode fail "Managed task assignments require container mode"
+  fi
+
+  user_definition="$HOME/.config/omarchy/agents/$agent.json"
+  builtin_definition="$OMARCHY_PATH/default/agents/definitions/$agent.json"
+  if [[ -f $user_definition ]]; then
+    definition=$user_definition
+    add_check definition pass "Using user agent definition: $definition"
+  elif [[ -f $builtin_definition ]]; then
+    definition=$builtin_definition
+    add_check definition pass "Using built-in agent definition: $definition"
+  else
+    definition=
+    add_check definition fail "No agent definition exists for: $agent"
+  fi
+
+  if [[ -n $definition ]]; then
+    if jq -e \
+      --arg agent "$agent" \
+      'type == "object"
+       and .name == $agent
+       and (.harness | type == "string" and test("^[a-z0-9][a-z0-9._-]*$"))
+       and (.runtime | type == "string")
+       and (.command | type == "array" and length > 0 and all(.[]; type == "string" and length > 0))' \
+      "$definition" >/dev/null; then
+      harness=$(jq -r '.harness' "$definition")
+      runtime=$(jq -r '.runtime' "$definition")
+      add_check definition_schema pass "Agent definition is valid"
+      if [[ $runtime == "podman" ]]; then
+        add_check runtime pass "Runtime is podman"
+      else
+        add_check runtime fail "Unsupported runtime for managed tasks: $runtime"
+      fi
+      if podman image exists "localhost/omarchy-harness-$harness:latest" 2>/dev/null; then
+        add_check harness_image pass "Harness image exists: localhost/omarchy-harness-$harness:latest"
+      else
+        add_check harness_image fail "Harness image is missing. Build it with: omarchy harness build $harness"
+      fi
+    else
+      add_check definition_schema fail "Invalid agent definition: $definition"
+    fi
+  fi
+
+  if [[ -d $project_path/.git ]]; then
+    add_check source pass "Source Git checkout exists: $project_path"
+  else
+    add_check source fail "Source checkout is missing or is not a Git repository: $project_path"
+  fi
+
+  if [[ -d $workspace/.git ]]; then
+    add_check workspace pass "Assignment Git workspace exists: $workspace"
+  else
+    add_check workspace fail "Assignment workspace is missing or is not a Git repository: $workspace"
+  fi
+
+  if [[ -d $workspace && -d $expected_root ]]; then
+    if [[ $(realpath -e "$workspace") == "$(realpath -e "$expected_root")/repo" ]]; then
+      add_check workspace_location pass "Workspace is inside its managed assignment directory"
+    else
+      add_check workspace_location fail "Workspace is outside its managed assignment directory"
+    fi
+  fi
+
+  if [[ -d $workspace/.git ]]; then
+    if git -C "$workspace" merge-base --is-ancestor "$base_commit" HEAD; then
+      add_check workspace_base pass "Assignment workspace descends from the task base commit"
+    else
+      add_check workspace_base fail "Assignment workspace does not descend from the task base commit"
+    fi
+
+    if [[ $assignment_status == "ready" && -n $(git -C "$workspace" status --porcelain) ]]; then
+      add_check workspace_clean fail "Ready assignment workspace has uncommitted changes"
+    else
+      add_check workspace_clean pass "Assignment workspace cleanliness is valid for status $assignment_status"
+    fi
+
+    if [[ -z $(git -C "$workspace" remote) ]]; then
+      add_check workspace_remote pass "Assignment workspace has no Git remote"
+    else
+      add_check workspace_remote fail "Assignment workspace has an unexpected Git remote"
+    fi
+  fi
+
+  if [[ -d $project_path/.git ]]; then
+    source_head=$(git -C "$project_path" rev-parse HEAD)
+    if [[ $source_head == "$base_commit" ]]; then
+      add_check source_head pass "Source checkout is still at the task base commit"
+    else
+      add_check source_head warn "Source checkout moved from task base; apply may require --3way"
+    fi
+  fi
+
+  if [[ -d $workspace && -d $project_path ]]; then
+    if [[ $(realpath -e "$workspace") != "$(realpath -e "$project_path")" ]]; then
+      add_check isolation pass "Assignment workspace is separate from the source checkout"
+    else
+      add_check isolation fail "Assignment workspace is the source checkout"
+    fi
+  fi
+
+  active=$(omarchy-agent-runtime-snapshot | jq --arg assignment "$assignment_id" '[.[] | select(.assignment_id == $assignment)] | length')
+  if (( active == 0 )); then
+    add_check active_instance pass "No active instance is running for this assignment"
+  else
+    add_check active_instance fail "Assignment already has an active instance"
+  fi
+
+  if omarchy-agent-container-doctor --quick >/dev/null 2>&1; then
+    add_check container_doctor pass "Container doctor passed"
+  else
+    add_check container_doctor fail "Container doctor failed. Run: omarchy agent container doctor"
+  fi
+
+  add_check runtime_policy warn "Network and credentials are delegated to OpenShell; Podman enforces declared resource limits"
+fi
+
+if [[ $json == "true" ]]; then
+  jq -n --argjson checks "$checks" --argjson policy "$policy" --argjson ok "$((1 - failed))" '{ok: ($ok == 1), checks: $checks, policy: $policy}'
+else
+  jq -r '.[] | "\(.status): \(.name) - \(.detail)"' <<<"$checks"
+fi
+
+if (( failed )); then
+  exit 1
+fi

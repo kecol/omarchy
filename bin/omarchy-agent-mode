@@ -1,0 +1,62 @@
+#!/bin/bash
+
+# omarchy:summary=Show or set where coding agents run
+# omarchy:args=[host|container]
+# omarchy:examples=omarchy agent mode | omarchy agent mode container
+
+set -euo pipefail
+
+mode_file="$HOME/.config/omarchy/agents/mode"
+
+usage() {
+  cat <<'USAGE'
+Usage: omarchy agent mode [host|container]
+
+With no argument, prints the current execution mode. The default is host.
+USAGE
+}
+
+valid_mode() {
+  [[ $1 == "host" || $1 == "container" ]]
+}
+
+if (( $# > 1 )); then
+  usage >&2
+  exit 1
+fi
+
+case "${1:-}" in
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  "")
+    if [[ -f $mode_file ]]; then
+      IFS= read -r mode <"$mode_file" || true
+      if ! valid_mode "${mode:-}"; then
+        echo "Invalid agent execution mode in $mode_file: ${mode:-<empty>}" >&2
+        exit 1
+      fi
+    else
+      mode="host"
+    fi
+
+    echo "$mode"
+    ;;
+  host | container)
+    mode=$1
+    mode_dir=$(dirname "$mode_file")
+    mkdir -p "$mode_dir"
+    staged=$(mktemp "$mode_dir/.mode.XXXXXX")
+    trap 'rm -f "$staged"' EXIT
+    printf '%s\n' "$mode" >"$staged"
+    mv -f -- "$staged" "$mode_file"
+    trap - EXIT
+    echo "$mode"
+    ;;
+  *)
+    echo "Unknown agent execution mode: $1" >&2
+    usage >&2
+    exit 1
+    ;;
+esac

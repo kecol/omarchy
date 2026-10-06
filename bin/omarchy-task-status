@@ -1,0 +1,97 @@
+#!/bin/bash
+
+# omarchy:summary=Show an assignment workspace and runtime status
+# omarchy:args=<assignment> [--json]
+# omarchy:examples=omarchy task status 019abc | omarchy task status 019abc --json
+
+set -euo pipefail
+
+json=false
+selector=
+for argument in "$@"; do
+  if [[ $argument == "--json" ]]; then
+    json=true
+  elif [[ -z $selector ]]; then
+    selector=$argument
+  else
+    echo "Usage: omarchy task status <assignment> [--json]" >&2
+    exit 1
+  fi
+done
+if [[ -z $selector ]]; then
+  echo "Usage: omarchy task status <assignment> [--json]" >&2
+  exit 1
+fi
+
+matches=$(omarchy-agent-state assignment-get "$selector")
+match_count=$(jq 'length' <<<"$matches")
+if (( match_count == 0 )); then
+  echo "No assignment matches: $selector" >&2
+  exit 1
+elif (( match_count > 1 )); then
+  echo "More than one assignment matches: $selector" >&2
+  exit 1
+fi
+
+assignment=$(jq '.[0]' <<<"$matches")
+assignment_id=$(jq -r '.id' <<<"$assignment")
+workspace=$(jq -r '.workspace_path' <<<"$assignment")
+reconcile_status=unknown
+reconcile_detail=""
+if reconcile_json=$(omarchy-task-reconcile "$assignment_id" --json 2>/dev/null); then
+  reconcile_status=$(jq -r '.status' <<<"$reconcile_json")
+  reconcile_detail=$(jq -r '.detail' <<<"$reconcile_json")
+fi
+
+policy=$(omarchy-agent-policy --json)
+active_instances=$(omarchy-agent-runtime-snapshot | jq --arg assignment "$assignment_id" '[.[] | select(.assignment_id == $assignment)]')
+if [[ -d $workspace/.git ]]; then
+  status_lines=$(git -C "$workspace" status --porcelain=v1)
+  branch=$(git -C "$workspace" branch --show-current)
+  head=$(git -C "$workspace" rev-parse HEAD)
+  diff_stat=$(git -C "$workspace" diff --stat HEAD)
+else
+  status_lines=
+  branch=
+  head=
+  diff_stat=
+fi
+
+record=$(jq -n \
+  --argjson assignment "$assignment" \
+  --argjson active_instances "$active_instances" \
+  --arg branch "$branch" \
+  --arg head "$head" \
+  --arg status_lines "$status_lines" \
+  --arg diff_stat "$diff_stat" \
+  --arg reconcile_status "$reconcile_status" \
+  --arg reconcile_detail "$reconcile_detail" \
+  --argjson policy "$policy" \
+  '{assignment: $assignment, active_instances: $active_instances, reconciliation: {status: $reconcile_status, detail: $reconcile_detail}, policy: $policy, git: {branch: $branch, head: $head, clean: ($status_lines == ""), status: ($status_lines | split("\n") | map(select(. != ""))), diff_stat: $diff_stat}}')
+
+if [[ $json == "true" ]]; then
+  jq . <<<"$record"
+else
+  jq -r '
+    "Assignment",
+    "  ID:        \(.assignment.id)",
+    "  Task:      \(.assignment.task_id)",
+    "  Agent:     \(.assignment.agent)",
+    "  Role:      \(.assignment.role)",
+    "  Status:    \(.assignment.status)",
+    "  Workspace: \(.assignment.workspace_path)",
+    "  Branch:    \(.git.branch)",
+    "  Running:   \(.active_instances | length)",
+    "  Workspace clean: \(.git.clean)",
+    "  Source state:    \(.reconciliation.status)",
+    (if .reconciliation.detail == "" then empty else "  Source detail:   \(.reconciliation.detail)" end),
+    "",
+    "Runtime policy",
+    "  Filesystem:     workspace=\(.policy.filesystem.workspace), source=\(.policy.filesystem.source), home=\(.policy.filesystem.home)",
+    "  Network:        \(.policy.network.mode)",
+    "  Credentials:    \(.policy.credentials.mode)",
+    "  Resources:      memory=\(.policy.resources.memory), pids=\(.policy.resources.pids)\(if .policy.resources.cpus then ", cpus=" + .policy.resources.cpus else "" end)",
+    (if (.git.status | length) == 0 then empty else "", "Assignment workspace changes", (.git.status[] | "  " + .) end),
+    (if .git.diff_stat == "" then empty else "", "Assignment workspace diff", .git.diff_stat end)
+  ' <<<"$record"
+fi

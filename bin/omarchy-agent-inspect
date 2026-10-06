@@ -1,0 +1,142 @@
+#!/bin/bash
+
+# omarchy:summary=Inspect a coding-agent instance
+# omarchy:args=<agent-or-instance> [--json]
+# omarchy:examples=omarchy agent inspect pi | omarchy agent inspect 019abc --json
+
+set -euo pipefail
+
+json=false
+selector=
+for argument in "$@"; do
+  if [[ $argument == "--json" ]]; then
+    json=true
+  elif [[ -z $selector ]]; then
+    selector=$argument
+  else
+    echo "Usage: omarchy agent inspect <agent-or-instance> [--json]" >&2
+    exit 1
+  fi
+done
+if [[ -z $selector ]]; then
+  echo "Usage: omarchy agent inspect <agent-or-instance> [--json]" >&2
+  exit 1
+fi
+
+snapshot=$(omarchy-agent-runtime-snapshot)
+matches=$(jq --arg selector "$selector" \
+  '[.[] | select(.agent == $selector or (.instance | startswith($selector)))]' <<<"$snapshot")
+match_count=$(jq 'length' <<<"$matches")
+
+if (( match_count > 1 )); then
+  echo "More than one active instance matches: $selector" >&2
+  jq -r '.[] | "  \(.instance)  \(.agent)"' <<<"$matches" >&2
+  exit 1
+fi
+
+if (( match_count == 1 )); then
+  record=$(jq '.[0] | . + {
+    record_source: "observed",
+    filesystem_policy: {
+      workspace_access: (.filesystem.workspace // "unknown"),
+      source_access: (.filesystem.source // "unknown"),
+      source_unmounted: ((.filesystem.source // "unknown") == "unmounted"),
+      host_root_mounted: ([.mounts[] | select(.source == "/")] | length > 0),
+      host_home_mounted: ([.mounts[] | select(.destination == "/home/agent" and .type == "bind")] | length > 0)
+    },
+    network_policy: {
+      egress: "unrestricted",
+      egress_verified: false,
+      host_gateway: "unknown"
+    },
+    credential_policy: {
+      storage: "persistent agent home volume",
+      readable_by_agent: true,
+      mediation: false
+    }
+  }' <<<"$matches")
+
+  if [[ $json == "true" ]]; then
+    jq . <<<"$record"
+    exit 0
+  fi
+
+  jq -r '
+    "Agent instance",
+    "  Instance:              \(.instance)",
+    "  Agent:                 \(.agent)",
+    "  Harness:               \(.harness)",
+    "  Runtime:               \(.runtime)",
+    "  Status:                \(.status)",
+    "  Container:             \(.container)",
+    "  Image:                 \(.image)",
+    "  Started:               \(.started_at)",
+    "",
+    "Filesystem",
+    (.mounts[] | "  \(.destination): \(.source) (\(if .read_write then "read-write" else "read-only" end), \(.type))"),
+    "  Workspace access:      \(.filesystem_policy.workspace_access)",
+    "  Source access:         \(.filesystem_policy.source_access)",
+    "  Source unmounted:      \(.filesystem_policy.source_unmounted)",
+    "  Host root mounted:     \(.filesystem_policy.host_root_mounted)",
+    "  Host home mounted:     \(.filesystem_policy.host_home_mounted)",
+    "",
+    "Network",
+    "  Runtime mode:          \(.network.mode)",
+    "  Internet egress:       \(.network_policy.egress) (declared, not verified)",
+    "  Host gateway:          \(.network_policy.host_gateway)",
+    "  Published ports:       \((.network.ports | keys | length))",
+    "",
+    "Credentials",
+    "  Storage:               \(.credential_policy.storage)",
+    "  Readable by agent:     \(.credential_policy.readable_by_agent)",
+    "  Credential mediation:  \(.credential_policy.mediation)",
+    "",
+    "Security",
+    "  User:                  \(.security.user)",
+    "  User namespace:        \(.security.userns)",
+    "  Dropped capabilities:  \(.security.capabilities_drop | join(", "))",
+    "  Security options:      \(.security.security_options | join(", "))"
+  ' <<<"$record"
+  exit 0
+fi
+
+history=$(omarchy-agent-state get "$selector")
+history_count=$(jq 'length' <<<"$history")
+if (( history_count == 0 )); then
+  echo "No agent instance matches: $selector" >&2
+  exit 1
+elif (( history_count > 1 )); then
+  agent_match_count=$(jq --arg selector "$selector" '[.[] | select(.agent == $selector)] | length' <<<"$history")
+  if (( agent_match_count == history_count )); then
+    history=$(jq '.[0:1]' <<<"$history")
+  else
+    echo "No active instance matched. More than one historical instance matches: $selector" >&2
+    jq -r '.[] | "  \(.id)  \(.agent)  \(.status)  \(.created_at)"' <<<"$history" >&2
+    exit 1
+  fi
+fi
+
+record=$(jq --argjson historical_count "$history_count" '.[0]
+  | . + {record_source: "registry", registry_status: .status, historical_instances: $historical_count}
+  | if .status == "running" then .status = "unknown" | .stale = true else .stale = false end' <<<"$history")
+if [[ $json == "true" ]]; then
+  jq . <<<"$record"
+else
+  jq -r '
+    "Agent instance (historical registry record)",
+    "  Instance:              \(.id)",
+    "  Agent:                 \(.agent)",
+    "  Harness:               \(.harness)",
+    "  Runtime:               \(.runtime)",
+    "  Status:                \(.status)",
+    "  Container:             \(.container_name)",
+    "  Image:                 \(.image)",
+    "  Host workspace:        \(.workspace_host)",
+    "  Container workspace:   \(.workspace_container)",
+    "  Started:               \(.created_at)",
+    "  Stopped:               \(.stopped_at // "unknown")",
+    "  Exit code:             \(.exit_code // "unknown")",
+    "",
+    "The runtime is not active. This output contains the last registry state."
+  ' <<<"$record"
+fi

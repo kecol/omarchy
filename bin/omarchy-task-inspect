@@ -1,0 +1,57 @@
+#!/bin/bash
+
+# omarchy:summary=Inspect a managed coding task and its assignments
+# omarchy:args=<task> [--json]
+
+set -euo pipefail
+
+json=false
+selector=
+for argument in "$@"; do
+  if [[ $argument == "--json" ]]; then
+    json=true
+  elif [[ -z $selector ]]; then
+    selector=$argument
+  else
+    echo "Usage: omarchy task inspect <task> [--json]" >&2
+    exit 1
+  fi
+done
+[[ -n $selector ]] || { echo "Usage: omarchy task inspect <task> [--json]" >&2; exit 1; }
+
+tasks=$(omarchy-agent-state task-get "$selector")
+count=$(jq 'length' <<<"$tasks")
+if (( count == 0 )); then
+  echo "No task matches: $selector" >&2
+  exit 1
+elif (( count > 1 )); then
+  echo "More than one task matches: $selector" >&2
+  exit 1
+fi
+task_id=$(jq -r '.[0].id' <<<"$tasks")
+assignments=$(omarchy-agent-state task-assignments "$task_id")
+policy=$(omarchy-agent-policy --json)
+record=$(jq --argjson assignments "$assignments" --argjson policy "$policy" '.[0] + {assignments: $assignments, policy: $policy}' <<<"$tasks")
+
+if [[ $json == "true" ]]; then
+  jq . <<<"$record"
+else
+  jq -r '
+    "Task",
+    "  ID:          \(.id)",
+    "  Project:     \(.project_name)",
+    "  Source:      \(.project_path)",
+    "  Base commit: \(.base_commit)",
+    "  Status:      \(.status)",
+    "  Goal:        \(.goal)",
+    "",
+    "Runtime policy",
+    "  Filesystem:   workspace=\(.policy.filesystem.workspace), source=\(.policy.filesystem.source), home=\(.policy.filesystem.home)",
+    "  Network:      \(.policy.network.mode)",
+    "  Credentials:  \(.policy.credentials.mode)",
+    "  Resources:    memory=\(.policy.resources.memory), pids=\(.policy.resources.pids)\(if .policy.resources.cpus then ", cpus=" + .policy.resources.cpus else "" end)",
+    "",
+    "Assignments",
+    (if (.assignments | length) == 0 then "  None" else (.assignments[] | "  \(.id[0:12])  \(.agent)  \(.role)  \(.status)\n    \(.workspace_path)") end)
+  ' <<<"$record"
+fi

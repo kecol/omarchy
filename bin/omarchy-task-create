@@ -1,0 +1,50 @@
+#!/bin/bash
+
+# omarchy:summary=Create an isolated coding task from the current Git commit
+# omarchy:args=[--json] <goal...>
+# omarchy:examples=omarchy task create "Fix the login test"
+
+set -euo pipefail
+
+json=false
+if [[ ${1:-} == "--json" ]]; then
+  json=true
+  shift
+fi
+if (( $# == 0 )); then
+  echo "Usage: omarchy task create [--json] <goal...>" >&2
+  exit 1
+fi
+goal=$*
+
+if ! project_path=$(git rev-parse --show-toplevel 2>/dev/null); then
+  echo "Create a task from a Git repository." >&2
+  exit 1
+fi
+project_path=$(realpath -e "$project_path")
+if [[ -n $(git -C "$project_path" status --porcelain) ]]; then
+  echo "The project has uncommitted changes. Commit or store them before task creation." >&2
+  exit 1
+fi
+
+base_commit=$(git -C "$project_path" rev-parse HEAD)
+project_name=$(basename "$project_path")
+project_candidate=$(< /proc/sys/kernel/random/uuid)
+project_id=$(omarchy-agent-state project-register "$project_candidate" "$project_name" "$project_path")
+task_id=$(< /proc/sys/kernel/random/uuid)
+omarchy-agent-state task-create "$task_id" "$project_id" "$goal" "$base_commit" ready
+
+if [[ $json == "true" ]]; then
+  jq -n \
+    --arg task "$task_id" \
+    --arg project "$project_id" \
+    --arg project_name "$project_name" \
+    --arg base_commit "$base_commit" \
+    --arg goal "$goal" \
+    '{task: $task, project: $project, project_name: $project_name, base_commit: $base_commit, goal: $goal, status: "ready"}'
+else
+  printf 'Created task %s\n' "$task_id"
+  printf 'Project: %s\n' "$project_name"
+  printf 'Base:    %s\n' "$base_commit"
+  printf 'Goal:    %s\n' "$goal"
+fi

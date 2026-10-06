@@ -1,0 +1,180 @@
+#!/bin/bash
+
+# omarchy:summary=Run a configured coding agent in its rootless Podman harness
+# omarchy:args=<agent> <harness> -- <command...>
+# omarchy:hidden=true
+
+set -euo pipefail
+
+usage() {
+  echo "Usage: omarchy-agent-run-podman <agent> <harness> -- <command...>" >&2
+}
+
+if (( $# < 4 )) || [[ $3 != "--" ]]; then
+  usage
+  exit 1
+fi
+
+agent=$1
+harness=$2
+shift 3
+command=("$@")
+
+for value in "$agent" "$harness"; do
+  if [[ ! $value =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
+    echo "Invalid agent or harness name: $value" >&2
+    exit 1
+  fi
+done
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+if ! "$script_dir/omarchy-agent-container-doctor" --quick >/dev/null; then
+  echo "Agent container mode is not safe to start." >&2
+  echo "Run: omarchy agent container doctor" >&2
+  exit 1
+fi
+
+image="localhost/omarchy-harness-$harness:latest"
+if ! podman image exists "$image"; then
+  echo "Harness image is missing. Build it with: omarchy harness build $harness" >&2
+  exit 1
+fi
+
+image_harness=$(podman image inspect --format '{{ index .Labels "org.omarchy.harness" }}' "$image")
+if [[ $image_harness != "$harness" ]]; then
+  echo "Harness image label mismatch for $image: ${image_harness:-<missing>}" >&2
+  exit 1
+fi
+
+workspace=$(realpath -e "$PWD")
+workspace_hash=$(printf '%s' "$workspace" | sha256sum)
+managed=${OMARCHY_AGENT_MANAGED:-false}
+if [[ $managed == "true" ]]; then
+  for variable in OMARCHY_AGENT_PROJECT_ID OMARCHY_AGENT_TASK_ID OMARCHY_AGENT_ASSIGNMENT_ID OMARCHY_AGENT_ROLE OMARCHY_AGENT_WORKSPACE; do
+    if [[ -z ${!variable:-} ]]; then
+      echo "Managed agent launch is missing $variable." >&2
+      exit 1
+    fi
+  done
+  if [[ $workspace != "$(realpath -e "$OMARCHY_AGENT_WORKSPACE")" ]]; then
+    echo "Managed agent launch does not match its assignment workspace." >&2
+    exit 1
+  fi
+  project_id=$OMARCHY_AGENT_PROJECT_ID
+  task_id=$OMARCHY_AGENT_TASK_ID
+  assignment_id=$OMARCHY_AGENT_ASSIGNMENT_ID
+  role=$OMARCHY_AGENT_ROLE
+  project_compact=${project_id//-/}
+  assignment_compact=${assignment_id//-/}
+  container_workspace="/workspace/${project_compact:0:12}/${assignment_compact:0:12}"
+  home_volume="omarchy-agent-$agent-${assignment_compact:0:12}-home"
+else
+  project_id=${workspace_hash:0:16}
+  task_id=
+  assignment_id=
+  role=
+  container_workspace="/workspace/$project_id"
+  home_volume="omarchy-agent-$agent-home"
+fi
+
+if ! podman volume exists "$home_volume"; then
+  volume_args=(
+    --label "org.omarchy.agent=$agent"
+    --label "org.omarchy.harness=$harness"
+  )
+  if [[ $managed == "true" ]]; then
+    volume_args+=(--label "org.omarchy.assignment=$assignment_id")
+  fi
+  podman volume create "${volume_args[@]}" "$home_volume" >/dev/null
+fi
+
+instance_id=$(< /proc/sys/kernel/random/uuid)
+instance_compact=${instance_id//-/}
+container_name="omarchy-agent-$agent-${instance_compact:0:12}"
+policy=$("$script_dir/omarchy-agent-policy" --json)
+memory_limit=$(jq -r '.resources.memory' <<<"$policy")
+pids_limit=$(jq -r '.resources.pids' <<<"$policy")
+cpus_limit=$(jq -r '.resources.cpus // ""' <<<"$policy")
+
+podman_args=(
+  run
+  --rm
+  --interactive
+  --name="$container_name"
+  --label=org.omarchy.managed=agent
+  --label="org.omarchy.instance=$instance_id"
+  --label="org.omarchy.agent=$agent"
+  --label="org.omarchy.harness=$harness"
+  --label=org.omarchy.runtime=podman
+  --label="org.omarchy.project=$project_id"
+  --label="org.omarchy.workspace.target=$container_workspace"
+  --label="org.omarchy.workspace.managed=$managed"
+  --label=org.omarchy.filesystem.workspace=read-write
+  --label=org.omarchy.filesystem.source=unmounted
+  --label="org.omarchy.resources.memory=$memory_limit"
+  --label="org.omarchy.resources.pids=$pids_limit"
+  --memory="$memory_limit"
+  --pids-limit="$pids_limit"
+  --userns=keep-id
+  --cap-drop=all
+  --security-opt=no-new-privileges
+  --workdir="$container_workspace"
+  --hostname="agent-$agent"
+  --env=OMARCHY_AGENT_IN_CONTAINER=1
+  --volume="$workspace:$container_workspace"
+  --volume="$home_volume:/home/agent:U"
+  --entrypoint="${command[0]}"
+)
+
+if [[ -n $cpus_limit ]]; then
+  podman_args+=(
+    --label="org.omarchy.resources.cpus=$cpus_limit"
+    --cpus="$cpus_limit"
+  )
+fi
+
+if [[ $managed == "true" ]]; then
+  podman_args+=(
+    --label="org.omarchy.task=$task_id"
+    --label="org.omarchy.assignment=$assignment_id"
+    --label="org.omarchy.role=$role"
+  )
+fi
+
+if [[ -t 0 && -t 1 ]]; then
+  podman_args+=(--tty)
+fi
+if [[ -n ${TERM:-} ]]; then
+  podman_args+=(--env=TERM)
+fi
+if [[ -n ${COLORTERM:-} ]]; then
+  podman_args+=(--env=COLORTERM)
+fi
+
+omarchy-agent-state start \
+  "$instance_id" \
+  "$agent" \
+  "$harness" \
+  podman \
+  "$container_name" \
+  "$project_id" \
+  "$workspace" \
+  "$container_workspace" \
+  "$image" \
+  running
+
+set +e
+podman "${podman_args[@]}" "$image" "${command[@]:1}"
+exit_code=$?
+set -e
+
+if (( exit_code == 0 || exit_code == 130 || exit_code == 143 )); then
+  final_status=stopped
+else
+  final_status=failed
+fi
+omarchy-agent-state finish "$instance_id" "$final_status" "$exit_code"
+if [[ $managed == "true" ]]; then
+  omarchy-agent-state assignment-status "$assignment_id" "$final_status"
+fi
+exit "$exit_code"

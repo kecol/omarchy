@@ -1,0 +1,47 @@
+#!/bin/bash
+
+# omarchy:summary=Export an assignment workspace patch
+# omarchy:args=<assignment> [output.patch]
+# omarchy:examples=omarchy task patch 019abc | omarchy task patch 019abc /tmp/assignment.patch
+
+set -euo pipefail
+
+if (( $# < 1 || $# > 2 )); then
+  echo "Usage: omarchy task patch <assignment> [output.patch]" >&2
+  exit 1
+fi
+selector=$1
+output_path=${2:-}
+
+matches=$(omarchy-agent-state assignment-get "$selector")
+match_count=$(jq 'length' <<<"$matches")
+if (( match_count == 0 )); then
+  echo "No assignment matches: $selector" >&2
+  exit 1
+elif (( match_count > 1 )); then
+  echo "More than one assignment matches: $selector" >&2
+  exit 1
+fi
+
+workspace=$(jq -r '.[0].workspace_path' <<<"$matches")
+if [[ ! -d $workspace/.git ]]; then
+  echo "Assignment workspace is missing or is not a Git repository: $workspace" >&2
+  exit 1
+fi
+
+index_file=$(mktemp)
+trap 'rm -f "$index_file"' EXIT
+cp "$workspace/.git/index" "$index_file"
+
+mapfile -d '' -t untracked < <(git -C "$workspace" ls-files --others --exclude-standard -z)
+if (( ${#untracked[@]} > 0 )); then
+  GIT_INDEX_FILE="$index_file" git -C "$workspace" add --intent-to-add -- "${untracked[@]}"
+fi
+
+if [[ -n $output_path ]]; then
+  mkdir -p "$(dirname -- "$output_path")"
+  GIT_INDEX_FILE="$index_file" git -C "$workspace" diff --binary HEAD >"$output_path"
+  printf 'Wrote patch: %s\n' "$output_path"
+else
+  GIT_INDEX_FILE="$index_file" git -C "$workspace" diff --binary HEAD
+fi

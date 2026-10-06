@@ -1,0 +1,61 @@
+#!/bin/bash
+
+# omarchy:summary=Check that rootless Podman can run an isolated coding-agent workspace
+# omarchy:args=[image]
+# omarchy:examples=omarchy agent container check | omarchy agent container check docker.io/library/archlinux:base
+
+set -euo pipefail
+
+DEFAULT_IMAGE="docker.io/library/archlinux:base"
+
+if (( $# > 1 )) || [[ ${1:-} == "-h" || ${1:-} == "--help" ]]; then
+  cat <<USAGE
+Usage: omarchy agent container check [image]
+
+Runs a disposable container against the current directory with the isolation
+settings used for coding agents. The image defaults to:
+  $DEFAULT_IMAGE
+
+Set OMARCHY_AGENT_CONTAINER_IMAGE to change the default without passing an
+argument.
+USAGE
+  exit 0
+fi
+
+if omarchy-cmd-missing podman; then
+  echo "Podman is not installed. Install it with: omarchy pkg add podman" >&2
+  exit 1
+fi
+
+if ! rootless=$(podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null); then
+  echo "Podman is installed but is not responding." >&2
+  exit 1
+fi
+
+if [[ $rootless != "true" ]]; then
+  echo "Agent containers require rootless Podman." >&2
+  exit 1
+fi
+
+image=${1:-${OMARCHY_AGENT_CONTAINER_IMAGE:-$DEFAULT_IMAGE}}
+workspace=$(realpath -e "$PWD")
+
+echo "Checking agent container isolation with $image"
+
+podman run --rm --pull=missing \
+  --userns=keep-id \
+  --cap-drop=all \
+  --security-opt=no-new-privileges \
+  --network=none \
+  --workdir=/workspace \
+  --volume "$workspace:/workspace" \
+  "$image" \
+  bash -lc '
+    set -euo pipefail
+    (( $(id -u) != 0 ))
+    [[ $PWD == "/workspace" ]]
+    [[ -r /workspace && -w /workspace ]]
+    echo "container uid=$(id -u) gid=$(id -g)"
+  '
+
+echo "Agent container check passed: $workspace is available at /workspace"
