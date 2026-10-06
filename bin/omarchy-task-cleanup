@@ -1,0 +1,77 @@
+#!/bin/bash
+
+# omarchy:summary=Remove a stopped assignment workspace
+# omarchy:args=<assignment> [--force]
+# omarchy:examples=omarchy task cleanup 019abc | omarchy task cleanup 019abc --force
+
+set -euo pipefail
+
+force=false
+selector=
+for argument in "$@"; do
+  if [[ $argument == "--force" ]]; then
+    force=true
+  elif [[ -z $selector ]]; then
+    selector=$argument
+  else
+    echo "Usage: omarchy task cleanup <assignment> [--force]" >&2
+    exit 1
+  fi
+done
+if [[ -z $selector ]]; then
+  echo "Usage: omarchy task cleanup <assignment> [--force]" >&2
+  exit 1
+fi
+
+matches=$(omarchy-agent-state assignment-get "$selector")
+match_count=$(jq 'length' <<<"$matches")
+if (( match_count == 0 )); then
+  echo "No assignment matches: $selector" >&2
+  exit 1
+elif (( match_count > 1 )); then
+  echo "More than one assignment matches: $selector" >&2
+  exit 1
+fi
+
+assignment_id=$(jq -r '.[0].id' <<<"$matches")
+task_id=$(jq -r '.[0].task_id' <<<"$matches")
+project_id=$(jq -r '.[0].project_id' <<<"$matches")
+workspace=$(jq -r '.[0].workspace_path' <<<"$matches")
+expected_root="${XDG_DATA_HOME:-$HOME/.local/share}/omarchy/agent-workspaces/$project_id/$task_id/$assignment_id"
+
+active=$(omarchy-agent-runtime-snapshot | jq --arg assignment "$assignment_id" '[.[] | select(.assignment_id == $assignment)] | length')
+if (( active > 0 )); then
+  echo "Assignment has an active instance and cannot be cleaned up: $assignment_id" >&2
+  exit 1
+fi
+
+if [[ ! -e $expected_root ]]; then
+  omarchy-agent-state assignment-status "$assignment_id" cleaned
+  printf 'Assignment workspace already removed: %s\n' "$assignment_id"
+  exit 0
+fi
+
+if [[ ! -d $workspace ]] || [[ $(realpath -e "$workspace") != "$(realpath -e "$expected_root")/repo" ]]; then
+  echo "Assignment workspace is outside its managed location: $workspace" >&2
+  exit 1
+fi
+
+reconcile_status=unknown
+if reconcile_json=$(omarchy-task-reconcile "$assignment_id" --json 2>/dev/null); then
+  reconcile_status=$(jq -r '.status' <<<"$reconcile_json")
+fi
+
+case "$reconcile_status" in
+  applied|empty)
+    ;;
+  *)
+    if [[ $force != "true" ]]; then
+      echo "Assignment source state is $reconcile_status. Use --force to remove its workspace anyway." >&2
+      exit 1
+    fi
+    ;;
+esac
+
+rm -rf -- "$expected_root"
+omarchy-agent-state assignment-status "$assignment_id" cleaned
+printf 'Cleaned assignment workspace: %s\n' "$assignment_id"

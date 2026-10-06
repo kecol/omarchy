@@ -164,6 +164,12 @@ grep -Fxq 'new.txt' "$test_tmp/diff-names" || fail "task diff names untracked fi
 grep -Fq 'file.txt' "$test_tmp/diff-stat" || fail "task diff stat reports modified files"
 pass "task diff reports assignment workspace changes"
 
+if "$ROOT/bin/omarchy-task-cleanup" "$assignment_id" >"$test_tmp/cleanup-unapplied-output" 2>&1; then
+  fail "task cleanup rejects unapplied assignment workspaces without force"
+fi
+grep -Fq 'Use --force' "$test_tmp/cleanup-unapplied-output" || fail "task cleanup explains force for unapplied changes"
+pass "task cleanup protects unapplied assignment changes"
+
 reconcile_json=$("$ROOT/bin/omarchy-task-reconcile" "$assignment_id" --json)
 [[ $(jq -r '.status' <<<"$reconcile_json") == "ready-to-apply" ]] || fail "task reconcile detects cleanly applicable assignment changes" "$reconcile_json"
 pass "task reconcile reports unapplied assignment changes"
@@ -207,8 +213,17 @@ grep -Fq 'Use --3way' "$test_tmp/apply-old-base-output" || fail "task apply sugg
 [[ $(<"$source_repo/other.txt") == "unrelated" ]] || fail "task apply --3way preserves unrelated current changes"
 pass "task apply can apply assignment changes onto a newer clean checkout"
 
+"$ROOT/bin/omarchy-task-cleanup" "$assignment_id" >"$test_tmp/cleanup-output"
+grep -Fq "Cleaned assignment workspace: $assignment_id" "$test_tmp/cleanup-output" || fail "task cleanup reports cleaned assignments"
+[[ ! -e $workspace ]] || fail "task cleanup removes the assignment workspace"
+[[ $(omarchy-agent-state assignment-get "$assignment_id" | jq -r '.[0].status') == "cleaned" ]] || fail "task cleanup records cleaned assignment status"
+pass "task cleanup removes applied assignment workspaces"
+
 git -C "$source_repo" reset --hard --quiet HEAD
 git -C "$source_repo" clean -fd --quiet
+
+workspace=$(jq -r '.workspace' <<<"$second_json")
+assignment_id=$(jq -r '.assignment' <<<"$second_json")
 
 jq -n --arg assignment "$assignment_id" '[{assignment_id: $assignment, runtime: "podman", container: "omarchy-agent-pi-test", status: "running"}]' >"$runtime_snapshot"
 "$ROOT/bin/omarchy-task-stop" "$assignment_id" >"$test_tmp/stop-output"
