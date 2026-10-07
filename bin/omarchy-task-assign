@@ -92,18 +92,23 @@ fi
 if [[ $json == "true" ]]; then
   jq -n \
     --arg assignment "$assignment_id" \
+    --arg selector "${assignment_id:0:8}" \
     --arg task "$task_id" \
+    --arg task_selector "${task_id:0:8}" \
     --arg project "$project_id" \
     --arg project_name "$project_name" \
     --arg agent "$agent" \
     --arg role "$role" \
     --arg workspace "$workspace" \
     --arg branch "$branch_name" \
-    '{assignment: $assignment, task: $task, project: $project, project_name: $project_name, agent: $agent, role: $role, workspace: $workspace, branch: $branch, status: "ready"}'
+    '{assignment: $assignment, selector: $selector, task: $task, task_selector: $task_selector, project: $project, project_name: $project_name, agent: $agent, role: $role, workspace: $workspace, branch: $branch, status: "ready"}'
 else
   printf 'Created assignment %s\n' "$assignment_id"
+  printf 'Selector:  %s\n' "${assignment_id:0:8}"
+  printf 'Task:      %s\n' "${task_id:0:8}"
   printf 'Agent:     %s\n' "$agent"
   printf 'Role:      %s\n' "$role"
   printf 'Workspace: %s\n' "$workspace"
   printf 'Branch:    %s\n' "$branch_name"
+  printf '\nNext:\n  omarchy task start %s\n' "${assignment_id:0:8}"
 fi

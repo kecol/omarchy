@@ -98,6 +98,7 @@ task_id=$(jq -r '.task' <<<"$create_json")
 project_id=$(jq -r '.project' <<<"$create_json")
 [[ $(jq -r '.base_commit' <<<"$create_json") == "$base_commit" ]] || fail "task creation records the immutable base commit"
 [[ $(jq -r '.goal' <<<"$create_json") == "Implement isolated workspaces" ]] || fail "task creation records its goal"
+[[ $(jq -r '.selector' <<<"$create_json") == "${task_id:0:8}" ]] || fail "task creation reports a short selector"
 pass "task creation records a clean project and immutable base"
 
 printf 'dirty\n' >>"$source_repo/file.txt"
@@ -112,6 +113,7 @@ assignment_json=$("$ROOT/bin/omarchy-task-assign" --json "${task_id:0:12}" pi co
 assignment_id=$(jq -r '.assignment' <<<"$assignment_json")
 workspace=$(jq -r '.workspace' <<<"$assignment_json")
 branch=$(jq -r '.branch' <<<"$assignment_json")
+[[ $(jq -r '.selector' <<<"$assignment_json") == "${assignment_id:0:8}" ]] || fail "task assignment reports a short selector"
 [[ -d $workspace/.git ]] || fail "assignment workspace has independent Git metadata"
 [[ $(git -C "$workspace" rev-parse HEAD) == "$base_commit" ]] || fail "assignment workspace starts at the task base"
 [[ $(git -C "$workspace" branch --show-current) == "$branch" ]] || fail "assignment workspace uses its private branch"
@@ -134,6 +136,13 @@ task_json=$("$ROOT/bin/omarchy-task-inspect" "$task_id" --json)
 [[ $(jq -r '.policy.resources.memory' <<<"$task_json") == "4g" ]] || fail "task inspection exposes Podman resource limits"
 list_json=$("$ROOT/bin/omarchy-task-list" --json)
 [[ $(jq -r '.[0].assignment_count' <<<"$list_json") == "2" ]] || fail "task list counts assignments"
+[[ $(jq -r '.[0].project_path' <<<"$list_json") == "$source_repo" ]] || fail "task list includes project paths for contextual completion"
+source "$ROOT/default/bash/completions"
+PATH="$mock_bin:$ROOT/bin:/usr/bin"
+COMP_WORDS=(omarchy task assign "")
+COMP_CWORD=3
+_omarchy_complete
+[[ ${COMPREPLY[*]} == "$task_id" ]] || fail "task completion prefers tasks from the current project" "${COMPREPLY[*]}"
 pass "task inventory reports private assignments"
 
 "$ROOT/bin/omarchy-task-start" "${assignment_id:0:12}" --inline --continue

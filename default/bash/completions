@@ -41,6 +41,12 @@ _omarchy_complete() {
   fi
 
   if [[ ${COMP_WORDS[1]:-} == "task" ]] && (( COMP_CWORD == 3 )); then
+    local current_project_path=""
+    if command -v git >/dev/null; then
+      current_project_path=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)
+      [[ -n $current_project_path ]] && current_project_path=$(realpath -e "$current_project_path" 2>/dev/null || printf '%s' "$current_project_path")
+    fi
+
     case "${COMP_WORDS[2]:-}" in
       archive|assign|inspect)
         if command -v omarchy-agent-state >/dev/null && command -v jq >/dev/null; then
@@ -48,7 +54,13 @@ _omarchy_complete() {
             [[ -n $value && -z ${seen[$value]:-} ]] || continue
             seen[$value]=1
             candidates+=("$value")
-          done < <(omarchy-agent-state task-list 2>/dev/null | jq -r '.[].id' 2>/dev/null)
+          done < <(omarchy-agent-state task-list 2>/dev/null | jq -r --arg project_path "$current_project_path" '
+            if $project_path != "" and any(.[]; (.project_path // "") == $project_path) then
+              .[] | select((.project_path // "") == $project_path) | .id
+            else
+              .[] | .id
+            end
+          ' 2>/dev/null)
         fi
         ;;
       apply|cleanup|diff|log|patch|preflight|reconcile|start|status|stop)
@@ -57,7 +69,13 @@ _omarchy_complete() {
             [[ -n $value && -z ${seen[$value]:-} ]] || continue
             seen[$value]=1
             candidates+=("$value")
-          done < <(omarchy-agent-state assignment-list 2>/dev/null | jq -r '.[].id' 2>/dev/null)
+          done < <(omarchy-agent-state assignment-list 2>/dev/null | jq -r --arg project_path "$current_project_path" '
+            if $project_path != "" and any(.[]; (.project_path // "") == $project_path) then
+              .[] | select((.project_path // "") == $project_path) | .id
+            else
+              .[] | .id
+            end
+          ' 2>/dev/null)
         fi
         ;;
     esac
