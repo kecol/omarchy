@@ -778,6 +778,9 @@ assert_bypass() {
 }
 
 assert_launch pi pi "Review this project"
+printf '%s\n' pi >"$agent_file"
+OMARCHY_AGENT_MANAGED=true omarchy-agent-prompt "Review this" project
+assert_launched pi "keeps managed task prompts in Pi system context" pi --append-system-prompt "Review this project" "Start the managed task now. The task details and safety rules are in your system instructions."
 assert_launch omp omp --auto-approve -- "Review this project"
 assert_launch opencode opencode --auto --prompt "Review this project"
 assert_launch ori ori code --interactive --prompt "Review this project"

@@ -144,7 +144,13 @@ ori)
 pi)
   command=(pi)
   [[ -n $session_action ]] && command+=("--$session_action")
-  [[ -n ${prompt:-} ]] && command+=("$prompt")
+  if [[ -n ${prompt:-} ]]; then
+    if [[ ${OMARCHY_AGENT_MANAGED:-false} == "true" ]]; then
+      command+=(--append-system-prompt "$prompt" "Start the managed task now. The task details and safety rules are in your system instructions.")
+    else
+      command+=("$prompt")
+    fi
+  fi
   ;;
 *)
   echo "Unsupported default agent: $agent" >&2
