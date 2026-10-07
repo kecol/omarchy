@@ -37,14 +37,17 @@ omarchy-agent-state task-create "$task_id" "$project_id" "$goal" "$base_commit" 
 if [[ $json == "true" ]]; then
   jq -n \
     --arg task "$task_id" \
+    --arg selector "${task_id:0:8}" \
     --arg project "$project_id" \
     --arg project_name "$project_name" \
     --arg base_commit "$base_commit" \
     --arg goal "$goal" \
-    '{task: $task, project: $project, project_name: $project_name, base_commit: $base_commit, goal: $goal, status: "ready"}'
+    '{task: $task, selector: $selector, project: $project, project_name: $project_name, base_commit: $base_commit, goal: $goal, status: "ready"}'
 else
   printf 'Created task %s\n' "$task_id"
-  printf 'Project: %s\n' "$project_name"
-  printf 'Base:    %s\n' "$base_commit"
-  printf 'Goal:    %s\n' "$goal"
+  printf 'Selector: %s\n' "${task_id:0:8}"
+  printf 'Project:  %s\n' "$project_name"
+  printf 'Base:     %s\n' "$base_commit"
+  printf 'Goal:     %s\n' "$goal"
+  printf '\nNext:\n  omarchy task assign %s pi coder\n' "${task_id:0:8}"
 fi
