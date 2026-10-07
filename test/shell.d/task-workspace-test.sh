@@ -134,6 +134,13 @@ task_json=$("$ROOT/bin/omarchy-task-inspect" "$task_id" --json)
 [[ $(jq -r '.policy.resources.memory' <<<"$task_json") == "4g" ]] || fail "task inspection exposes Podman resource limits"
 list_json=$("$ROOT/bin/omarchy-task-list" --json)
 [[ $(jq -r '.[0].assignment_count' <<<"$list_json") == "2" ]] || fail "task list counts assignments"
+[[ $(jq -r '.[0].project_path' <<<"$list_json") == "$source_repo" ]] || fail "task list includes project paths for contextual completion"
+source "$ROOT/default/bash/completions"
+PATH="$mock_bin:$ROOT/bin:/usr/bin"
+COMP_WORDS=(omarchy task assign "")
+COMP_CWORD=3
+_omarchy_complete
+[[ ${COMPREPLY[*]} == "$task_id" ]] || fail "task completion prefers tasks from the current project" "${COMPREPLY[*]}"
 pass "task inventory reports private assignments"
 
 "$ROOT/bin/omarchy-task-start" "${assignment_id:0:12}" --inline --continue

@@ -175,7 +175,7 @@ SQL
   task-list)
     (( $# == 0 )) || { echo "Usage: omarchy-agent-state task-list" >&2; exit 1; }
     initialize
-    sqlite_json 'SELECT tasks.*, projects.name AS project_name, (SELECT count(*) FROM assignments WHERE assignments.task_id = tasks.id) AS assignment_count FROM tasks JOIN projects ON projects.id = tasks.project_id ORDER BY tasks.created_at DESC;'
+    sqlite_json 'SELECT tasks.*, projects.name AS project_name, projects.source_path AS project_path, (SELECT count(*) FROM assignments WHERE assignments.task_id = tasks.id) AS assignment_count FROM tasks JOIN projects ON projects.id = tasks.project_id ORDER BY tasks.created_at DESC;'
     ;;
   task-status)
     (( $# == 2 )) || { echo "Usage: omarchy-agent-state task-status <id> <status>" >&2; exit 1; }
