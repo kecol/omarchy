@@ -1,13 +1,14 @@
 #!/bin/bash
 
 # omarchy:summary=Launch the default coding agent in a terminal
-# omarchy:args=[--inline] [--pick]
+# omarchy:args=[--inline] [--pick] [--host|--container]
 # omarchy:examples=omarchy agent | omarchy agent --inline
 
 inline=false
 pick=false
 session_action=
 selected_agent=
+execution_mode_override=
 
 # Flags only. A bare prompt would shadow the subcommands under this group, so
 # prompts go through omarchy-agent-prompt, which passes one here as --prompt.
@@ -19,6 +20,14 @@ while (($#)); do
       ;;
     --pick)
       pick=true
+      shift
+      ;;
+    --host)
+      execution_mode_override=host
+      shift
+      ;;
+    --container)
+      execution_mode_override=container
       shift
       ;;
     --prompt)
@@ -60,7 +69,7 @@ if [[ -z $agent ]]; then
   exit 1
 fi
 
-execution_mode=$(omarchy-agent-mode)
+execution_mode=${execution_mode_override:-$(omarchy-agent-mode)}
 if [[ $execution_mode == "host" ]] && omarchy-cmd-missing "$agent"; then
   echo "$agent is not installed. Choose an installed agent with: omarchy default agent <name>" >&2
   exit 1
