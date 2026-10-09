@@ -74,6 +74,7 @@ mapfile -d '' -t launch_args <"$launch_log"
 [[ ${launch_args[*]} == "--print print pwd" ]] ||
   fail "agent prompt can run Pi one-shot without opening a TUI" "${launch_args[*]}"
 
+
 if "$ROOT/bin/omarchy-agent-prompt" --oneshot "unsupported" >"$test_tmp/oneshot-unsupported" 2>&1; then
   fail "one-shot rejects unsupported agents"
 fi

@@ -99,7 +99,6 @@ cpus_limit=$(jq -r '.resources.cpus // ""' <<<"$policy")
 podman_args=(
   run
   --rm
-  --interactive
   --name="$container_name"
   --label=org.omarchy.managed=agent
   --label="org.omarchy.instance=$instance_id"
@@ -150,8 +149,11 @@ if [[ $managed == "true" ]]; then
   )
 fi
 
-if [[ -t 0 && -t 1 ]]; then
-  podman_args+=(--tty)
+if [[ ${OMARCHY_AGENT_ONESHOT:-false} != "true" ]]; then
+  podman_args+=(--interactive)
+  if [[ -t 0 && -t 1 ]]; then
+    podman_args+=(--tty)
+  fi
 fi
 if [[ -n ${TERM:-} ]]; then
   podman_args+=(--env=TERM)

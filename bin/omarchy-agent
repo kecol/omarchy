@@ -226,6 +226,9 @@ fi
 
 if [[ $execution_mode == "container" ]]; then
   command=("$script_dir/omarchy-agent-exec" --container "$agent" -- "${command[@]}")
+  if [[ $oneshot == "true" ]]; then
+    command=(env OMARCHY_AGENT_ONESHOT=1 "${command[@]}")
+  fi
 fi
 
 if [[ $inline == "true" ]]; then
