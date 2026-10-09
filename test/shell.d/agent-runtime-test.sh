@@ -173,17 +173,26 @@ for expected in \
   "--label=org.omarchy.workspace.target=$container_workspace" \
   "--label=org.omarchy.filesystem.workspace=read-write" \
   "--label=org.omarchy.filesystem.source=unmounted" \
+  "--label=org.omarchy.filesystem.home=isolated-persistent-volume" \
+  "--label=org.omarchy.filesystem.root=read-only" \
+  "--label=org.omarchy.filesystem.tmp=ephemeral-tmpfs" \
   "--label=org.omarchy.resources.memory=4g" \
   "--label=org.omarchy.resources.pids=1024" \
   "--memory=4g" \
   "--pids-limit=1024" \
   "--cap-drop=all" \
   "--security-opt=no-new-privileges" \
+  "--read-only" \
+  "--tmpfs=/tmp:rw,nosuid,nodev,size=1g" \
+  "--tmpfs=/run:rw,nosuid,nodev,size=64m" \
   "--workdir=$container_workspace" \
   "--hostname=agent-pi" \
   "--env=OMARCHY_AGENT_IN_CONTAINER=1" \
-  "--volume=$workspace:$container_workspace" \
-  "--volume=omarchy-agent-pi-home:/home/agent:U" \
+  "--env=HOME=/home/agent" \
+  "--env=USER=agent" \
+  "--env=LOGNAME=agent" \
+  "--volume=$workspace:$container_workspace:rw,rprivate" \
+  "--volume=omarchy-agent-pi-home:/home/agent:U,rw" \
   "--entrypoint=pi" \
   "localhost/omarchy-harness-pi:latest" \
   "--version"; do
@@ -222,8 +231,8 @@ for expected in \
   "--label=org.omarchy.assignment=$managed_assignment" \
   "--label=org.omarchy.role=coder" \
   "--workdir=/workspace/111111112222/333333334444" \
-  "--volume=$workspace:/workspace/111111112222/333333334444" \
-  "--volume=omarchy-agent-pi-333333334444-home:/home/agent:U"; do
+  "--volume=$workspace:/workspace/111111112222/333333334444:rw,rprivate" \
+  "--volume=omarchy-agent-pi-333333334444-home:/home/agent:U,rw"; do
   grep -Fxq -- "$expected" <<<"$run_joined" || fail "managed Podman launch includes $expected" "$run_joined"
 done
 pass "Podman adapter gives managed assignments task-scoped state and identity"
@@ -275,7 +284,8 @@ mapfile -d '' -t launch_args <"$launch_log"
 launch_joined=$(printf '%s\n' "${launch_args[@]}")
 for expected in \
   "--app-id=org.omarchy.agent" \
-  "omarchy-agent-exec" \
+  "$ROOT/bin/omarchy-agent-exec" \
+  "--container" \
   "pi" \
   "--"; do
   grep -Fxq -- "$expected" <<<"$launch_joined" || fail "agent launcher routes container mode with $expected" "$launch_joined"

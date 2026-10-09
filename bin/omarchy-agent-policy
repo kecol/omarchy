@@ -15,7 +15,7 @@ elif (( $# != 0 )); then
 fi
 
 config=${OMARCHY_AGENT_POLICY:-$HOME/.config/omarchy/agents/policy.json}
-default_policy=$(jq -n '{filesystem: {workspace: "read-write", source: "unmounted", home: "isolated persistent agent volume"}, network: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, credentials: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, resources: {mode: "podman", memory: "4g", pids: "1024", cpus: null}}')
+default_policy=$(jq -n '{filesystem: {workspace: "read-write", source: "unmounted", home: "isolated persistent agent volume", root: "read-only", tmp: "ephemeral tmpfs"}, network: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, credentials: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, resources: {mode: "podman", memory: "4g", pids: "1024", cpus: null}}')
 
 if [[ -f $config ]]; then
   if ! jq -e 'type == "object"' "$config" >/dev/null; then
@@ -43,6 +43,8 @@ if ! jq -e '
   .filesystem.workspace == "read-write"
   and .filesystem.source == "unmounted"
   and (.filesystem.home | type == "string" and length > 0)
+  and .filesystem.root == "read-only"
+  and .filesystem.tmp == "ephemeral tmpfs"
   and (.network.mode | type == "string" and length > 0)
   and (.credentials.mode | type == "string" and length > 0)
   and .resources.mode == "podman"
@@ -60,7 +62,7 @@ else
   jq -r --arg config "$config" '
     "Agent runtime policy",
     "  Config:       " + $config,
-    "  Filesystem:   workspace=\(.filesystem.workspace), source=\(.filesystem.source), home=\(.filesystem.home)",
+    "  Filesystem:   workspace=\(.filesystem.workspace), source=\(.filesystem.source), home=\(.filesystem.home), root=\(.filesystem.root), tmp=\(.filesystem.tmp)",
     "  Network:      \(.network.mode)",
     "  Credentials:  \(.credentials.mode)",
     "  Resources:    memory=\(.resources.memory), pids=\(.resources.pids)\(if .resources.cpus then ", cpus=" + .resources.cpus else "" end)"
