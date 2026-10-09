@@ -261,6 +261,18 @@ policy_json=$(env HOME="$test_home" PATH="$mock_bin:$ROOT/bin:/usr/bin" "$ROOT/b
 rm -f "$test_home/.config/omarchy/agents/policy.json"
 pass "Podman adapter reads configurable resource policy"
 
+(
+  cd "$workspace"
+  env "${common_env[@]}" PATH="$mock_bin:$ROOT/bin:/usr/bin" OMARCHY_AGENT_ONESHOT=true \
+    "$ROOT/bin/omarchy-agent-run-podman" pi pi -- pi --print "2+6"
+)
+mapfile -d '' -t run_args <"$podman_run_log"
+run_joined=$(printf '%s\n' "${run_args[@]}")
+! grep -Fxq -- "--interactive" <<<"$run_joined" || fail "one-shot Podman launch does not keep stdin open" "$run_joined"
+! grep -Fxq -- "--tty" <<<"$run_joined" || fail "one-shot Podman launch does not allocate a TTY" "$run_joined"
+grep -Fxq -- "--print" <<<"$run_joined" || fail "one-shot Podman launch preserves the agent print flag" "$run_joined"
+pass "Podman adapter runs one-shot agents without interactive stdin"
+
 if (
   cd "$workspace"
   env "${common_env[@]}" PATH="$mock_bin:/usr/bin" OMARCHY_TEST_IMAGE_EXISTS=false \

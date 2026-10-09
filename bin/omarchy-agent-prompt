@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # omarchy:summary=Launch the default coding agent with a prompt
-# omarchy:args=[--inline] [--host|--container] <prompt...>
-# omarchy:examples=omarchy agent prompt "Review this project" | omarchy agent prompt --container "Review this project"
+# omarchy:args=[--inline|--oneshot] [--host|--container] <prompt...>
+# omarchy:examples=omarchy agent prompt "Review this project" | omarchy agent prompt --container "Review this project" | omarchy agent prompt --oneshot "Print the current directory"
 
 # Prompts live here rather than on `omarchy agent`, where a bare prompt would
 # shadow the subcommands under that group.
@@ -13,7 +13,7 @@ agent_args=()
 prompt=()
 while (($#)); do
   case "$1" in
-    --inline | --host | --container)
+    --inline | --oneshot | --host | --container)
       agent_args+=("$1")
       shift
       ;;
@@ -30,7 +30,7 @@ while (($#)); do
 done
 
 if ((${#prompt[@]} == 0)); then
-  echo "Usage: omarchy agent prompt [--inline] [--host|--container] <prompt...>" >&2
+  echo "Usage: omarchy agent prompt [--inline|--oneshot] [--host|--container] <prompt...>" >&2
   exit 1
 fi
 

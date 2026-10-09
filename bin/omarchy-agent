@@ -8,6 +8,7 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
 inline=false
 pick=false
+oneshot=false
 session_action=
 selected_agent=
 execution_mode_override=
@@ -22,6 +23,11 @@ while (($#)); do
       ;;
     --pick)
       pick=true
+      shift
+      ;;
+    --oneshot)
+      oneshot=true
+      inline=true
       shift
       ;;
     --host)
@@ -99,6 +105,7 @@ crush)
   else
     command=(crush --yolo)
   fi
+  [[ $oneshot == "true" && -n ${prompt:-} ]] && oneshot_supported=true
   ;;
 claude)
   command=(claude --permission-mode auto)
@@ -147,13 +154,22 @@ omp)
   ;;
 ori)
   # Ori is a harness launcher, and `ori code` is the agent it runs itself.
-  # A prompt alone means one headless turn there, printed after the turn ends,
-  # so --interactive is what seeds the session with it and keeps the window.
-  command=(ori code)
-  [[ -n ${prompt:-} ]] && command+=(--interactive --prompt "$prompt")
+  if [[ $oneshot == "true" && -n ${prompt:-} ]]; then
+    command=(ori code --prompt "$prompt")
+    oneshot_supported=true
+  else
+    # A prompt alone means one headless turn there, printed after the turn ends,
+    # so --interactive is what seeds the session with it and keeps the window.
+    command=(ori code)
+    [[ -n ${prompt:-} ]] && command+=(--interactive --prompt "$prompt")
+  fi
   ;;
 pi)
   command=(pi)
+  if [[ $oneshot == "true" ]]; then
+    command+=(--print)
+    oneshot_supported=true
+  fi
   [[ -n $session_action ]] && command+=("--$session_action")
   if [[ -n ${prompt:-} ]]; then
     if [[ ${OMARCHY_AGENT_MANAGED:-false} == "true" ]]; then
@@ -172,6 +188,17 @@ esac
 if [[ -n $session_action && $agent != "pi" ]]; then
   echo "Session resume commands are currently supported only for Pi." >&2
   exit 1
+fi
+
+if [[ $oneshot == "true" ]]; then
+  if [[ -z ${prompt:-} ]]; then
+    echo "One-shot agent runs need a prompt: omarchy agent prompt --oneshot <prompt...>" >&2
+    exit 1
+  fi
+  if [[ ${oneshot_supported:-false} != "true" ]]; then
+    echo "One-shot prompts are not supported for $agent yet." >&2
+    exit 1
+  fi
 fi
 
 # A new session uses the current selection rather than its parent's account
@@ -199,6 +226,9 @@ fi
 
 if [[ $execution_mode == "container" ]]; then
   command=("$script_dir/omarchy-agent-exec" --container "$agent" -- "${command[@]}")
+  if [[ $oneshot == "true" ]]; then
+    command=(env OMARCHY_AGENT_ONESHOT=1 "${command[@]}")
+  fi
 fi
 
 if [[ $inline == "true" ]]; then
