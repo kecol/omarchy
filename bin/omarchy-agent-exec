@@ -10,6 +10,14 @@ usage() {
   echo "Usage: omarchy-agent-exec <agent> -- <command...>" >&2
 }
 
+execution_mode_override=
+case "${1:-}" in
+  --host | --container)
+    execution_mode_override=${1#--}
+    shift
+    ;;
+esac
+
 if (( $# < 3 )) || [[ $2 != "--" ]]; then
   usage
   exit 1
@@ -24,7 +32,7 @@ if [[ ! $agent =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
   exit 1
 fi
 
-mode=$(omarchy-agent-mode)
+mode=${execution_mode_override:-$(omarchy-agent-mode)}
 if [[ $mode == "host" ]]; then
   exec "${command[@]}"
 fi

@@ -4,6 +4,8 @@
 # omarchy:args=[--inline] [--pick] [--host|--container]
 # omarchy:examples=omarchy agent | omarchy agent --inline
 
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+
 inline=false
 pick=false
 session_action=
@@ -196,7 +198,7 @@ if [[ -n $home_env ]]; then
 fi
 
 if [[ $execution_mode == "container" ]]; then
-  command=(omarchy-agent-exec "$agent" -- "${command[@]}")
+  command=("$script_dir/omarchy-agent-exec" --container "$agent" -- "${command[@]}")
 fi
 
 if [[ $inline == "true" ]]; then

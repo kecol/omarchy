@@ -111,6 +111,9 @@ podman_args=(
   --label="org.omarchy.workspace.managed=$managed"
   --label=org.omarchy.filesystem.workspace=read-write
   --label=org.omarchy.filesystem.source=unmounted
+  --label=org.omarchy.filesystem.home=isolated-persistent-volume
+  --label=org.omarchy.filesystem.root=read-only
+  --label=org.omarchy.filesystem.tmp=ephemeral-tmpfs
   --label="org.omarchy.resources.memory=$memory_limit"
   --label="org.omarchy.resources.pids=$pids_limit"
   --memory="$memory_limit"
@@ -118,11 +121,17 @@ podman_args=(
   --userns=keep-id
   --cap-drop=all
   --security-opt=no-new-privileges
+  --read-only
+  --tmpfs=/tmp:rw,nosuid,nodev,size=1g
+  --tmpfs=/run:rw,nosuid,nodev,size=64m
   --workdir="$container_workspace"
   --hostname="agent-$agent"
   --env=OMARCHY_AGENT_IN_CONTAINER=1
-  --volume="$workspace:$container_workspace"
-  --volume="$home_volume:/home/agent:U"
+  --env=HOME=/home/agent
+  --env=USER=agent
+  --env=LOGNAME=agent
+  --volume="$workspace:$container_workspace:rw,rprivate"
+  --volume="$home_volume:/home/agent:U,rw"
   --entrypoint="${command[0]}"
 )
 

@@ -46,12 +46,22 @@ mapfile -d '' -t launch_args <"$launch_log"
 
 "$ROOT/bin/omarchy-agent" --container
 mapfile -d '' -t launch_args <"$launch_log"
-[[ ${launch_args[*]} == "--app-id=org.omarchy.agent omarchy-agent-exec opencode -- opencode --auto" ]] ||
+[[ ${launch_args[*]} == "--app-id=org.omarchy.agent $ROOT/bin/omarchy-agent-exec --container opencode -- opencode --auto" ]] ||
   fail "agent launcher can force a container launch" "${launch_args[*]}"
 
 OMARCHY_TEST_AGENT_MODE=container "$ROOT/bin/omarchy-agent" --host
 mapfile -d '' -t launch_args <"$launch_log"
 [[ ${launch_args[*]} == "--app-id=org.omarchy.agent opencode --auto" ]] ||
   fail "agent launcher can force a host launch" "${launch_args[*]}"
+
+"$ROOT/bin/omarchy-agent-prompt" --container "review this"
+mapfile -d '' -t launch_args <"$launch_log"
+[[ ${launch_args[*]} == "--app-id=org.omarchy.agent $ROOT/bin/omarchy-agent-exec --container opencode -- opencode --auto --prompt review this" ]] ||
+  fail "agent prompt can force a container launch" "${launch_args[*]}"
+
+OMARCHY_TEST_AGENT_MODE=container "$ROOT/bin/omarchy-agent-prompt" --host "review this"
+mapfile -d '' -t launch_args <"$launch_log"
+[[ ${launch_args[*]} == "--app-id=org.omarchy.agent opencode --auto --prompt review this" ]] ||
+  fail "agent prompt can force a host launch" "${launch_args[*]}"
 
 pass "agent launcher supports per-launch runtime overrides"

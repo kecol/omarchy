@@ -13,8 +13,16 @@ Usage: omarchy agent container doctor [--quick]
 
 Checks the local host before agent container mode starts.
 
-The full check verifies Podman with a disposable volume and container.
+The full check verifies Podman with a disposable volume and hardened container.
 The quick check skips the disposable container and is used before launches.
+
+After it passes, smoke-test an agent with:
+  omarchy agent --container
+
+Inside the agent, these should hold:
+  !echo $HOME              # /home/agent
+  !touch /root-should-fail # fails: root filesystem is read-only
+  !touch /tmp/tmp-ok       # succeeds: /tmp is ephemeral tmpfs
 USAGE
   exit 0
 elif [[ ${1:-} == "--quick" ]]; then
@@ -24,6 +32,7 @@ elif (( $# == 1 )); then
   exit 1
 fi
 
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 failures=0
 
 check_ok() {
@@ -51,6 +60,17 @@ check_writable_dir "home" "$HOME"
 check_writable_dir "current workspace" "$PWD"
 check_writable_dir "agent state" "${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/agents"
 
+if policy_json=$("$script_dir/omarchy-agent-policy" --json 2>/dev/null); then
+  check_ok "agent runtime policy is valid"
+  if [[ $(jq -r '.filesystem.root' <<<"$policy_json") == "read-only" && $(jq -r '.filesystem.tmp' <<<"$policy_json") == "ephemeral tmpfs" ]]; then
+    check_ok "agent containers use a read-only root with ephemeral tmpfs"
+  else
+    check_fail "agent filesystem policy is not hardened"
+  fi
+else
+  check_fail "agent runtime policy is invalid"
+fi
+
 if omarchy-cmd-missing podman; then
   check_fail "Podman is not installed"
 else
@@ -76,10 +96,10 @@ else
 
   if [[ $quick != "true" ]]; then
     image=${OMARCHY_AGENT_CONTAINER_IMAGE:-docker.io/library/archlinux:base}
-    if podman run --rm --pull=missing --network=none "$image" bash -lc 'printf ok >/tmp/omarchy-agent-doctor'; then
-      check_ok "Podman can start a disposable container"
+    if podman run --rm --pull=missing --network=none --read-only --tmpfs=/tmp:rw,nosuid,nodev,size=64m --volume="$PWD:/workspace/doctor:rw,rprivate" --workdir=/workspace/doctor "$image" bash -lc 'printf ok >/tmp/omarchy-agent-doctor && printf ok >.omarchy-agent-doctor && rm -f .omarchy-agent-doctor && ! touch /omarchy-agent-doctor-root'; then
+      check_ok "Podman can start a disposable hardened container"
     else
-      check_fail "Podman cannot start a disposable container"
+      check_fail "Podman cannot start a disposable hardened container"
     fi
   fi
 fi
