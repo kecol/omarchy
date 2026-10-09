@@ -14,7 +14,7 @@ mkdir -p "$mock_bin" "$test_home"
 
 cat >"$mock_bin/omarchy-default-agent" <<'MOCK'
 #!/bin/bash
-printf '%s\n' opencode
+printf '%s\n' "${OMARCHY_TEST_DEFAULT_AGENT:-opencode}"
 MOCK
 
 cat >"$mock_bin/omarchy-agent-mode" <<'MOCK'
@@ -28,6 +28,11 @@ exit 1
 MOCK
 
 cat >"$mock_bin/omarchy-launch-tui" <<'MOCK'
+#!/bin/bash
+printf '%s\0' "$@" >"$OMARCHY_TEST_LAUNCH_LOG"
+MOCK
+
+cat >"$mock_bin/pi" <<'MOCK'
 #!/bin/bash
 printf '%s\0' "$@" >"$OMARCHY_TEST_LAUNCH_LOG"
 MOCK
@@ -63,5 +68,16 @@ OMARCHY_TEST_AGENT_MODE=container "$ROOT/bin/omarchy-agent-prompt" --host "revie
 mapfile -d '' -t launch_args <"$launch_log"
 [[ ${launch_args[*]} == "--app-id=org.omarchy.agent opencode --auto --prompt review this" ]] ||
   fail "agent prompt can force a host launch" "${launch_args[*]}"
+
+OMARCHY_TEST_DEFAULT_AGENT=pi "$ROOT/bin/omarchy-agent-prompt" --oneshot "print pwd"
+mapfile -d '' -t launch_args <"$launch_log"
+[[ ${launch_args[*]} == "--print print pwd" ]] ||
+  fail "agent prompt can run Pi one-shot without opening a TUI" "${launch_args[*]}"
+
+if "$ROOT/bin/omarchy-agent-prompt" --oneshot "unsupported" >"$test_tmp/oneshot-unsupported" 2>&1; then
+  fail "one-shot rejects unsupported agents"
+fi
+grep -Fq 'One-shot prompts are not supported for opencode yet.' "$test_tmp/oneshot-unsupported" ||
+  fail "one-shot unsupported error names the agent" "$(<"$test_tmp/oneshot-unsupported")"
 
 pass "agent launcher supports per-launch runtime overrides"
