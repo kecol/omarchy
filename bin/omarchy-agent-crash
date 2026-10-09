@@ -49,4 +49,7 @@ mechanism, read the skill files directly and follow them instead:
 PROMPT
 )
 
-exec omarchy-agent --prompt "$prompt"
+# Crash diagnosis needs host access to coredumpctl, journalctl, system logs, and
+# desktop state. Respect container-by-default for ordinary agents, but force this
+# explicitly host-side rather than making the user toggle global agent mode.
+exec omarchy-agent --host --prompt "$prompt"
