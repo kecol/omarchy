@@ -1,0 +1,74 @@
+#!/bin/bash
+
+# omarchy:summary=Run a minimal OpenShell credential prompt smoke test
+# omarchy:args=[--provider <name>] [--from <image>] <prompt...>
+# omarchy:examples=omarchy agent openshell prompt --provider codex "hello from OpenShell"
+
+set -euo pipefail
+
+provider=codex
+image=
+while (($#)); do
+  case "$1" in
+    --provider)
+      provider=${2:?--provider needs a value}
+      shift 2
+      ;;
+    --from)
+      image=${2:?--from needs an image reference}
+      shift 2
+      ;;
+    -h|--help)
+      cat <<USAGE
+Usage: omarchy agent openshell prompt [--provider <name>] [--from <image>] <prompt...>
+
+Runs a minimal OpenShell sandbox that attaches an imported provider, verifies
+that required credential environment variables are present without printing
+their values, and echoes the prompt. This is a proof-of-life for provider
+mediation, not a full agent runtime.
+
+Import Codex first with:
+  omarchy agent openshell provider import codex
+USAGE
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+if (( $# == 0 )); then
+  echo "Usage: omarchy agent openshell prompt [--provider <name>] [--from <image>] <prompt...>" >&2
+  exit 1
+fi
+prompt=$*
+
+command -v openshell >/dev/null 2>&1 || { echo "OpenShell is not installed. Run: omarchy agent openshell install" >&2; exit 1; }
+openshell provider get "$provider" >/dev/null 2>&1 || {
+  echo "OpenShell provider is missing: $provider" >&2
+  echo "For Codex: omarchy agent openshell provider import codex" >&2
+  exit 1
+}
+
+create_args=(sandbox create --no-keep --no-tty --provider "$provider" --env "OMARCHY_OPEN_SHELL_PROMPT=$prompt")
+[[ -n $image ]] && create_args+=(--from "$image")
+create_args+=(-- sh -lc 'missing=0
+for key in CODEX_AUTH_ACCESS_TOKEN CODEX_AUTH_ACCOUNT_ID; do
+  eval "value=\${$key:-}"
+  if [ -z "$value" ]; then
+    printf "missing credential env: %s\n" "$key" >&2
+    missing=1
+  fi
+done
+[ "$missing" -eq 0 ] || exit 42
+printf "OpenShell provider: codex\n"
+printf "Credential env: CODEX_AUTH_ACCESS_TOKEN=set CODEX_AUTH_ACCOUNT_ID=set\n"
+printf "Prompt: %s\n" "$OMARCHY_OPEN_SHELL_PROMPT"
+')
+
+exec openshell "${create_args[@]}"

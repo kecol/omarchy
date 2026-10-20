@@ -1,0 +1,174 @@
+#!/bin/bash
+
+# omarchy:summary=Import host account credentials into OpenShell provider storage
+# omarchy:args=<provider> [--name <name>] [--force]
+# omarchy:examples=omarchy agent openshell provider import codex | omarchy agent openshell provider import codex --name codex
+
+set -euo pipefail
+
+if (( $# == 0 )); then
+  echo "Usage: omarchy agent openshell provider import <provider> [--name <name>] [--force]" >&2
+  exit 1
+fi
+
+provider=$1
+shift
+name=$provider
+force=false
+while (($#)); do
+  case "$1" in
+    --name)
+      name=${2:?--name needs a value}
+      shift 2
+      ;;
+    --force)
+      force=true
+      shift
+      ;;
+    -h|--help)
+      echo "Usage: omarchy agent openshell provider import <provider> [--name <name>] [--force]" >&2
+      exit 0
+      ;;
+    *)
+      echo "Unexpected argument: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+case "$provider" in
+  codex) ;;
+  *)
+    echo "Unsupported OpenShell provider import: $provider" >&2
+    echo "Supported now: codex" >&2
+    exit 1
+    ;;
+esac
+
+command -v openshell >/dev/null 2>&1 || { echo "OpenShell is not installed. Run: omarchy agent openshell install" >&2; exit 1; }
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+"$script_dir/omarchy-agent-openshell-doctor" --quick >/dev/null
+
+auth_file=${CODEX_AUTH_FILE:-$HOME/.codex/auth.json}
+if [[ ! -f $auth_file ]]; then
+  echo "Codex auth file not found: $auth_file" >&2
+  echo "Log in with Codex on the host first, then rerun this import." >&2
+  exit 1
+fi
+
+access_token=$(jq -er '.tokens.access_token' "$auth_file") || { echo "Codex access token is missing in $auth_file" >&2; exit 1; }
+account_id=$(jq -er '.tokens.account_id' "$auth_file") || { echo "Codex account id is missing in $auth_file" >&2; exit 1; }
+refresh_token=$(jq -er '.tokens.refresh_token' "$auth_file") || { echo "Codex refresh token is missing in $auth_file" >&2; exit 1; }
+id_token=$(jq -er '.tokens.id_token // empty' "$auth_file" || true)
+
+tmpdir=$(mktemp -d)
+trap 'rm -rf "$tmpdir"' EXIT
+profile_file="$tmpdir/codex.yaml"
+cat >"$profile_file" <<'YAML'
+id: codex
+display_name: Codex
+description: OpenAI Codex CLI with gateway-managed token refresh
+category: agent
+inference_capable: true
+credentials:
+  - name: access_token
+    description: Codex OAuth access token refreshed by the gateway
+    env_vars: [CODEX_AUTH_ACCESS_TOKEN]
+    required: true
+    auth_style: bearer
+    header_name: authorization
+    refresh:
+      strategy: oauth2_refresh_token
+      token_url: https://auth.openai.com/oauth/token
+      refresh_before_seconds: 300
+      max_lifetime_seconds: 3600
+      material:
+        - name: client_id
+          description: Codex OAuth client ID
+          required: true
+        - name: refresh_token
+          description: Codex OAuth refresh token
+          required: true
+          secret: true
+  - name: refresh_token
+    description: Codex OAuth refresh token for clients that manage their own refresh
+    env_vars: [CODEX_AUTH_REFRESH_TOKEN]
+  - name: account_id
+    description: Codex account identifier
+    env_vars: [CODEX_AUTH_ACCOUNT_ID]
+    required: true
+  - name: id_token
+    description: Codex OAuth ID token
+    env_vars: [CODEX_AUTH_ID_TOKEN]
+discovery:
+  credentials: [access_token, refresh_token, account_id, id_token]
+endpoints:
+  - host: api.openai.com
+    port: 443
+    protocol: rest
+    access: read-write
+    enforcement: enforce
+  - host: auth.openai.com
+    port: 443
+    protocol: rest
+    access: read-write
+    enforcement: enforce
+  - host: chatgpt.com
+    port: 443
+    protocol: rest
+    access: read-write
+    enforcement: enforce
+  - host: ab.chatgpt.com
+    port: 443
+    protocol: rest
+    access: read-write
+    enforcement: enforce
+binaries:
+  - /usr/bin/codex
+  - /usr/local/bin/codex
+  - /usr/lib/node_modules/@openai/**
+  - /usr/local/lib/node_modules/@openai/**
+  - /opt/pi/pi
+  - /usr/bin/curl
+YAML
+
+if openshell provider get "$name" >/dev/null 2>&1; then
+  if [[ $force != true ]]; then
+    echo "OpenShell provider already exists: $name" >&2
+    echo "Use --force to replace its stored credentials." >&2
+    exit 1
+  fi
+  openshell provider delete "$name" >/dev/null
+fi
+
+if openshell profile describe codex >/dev/null 2>&1 && [[ $force == true ]]; then
+  openshell profile delete codex >/dev/null || true
+fi
+if ! openshell profile describe codex >/dev/null 2>&1; then
+  openshell profile lint -f "$profile_file" >/dev/null
+  openshell profile import -f "$profile_file" >/dev/null
+fi
+
+env \
+  CODEX_AUTH_ACCESS_TOKEN="$access_token" \
+  CODEX_AUTH_ACCOUNT_ID="$account_id" \
+  CODEX_AUTH_ID_TOKEN="$id_token" \
+  openshell provider create \
+    --name "$name" \
+    --type codex \
+    --credential CODEX_AUTH_ACCESS_TOKEN \
+    --credential CODEX_AUTH_ACCOUNT_ID \
+    ${id_token:+--credential CODEX_AUTH_ID_TOKEN} >/dev/null
+
+env CODEX_AUTH_REFRESH_TOKEN="$refresh_token" \
+  openshell provider refresh configure "$name" \
+    --credential-key CODEX_AUTH_ACCESS_TOKEN \
+    --strategy oauth2-refresh-token \
+    --material client_id=app_EMoamEEZ73f0CkXaXp7hrann \
+    --secret-material-env refresh_token=CODEX_AUTH_REFRESH_TOKEN >/dev/null
+
+openshell provider refresh rotate "$name" --credential-key CODEX_AUTH_ACCESS_TOKEN >/dev/null || true
+
+echo "Imported Codex credentials into OpenShell provider: $name"
+echo "Stored credential values were not printed. Refresh material is held by the OpenShell gateway."

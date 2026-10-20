@@ -329,3 +329,49 @@ fi
 grep -Fq 'currently supported only for Pi' "$test_tmp/unsupported-resume" ||
   fail "unsupported session resume explains its Pi limitation"
 pass "session routes fail explicitly for unsupported harnesses"
+
+cat >"$mock_bin/openshell" <<'SH'
+#!/bin/bash
+case "$1 ${2:-}" in
+  "--version ")
+    printf 'openshell 0.1-test\n'
+    ;;
+  "doctor check")
+    ;;
+  "gateway list")
+    printf '{"gateways":[{"name":"local"}]}\n'
+    ;;
+  "gateway info")
+    printf '{"name":"local"}\n'
+    ;;
+  "sandbox create")
+    printf '%s\0' "$@" >"$OMARCHY_TEST_OPEN_SHELL_LOG"
+    ;;
+  *)
+    echo "unexpected openshell call: $*" >&2
+    exit 1
+    ;;
+esac
+SH
+chmod +x "$mock_bin/openshell"
+openshell_log="$test_tmp/openshell-log"
+
+openshell_json=$(env "${common_env[@]}" OMARCHY_TEST_OPEN_SHELL_LOG="$openshell_log" PATH="$mock_bin:$ROOT/bin:/usr/bin" \
+  "$ROOT/bin/omarchy-agent-openshell-doctor" --json --quick)
+[[ $(jq -r '.ok' <<<"$openshell_json") == "true" ]] || fail "OpenShell doctor quick check passes with a reachable gateway" "$openshell_json"
+[[ $(jq -r '.checks[] | select(.name == "gateway_selected") | .status' <<<"$openshell_json") == "pass" ]] || fail "OpenShell doctor reports selected gateway readiness" "$openshell_json"
+pass "OpenShell doctor reports CLI and gateway readiness"
+
+openshell_json=$(env "${common_env[@]}" OMARCHY_TEST_OPEN_SHELL_LOG="$openshell_log" PATH="$mock_bin:$ROOT/bin:/usr/bin" \
+  "$ROOT/bin/omarchy-agent-openshell-doctor" --json)
+[[ $(jq -r '.checks[] | select(.name == "sandbox_smoke") | .status' <<<"$openshell_json") == "pass" ]] || fail "OpenShell doctor full check smoke-tests sandbox creation" "$openshell_json"
+mapfile -d '' -t openshell_args <"$openshell_log"
+openshell_joined=$(printf '%s\n' "${openshell_args[@]}")
+for expected in sandbox create --no-keep --no-tty -- sh -lc 'printf ok'; do
+  grep -Fxq -- "$expected" <<<"$openshell_joined" || fail "OpenShell doctor uses disposable sandbox argument $expected" "$openshell_joined"
+done
+pass "OpenShell doctor can smoke-test a disposable sandbox"
+
+policy_json=$(env "${common_env[@]}" PATH="$mock_bin:$ROOT/bin:/usr/bin" "$ROOT/bin/omarchy-agent-policy" --json)
+[[ $(jq -r '.openshell.status' <<<"$policy_json") == "available" ]] || fail "agent policy exposes OpenShell availability" "$policy_json"
+pass "agent policy shows OpenShell status"

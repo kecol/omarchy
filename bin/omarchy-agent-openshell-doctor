@@ -1,0 +1,179 @@
+#!/bin/bash
+
+# omarchy:summary=Check NVIDIA OpenShell readiness for agent sandboxes
+# omarchy:args=[--json] [--quick] [--install]
+# omarchy:examples=omarchy agent openshell doctor | omarchy agent openshell doctor --install | omarchy agent openshell doctor --json
+
+set -euo pipefail
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+
+json=false
+quick=false
+install_missing=false
+rerun_args=()
+for argument in "$@"; do
+  case "$argument" in
+    --json)
+      json=true
+      ;;
+    --quick)
+      quick=true
+      ;;
+    --install)
+      install_missing=true
+      continue
+      ;;
+    -h|--help)
+      cat <<USAGE
+Usage: omarchy agent openshell doctor [--json] [--quick] [--install]
+
+Checks whether NVIDIA OpenShell is ready to enforce agent sandbox policy.
+
+The quick check verifies local prerequisites and gateway metadata. The full
+check also tries a disposable --no-keep sandbox command through the selected
+OpenShell gateway. With --install, or with interactive confirmation, it installs
+OpenShell for the current user when the CLI is missing.
+
+OpenShell is the intended policy boundary for agent network and credential
+mediation. Omarchy's Podman container mode remains a local filesystem/process
+boundary when OpenShell is unavailable.
+USAGE
+      exit 0
+      ;;
+    *)
+      echo "Usage: omarchy agent openshell doctor [--json] [--quick] [--install]" >&2
+      exit 1
+      ;;
+  esac
+  rerun_args+=("$argument")
+done
+
+tmpdir=$(mktemp -d)
+trap 'rm -rf "$tmpdir"' EXIT
+
+checks='[]'
+failed=0
+warned=0
+
+add_check() {
+  local name=$1
+  local status=$2
+  local detail=$3
+  checks=$(jq \
+    --arg name "$name" \
+    --arg status "$status" \
+    --arg detail "$detail" \
+    '. + [{name: $name, status: $status, detail: $detail}]' \
+    <<<"$checks")
+  case "$status" in
+    fail) failed=1 ;;
+    warn) warned=1 ;;
+  esac
+}
+
+openshell_path=$(command -v openshell || true)
+if [[ -z $openshell_path ]]; then
+  if [[ $json != true && ( $install_missing == true || ( -t 0 && -t 1 && ${OMARCHY_AGENT_OPENSHELL_DOCTOR_NO_PROMPT:-false} != true ) ) ]]; then
+    if [[ $install_missing == true ]]; then
+      reply=y
+    else
+      printf 'OpenShell is not installed. Install it for this user now? [y/N] '
+      read -r reply
+    fi
+    if [[ $reply =~ ^[Yy]$ ]]; then
+      "$script_dir/omarchy-agent-openshell-install"
+      exec "$0" "${rerun_args[@]}"
+    fi
+  fi
+  add_check openshell_cli fail "openshell is not installed"
+else
+  version=$(openshell --version 2>/dev/null | head -1 || true)
+  add_check openshell_cli pass "${version:-openshell found at $openshell_path}"
+fi
+
+if [[ -r /sys/kernel/security/lsm ]]; then
+  if grep -qw landlock /sys/kernel/security/lsm; then
+    add_check landlock pass "Landlock LSM is enabled"
+  else
+    add_check landlock fail "Landlock LSM is not enabled"
+  fi
+else
+  add_check landlock warn "cannot read /sys/kernel/security/lsm"
+fi
+
+if command -v podman >/dev/null 2>&1; then
+  add_check podman pass "$(podman --version 2>/dev/null | head -1 || printf 'podman is installed')"
+  podman_socket=${XDG_RUNTIME_DIR:-/run/user/$UID}/podman/podman.sock
+  if [[ -S $podman_socket ]]; then
+    add_check podman_socket pass "Podman user socket is active: $podman_socket"
+  elif systemctl --user is-enabled podman.socket >/dev/null 2>&1; then
+    add_check podman_socket warn "Podman user socket is enabled but not active yet: $podman_socket"
+  else
+    add_check podman_socket fail "Podman user socket is not active. Run: systemctl --user enable --now podman.socket"
+  fi
+elif command -v docker >/dev/null 2>&1; then
+  add_check docker pass "$(docker --version 2>/dev/null | head -1 || printf 'docker is installed')"
+else
+  add_check container_engine warn "neither podman nor docker is on PATH"
+fi
+
+if [[ -n $openshell_path ]]; then
+  if openshell doctor check >"$tmpdir/doctor-check" 2>&1; then
+    add_check openshell_doctor pass "openshell doctor check passed"
+  else
+    detail=$(tr '\n' ' ' <"$tmpdir/doctor-check" | sed 's/[[:space:]]\+/ /g; s/^ //; s/ $//' | cut -c1-240)
+    add_check openshell_doctor warn "openshell doctor check reported an issue${detail:+: $detail}"
+  fi
+
+  if gateways=$(openshell gateway list -o json 2>"$tmpdir/gateways"); then
+    gateway_count=$(jq 'if type == "array" then length elif has("gateways") then (.gateways | length) else 0 end' <<<"$gateways" 2>/dev/null || printf '0')
+    if (( gateway_count > 0 )); then
+      add_check gateway_list pass "registered gateways: $gateway_count"
+    else
+      add_check gateway_list fail "no registered OpenShell gateways"
+    fi
+  else
+    detail=$(tr '\n' ' ' <"$tmpdir/gateways" | sed 's/[[:space:]]\+/ /g; s/^ //; s/ $//' | cut -c1-240)
+    add_check gateway_list fail "cannot list OpenShell gateways${detail:+: $detail}"
+  fi
+
+  if gateway_info=$(openshell gateway info -o json 2>"$tmpdir/gateway-info"); then
+    gateway_name=$(jq -r '.name // .gateway.name // .selected_gateway // "selected"' <<<"$gateway_info" 2>/dev/null || printf 'selected')
+    add_check gateway_selected pass "selected gateway is reachable: $gateway_name"
+  else
+    detail=$(tr '\n' ' ' <"$tmpdir/gateway-info" | sed 's/[[:space:]]\+/ /g; s/^ //; s/ $//' | cut -c1-240)
+    add_check gateway_selected fail "selected OpenShell gateway is not reachable${detail:+: $detail}"
+  fi
+
+  if [[ $quick != "true" ]]; then
+    if openshell sandbox create --no-keep --no-tty -- sh -lc 'printf ok' >"$tmpdir/smoke" 2>&1; then
+      add_check sandbox_smoke pass "disposable OpenShell sandbox command succeeded"
+    else
+      detail=$(tr '\n' ' ' <"$tmpdir/smoke" | sed 's/[[:space:]]\+/ /g; s/^ //; s/ $//' | cut -c1-240)
+      add_check sandbox_smoke fail "disposable OpenShell sandbox command failed${detail:+: $detail}"
+    fi
+  fi
+fi
+
+record=$(jq -n \
+  --argjson ok "$((1 - failed))" \
+  --argjson warnings "$warned" \
+  --argjson quick "$([[ $quick == true ]] && printf true || printf false)" \
+  --argjson checks "$checks" \
+  '{ok: ($ok == 1), warnings: ($warnings == 1), quick: $quick, checks: $checks}')
+
+if [[ $json == "true" ]]; then
+  jq . <<<"$record"
+else
+  jq -r '.checks[] | "\(.status): \(.name) - \(.detail)"' <<<"$record"
+  if [[ $(jq -r '.ok' <<<"$record") == "true" ]]; then
+    echo "OpenShell doctor passed."
+  else
+    echo "OpenShell doctor failed. Keep using Omarchy container/host runtimes until this is fixed." >&2
+  fi
+fi
+
+if (( failed )); then
+  exit 1
+fi

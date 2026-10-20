@@ -23,8 +23,19 @@ for argument in "$@"; do
   esac
 done
 
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+
 snapshot=$(omarchy-agent-runtime-snapshot)
 policy=$(omarchy-agent-policy --json)
+if openshell_status=$("$script_dir/omarchy-agent-openshell-doctor" --json --quick 2>/dev/null); then
+  openshell_status=$(jq '.available = true' <<<"$openshell_status")
+else
+  if command -v openshell >/dev/null 2>&1; then
+    openshell_status=$(jq -n '{ok: false, available: true, quick: true, checks: [{name: "openshell", status: "warn", detail: "OpenShell quick doctor failed"}]}')
+  else
+    openshell_status=$(jq -n '{ok: false, available: false, quick: true, checks: [{name: "openshell", status: "warn", detail: "openshell is not installed"}]}')
+  fi
+fi
 checks='[]'
 unsafe_instances='{}'
 fixed_instances='[]'
@@ -150,7 +161,8 @@ record=$(jq -n \
   --argjson instances "$(jq 'length' <<<"$snapshot")" \
   --argjson checks "$checks" \
   --argjson fixed "$fixed_instances" \
-  '{ok: ($ok == 1), instances: $instances, checks: $checks, fixed: $fixed}')
+  --argjson openshell "$openshell_status" \
+  '{ok: ($ok == 1), instances: $instances, checks: $checks, fixed: $fixed, openshell: $openshell}')
 
 if [[ $json == "true" ]]; then
   jq . <<<"$record"
@@ -163,6 +175,7 @@ else
       jq -r '.fixed[] | "fix: \(.instance[0:12]) \(.action) \(.container)"' <<<"$record"
     fi
   fi
+  jq -r '.openshell.checks[]? | "openshell \(.status): \(.name) - \(.detail)"' <<<"$record"
 fi
 
 if (( failed )) && [[ $fix != "true" ]]; then

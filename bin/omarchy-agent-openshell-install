@@ -1,0 +1,163 @@
+#!/bin/bash
+
+# omarchy:summary=Install NVIDIA OpenShell for the current user
+# omarchy:args=[--version <tag>] [--force]
+# omarchy:examples=omarchy agent openshell install | omarchy agent openshell install --version v0.1.3
+
+set -euo pipefail
+
+version=
+force=false
+while (($#)); do
+  case "$1" in
+    --version)
+      version=${2:?--version needs a release tag}
+      shift 2
+      ;;
+    --force)
+      force=true
+      shift
+      ;;
+    -h|--help)
+      cat <<USAGE
+Usage: omarchy agent openshell install [--version <tag>] [--force]
+
+Installs NVIDIA OpenShell's CLI, prover, and local gateway binaries into
+~/.local/bin, creates a per-user mTLS gateway bundle under
+~/.local/state/openshell/tls, starts a systemd user gateway service, and
+registers it as the local OpenShell gateway.
+
+This user-local path is used because Omarchy runs on Arch-based systems while
+OpenShell's official Linux installer currently packages deb/rpm/snap installs.
+USAGE
+      exit 0
+      ;;
+    *)
+      echo "Usage: omarchy agent openshell install [--version <tag>] [--force]" >&2
+      exit 1
+      ;;
+  esac
+done
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || { echo "Required command is missing: $1" >&2; exit 1; }
+}
+
+need curl
+need jq
+need tar
+need sha256sum
+need systemctl
+
+case "$(uname -m)" in
+  x86_64|amd64)
+    musl_arch=x86_64-unknown-linux-musl
+    gnu_arch=x86_64-unknown-linux-gnu
+    ;;
+  aarch64|arm64)
+    musl_arch=aarch64-unknown-linux-musl
+    gnu_arch=aarch64-unknown-linux-gnu
+    ;;
+  *)
+    echo "Unsupported architecture for OpenShell binary install: $(uname -m)" >&2
+    exit 1
+    ;;
+esac
+
+if [[ -z $version ]]; then
+  version=$(curl -fsSL https://api.github.com/repos/NVIDIA/OpenShell/releases/latest | jq -r '.tag_name')
+fi
+[[ -n $version && $version != null ]] || { echo "Could not resolve latest OpenShell release." >&2; exit 1; }
+
+if command -v openshell >/dev/null 2>&1 && [[ $force != true ]]; then
+  echo "OpenShell is already installed: $(command -v openshell)" >&2
+  echo "Use --force to reinstall." >&2
+  exit 0
+fi
+
+base_url="https://github.com/NVIDIA/OpenShell/releases/download/$version"
+tmpdir=$(mktemp -d)
+trap 'rm -rf "$tmpdir"' EXIT
+
+install_asset() {
+  local asset=$1
+  local checksum_asset=$2
+  local binary=$3
+
+  echo "Downloading $asset..." >&2
+  curl -fL --retry 3 -o "$tmpdir/$asset" "$base_url/$asset"
+  curl -fL --retry 3 -o "$tmpdir/$checksum_asset" "$base_url/$checksum_asset"
+  (cd "$tmpdir" && grep -F "  $asset" "$checksum_asset" | sha256sum -c -)
+  tar -xzf "$tmpdir/$asset" -C "$tmpdir"
+  install -D -m 755 "$tmpdir/$binary" "$HOME/.local/bin/$binary"
+}
+
+mkdir -p "$HOME/.local/bin"
+install_asset "openshell-$musl_arch.tar.gz" "openshell-checksums-sha256.txt" openshell
+install_asset "openshell-prover-$musl_arch.tar.gz" "openshell-prover-checksums-sha256.txt" openshell-prover
+install_asset "openshell-gateway-$gnu_arch.tar.gz" "openshell-gateway-checksums-sha256.txt" openshell-gateway
+
+export PATH="$HOME/.local/bin:$PATH"
+
+tls_dir="$HOME/.local/state/openshell/tls"
+if [[ $force == true || ! -f $tls_dir/server/tls.crt || ! -f $tls_dir/client/tls.crt ]]; then
+  mkdir -p "$tls_dir"
+  openshell-gateway generate-certs \
+    --output-dir "$tls_dir" \
+    --server-san 127.0.0.1 \
+    --server-san localhost \
+    --server-san ::1
+fi
+
+mtls_dir="$HOME/.config/openshell/gateways/openshell/mtls"
+mkdir -p "$mtls_dir"
+install -m 600 "$tls_dir/ca.crt" "$mtls_dir/ca.crt"
+install -m 600 "$tls_dir/client/tls.crt" "$mtls_dir/tls.crt"
+install -m 600 "$tls_dir/client/tls.key" "$mtls_dir/tls.key"
+
+service_dir="$HOME/.config/systemd/user"
+mkdir -p "$service_dir"
+cat >"$service_dir/openshell-gateway.service" <<SERVICE
+[Unit]
+Description=NVIDIA OpenShell local gateway
+After=network-online.target
+
+[Service]
+Type=simple
+Environment=OPENSHELL_LOCAL_TLS_DIR=%h/.local/state/openshell/tls
+Environment=OPENSHELL_COMPUTE_DRIVER=podman
+Environment=OPENSHELL_TLS_CERT=%h/.local/state/openshell/tls/server/tls.crt
+Environment=OPENSHELL_TLS_KEY=%h/.local/state/openshell/tls/server/tls.key
+Environment=OPENSHELL_TLS_CLIENT_CA=%h/.local/state/openshell/tls/ca.crt
+Environment=OPENSHELL_ENABLE_MTLS_AUTH=true
+ExecStart=%h/.local/bin/openshell-gateway
+Restart=on-failure
+RestartSec=2s
+
+[Install]
+WantedBy=default.target
+SERVICE
+
+systemctl --user daemon-reload
+if systemctl --user list-unit-files podman.socket >/dev/null 2>&1; then
+  systemctl --user enable --now podman.socket
+fi
+systemctl --user enable --now openshell-gateway.service
+
+for _ in {1..30}; do
+  if openshell gateway add https://127.0.0.1:17670 --local --name openshell >/dev/null 2>&1 || openshell gateway select openshell >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+
+openshell gateway select openshell >/dev/null 2>&1 || true
+
+if openshell status >/dev/null 2>&1; then
+  echo "OpenShell installed and local gateway is reachable."
+else
+  echo "OpenShell installed, but the gateway is not reachable yet." >&2
+  echo "Inspect with: systemctl --user status openshell-gateway" >&2
+  echo "Logs: journalctl --user -u openshell-gateway -f" >&2
+  exit 1
+fi

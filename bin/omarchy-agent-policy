@@ -15,7 +15,7 @@ elif (( $# != 0 )); then
 fi
 
 config=${OMARCHY_AGENT_POLICY:-$HOME/.config/omarchy/agents/policy.json}
-default_policy=$(jq -n '{filesystem: {workspace: "read-write", source: "unmounted", home: "isolated persistent agent volume", root: "read-only", tmp: "ephemeral tmpfs"}, network: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, credentials: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, resources: {mode: "podman", memory: "4g", pids: "1024", cpus: null}}')
+default_policy=$(jq -n '{filesystem: {workspace: "read-write", source: "unmounted", home: "isolated persistent agent volume", root: "read-only", tmp: "ephemeral tmpfs"}, network: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, credentials: {mode: "delegated-to-openshell", enforced_by_omarchy: false}, openshell: {mode: "optional", enforced_by_omarchy: false, status: "not-checked"}, resources: {mode: "podman", memory: "4g", pids: "1024", cpus: null}}')
 
 if [[ -f $config ]]; then
   if ! jq -e 'type == "object"' "$config" >/dev/null; then
@@ -56,6 +56,12 @@ if ! jq -e '
   exit 1
 fi
 
+if command -v openshell >/dev/null 2>&1; then
+  policy=$(jq '.openshell.status = "available"' <<<"$policy")
+else
+  policy=$(jq '.openshell.status = "not-installed"' <<<"$policy")
+fi
+
 if [[ $json == "true" ]]; then
   jq . <<<"$policy"
 else
@@ -65,6 +71,7 @@ else
     "  Filesystem:   workspace=\(.filesystem.workspace), source=\(.filesystem.source), home=\(.filesystem.home), root=\(.filesystem.root), tmp=\(.filesystem.tmp)",
     "  Network:      \(.network.mode)",
     "  Credentials:  \(.credentials.mode)",
+    "  OpenShell:    \(.openshell.mode) (\(.openshell.status))",
     "  Resources:    memory=\(.resources.memory), pids=\(.resources.pids)\(if .resources.cpus then ", cpus=" + .resources.cpus else "" end)"
   ' <<<"$policy"
 fi

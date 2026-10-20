@@ -106,6 +106,7 @@ The default policy is:
 Filesystem:  workspace=read-write, source=unmounted, home=isolated persistent agent volume
 Network:     delegated-to-openshell
 Credentials: delegated-to-openshell
+OpenShell:   optional (available or not-installed)
 Resources:   memory=4g, pids=1024
 ```
 
@@ -182,8 +183,51 @@ assignments are applied, empty, or cleaned.
 
 ## OpenShell boundary
 
+See [Agent OpenShell Architecture](agent-openshell-architecture.md) for the planned runtime, credential, workspace, and audit model.
+
 Omarchy declares network and credential policy but does not enforce those
 controls directly. OpenShell is expected to broker network access, credential
 access, secret prompts, and tool mediation. Omarchy's responsibility is the
 local Git/workspace lifecycle, container launch constraints, resource limits,
 and active-runtime audit.
+
+Check OpenShell readiness with:
+
+```bash
+omarchy agent openshell doctor
+omarchy agent openshell doctor --quick
+omarchy agent openshell doctor --json
+```
+
+When the CLI is missing, the interactive doctor offers to install OpenShell for
+the current user. To install explicitly, run:
+
+```bash
+omarchy agent openshell install
+omarchy agent openshell doctor --install
+```
+
+Import a supported host account into OpenShell provider storage and run a
+minimal provider-backed sandbox smoke test with:
+
+```bash
+omarchy agent openshell provider import codex
+omarchy agent openshell prompt --provider codex "hello from OpenShell"
+```
+
+The smoke test verifies that OpenShell injects the expected credential
+environment variables without printing their values. It is not yet a full agent
+runtime.
+
+On Omarchy, the installer uses a user-local layout instead of system deb/rpm
+packages: binaries go in `~/.local/bin`, gateway TLS and state go under
+`~/.local/state/openshell`, CLI mTLS credentials go under
+`~/.config/openshell/gateways/openshell/mtls`, and the gateway runs as the
+`openshell-gateway.service` systemd user service.
+
+The quick check reports whether the `openshell` CLI is installed, Landlock is
+enabled, a container engine is present, and a selected gateway is reachable. The
+full check also runs a disposable `openshell sandbox create --no-keep` command.
+`omarchy agent audit` includes the quick OpenShell status as advisory
+information without failing the Podman runtime audit when OpenShell is not yet
+installed.

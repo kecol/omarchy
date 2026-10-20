@@ -1,0 +1,145 @@
+#!/bin/bash
+
+# omarchy:summary=Run a minimal Pi one-shot inside OpenShell with Codex credentials
+# omarchy:args=[--provider <name>] [--model <model>] [--from <image>] [--tools] <prompt...>
+# omarchy:examples=omarchy agent openshell pi --model gpt-5.5 "who are you?" | omarchy agent openshell pi --tools "inspect this workspace"
+
+set -euo pipefail
+
+provider=codex
+model=gpt-5.5
+image=localhost/omarchy-harness-pi:latest
+tools=false
+while (($#)); do
+  case "$1" in
+    --provider)
+      provider=${2:?--provider needs a value}
+      shift 2
+      ;;
+    --model)
+      model=${2:?--model needs a value}
+      shift 2
+      ;;
+    --from)
+      image=${2:?--from needs an image reference}
+      shift 2
+      ;;
+    --tools)
+      tools=true
+      shift
+      ;;
+    -h|--help)
+      cat <<USAGE
+Usage: omarchy agent openshell pi [--provider <name>] [--model <model>] [--from <image>] [--tools] <prompt...>
+
+Runs Pi in a disposable OpenShell sandbox with an imported Codex provider. By
+default this is a minimal no-tool proof for OpenShell + provider credentials +
+Pi model selection. Pass --tools to expose Pi's default local tools inside the
+OpenShell sandbox. It does not mount your host Pi home or auth directories.
+
+Default model: gpt-5.5 on Pi provider openshell-codex
+Default image: localhost/omarchy-harness-pi:latest
+USAGE
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+if (( $# == 0 )); then
+  echo "Usage: omarchy agent openshell pi [--provider <name>] [--model <model>] [--tools] <prompt...>" >&2
+  exit 1
+fi
+prompt=$*
+
+command -v openshell >/dev/null 2>&1 || { echo "OpenShell is not installed. Run: omarchy agent openshell install" >&2; exit 1; }
+openshell provider get "$provider" >/dev/null 2>&1 || {
+  echo "OpenShell provider is missing: $provider" >&2
+  echo "For Codex: omarchy agent openshell provider import codex --force" >&2
+  exit 1
+}
+
+session_id=$(< /proc/sys/kernel/random/uuid)
+tmpdir=$(mktemp -d)
+trap 'rm -rf "$tmpdir"' EXIT
+policy_file="$tmpdir/pi-policy.yaml"
+cat >"$policy_file" <<'YAML'
+version: 1
+filesystem_policy:
+  include_workdir: true
+  read_only:
+    - /bin
+    - /usr
+    - /lib
+    - /lib64
+    - /etc
+    - /proc
+    - /dev/urandom
+    - /var/log
+    - /opt
+  read_write:
+    - /tmp
+    - /dev/null
+    - /home/agent
+landlock:
+  compatibility: best_effort
+YAML
+
+printf 'OpenShell Pi proof\n'
+printf '  Provider:      %s\n' "$provider"
+printf '  Model request: openshell-codex/%s\n' "$model"
+printf '  Pi session:    %s\n' "$session_id"
+printf '  Pi tools:      %s\n' "$tools"
+printf '\n'
+
+exec openshell sandbox create \
+  --no-keep \
+  --no-tty \
+  --from "$image" \
+  --provider "$provider" \
+  --policy "$policy_file" \
+  --env "OMARCHY_OPEN_SHELL_PROMPT=$prompt" \
+  --env "OMARCHY_OPEN_SHELL_MODEL=$model" \
+  --env "OMARCHY_OPEN_SHELL_SESSION=$session_id" \
+  --env "OMARCHY_OPEN_SHELL_TOOLS=$tools" \
+  -- sh -lc '
+set -eu
+export HOME=/tmp/home
+mkdir -p "$HOME"
+export agent_dir=/tmp/pi-agent
+mkdir -p "$agent_dir"
+if [ -z "${CODEX_AUTH_ACCESS_TOKEN:-}" ] || [ -z "${CODEX_AUTH_ACCOUNT_ID:-}" ]; then
+  echo "missing OpenShell-injected Codex credential environment" >&2
+  exit 42
+fi
+export OPENSHELL_CODEX_AUTH_ACCESS_TOKEN="$CODEX_AUTH_ACCESS_TOKEN"
+unset CODEX_AUTH_ACCESS_TOKEN CODEX_AUTH_ACCOUNT_ID
+tools_flag="--no-tools"
+tools_value=""
+if [ "${OMARCHY_OPEN_SHELL_TOOLS:-false}" = true ]; then
+  tools_flag="--tools"
+  tools_value="*"
+fi
+printf "Sandbox credential env: CODEX_AUTH_ACCESS_TOKEN=opaque CODEX_AUTH_ACCOUNT_ID=set\n"
+printf "Running Pi model: openshell-codex/%s\n" "$OMARCHY_OPEN_SHELL_MODEL"
+printf "%s" "$OMARCHY_OPEN_SHELL_PROMPT" | HOME="$HOME" PI_CODING_AGENT_DIR="$agent_dir" pi \
+  --print \
+  --extension /opt/omarchy/pi/extensions/openshell-codex.ts \
+  --provider openshell-codex \
+  --model "$OMARCHY_OPEN_SHELL_MODEL" \
+  --no-session \
+  --offline \
+  "$tools_flag" ${tools_value:+"$tools_value"} \
+  --no-context-files \
+  --no-skills \
+  --no-prompt-templates \
+  --no-themes
+printf "\nModel used: openshell-codex/%s\n" "$OMARCHY_OPEN_SHELL_MODEL"
+printf "Pi session: %s\n" "$OMARCHY_OPEN_SHELL_SESSION"
+'

@@ -27,6 +27,7 @@ RUN pacman -Syu --noconfirm --needed \
     && ln -s /opt/pi/pi /usr/local/bin/pi
 
 COPY --from=pi-installer /opt/pi /opt/pi
+COPY extensions /opt/omarchy/pi/extensions
 
 RUN pi --version \
     && groupadd --gid "$HARNESS_GID" agent \
