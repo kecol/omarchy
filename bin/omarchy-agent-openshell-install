@@ -40,7 +40,7 @@ USAGE
 done
 
 need() {
-  command -v "$1" >/dev/null 2>&1 || { echo "Required command is missing: $1" >&2; exit 1; }
+  omarchy-cmd-present "$1" || { echo "Required command is missing: $1" >&2; exit 1; }
 }
 
 need curl
@@ -69,8 +69,8 @@ if [[ -z $version ]]; then
 fi
 [[ -n $version && $version != null ]] || { echo "Could not resolve latest OpenShell release." >&2; exit 1; }
 
-if command -v openshell >/dev/null 2>&1 && [[ $force != true ]]; then
-  echo "OpenShell is already installed: $(command -v openshell)" >&2
+if omarchy-cmd-present openshell && [[ $force != true ]]; then
+  echo "OpenShell is already installed: $(type -P openshell)" >&2
   echo "Use --force to reinstall." >&2
   exit 0
 fi

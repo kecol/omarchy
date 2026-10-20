@@ -72,7 +72,7 @@ add_check() {
   esac
 }
 
-openshell_path=$(command -v openshell || true)
+openshell_path=$(type -P openshell || true)
 if [[ -z $openshell_path ]]; then
   if [[ $json != true && ( $install_missing == true || ( -t 0 && -t 1 && ${OMARCHY_AGENT_OPENSHELL_DOCTOR_NO_PROMPT:-false} != true ) ) ]]; then
     if [[ $install_missing == true ]]; then
@@ -102,7 +102,7 @@ else
   add_check landlock warn "cannot read /sys/kernel/security/lsm"
 fi
 
-if command -v podman >/dev/null 2>&1; then
+if omarchy-cmd-present podman; then
   add_check podman pass "$(podman --version 2>/dev/null | head -1 || printf 'podman is installed')"
   podman_socket=${XDG_RUNTIME_DIR:-/run/user/$UID}/podman/podman.sock
   if [[ -S $podman_socket ]]; then
@@ -112,7 +112,7 @@ if command -v podman >/dev/null 2>&1; then
   else
     add_check podman_socket fail "Podman user socket is not active. Run: systemctl --user enable --now podman.socket"
   fi
-elif command -v docker >/dev/null 2>&1; then
+elif omarchy-cmd-present docker; then
   add_check docker pass "$(docker --version 2>/dev/null | head -1 || printf 'docker is installed')"
 else
   add_check container_engine warn "neither podman nor docker is on PATH"

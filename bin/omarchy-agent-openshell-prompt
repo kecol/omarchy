@@ -48,7 +48,7 @@ if (( $# == 0 )); then
 fi
 prompt=$*
 
-command -v openshell >/dev/null 2>&1 || { echo "OpenShell is not installed. Run: omarchy agent openshell install" >&2; exit 1; }
+omarchy-cmd-present openshell || { echo "OpenShell is not installed. Run: omarchy agent openshell install" >&2; exit 1; }
 openshell provider get "$provider" >/dev/null 2>&1 || {
   echo "OpenShell provider is missing: $provider" >&2
   echo "For Codex: omarchy agent openshell provider import codex" >&2

@@ -104,7 +104,7 @@ else
   fi
 fi
 
-if [[ ${OMARCHY_AGENT_CONTAINER_DOCTOR_SKIP_JOURNAL:-false} != "true" ]] && command -v journalctl >/dev/null; then
+if [[ ${OMARCHY_AGENT_CONTAINER_DOCTOR_SKIP_JOURNAL:-false} != "true" ]]; then
   if journalctl -b --since '-15 minutes' --no-pager 2>/dev/null |
     grep -Eiq 'read-only|readonly|remount.*ro|I/O error|BTRFS error|EXT4-fs error|XFS.*error'; then
     check_fail "recent kernel or system logs contain filesystem I/O or read-only warnings"

@@ -56,7 +56,7 @@ if ! jq -e '
   exit 1
 fi
 
-if command -v openshell >/dev/null 2>&1; then
+if omarchy-cmd-present openshell; then
   policy=$(jq '.openshell.status = "available"' <<<"$policy")
 else
   policy=$(jq '.openshell.status = "not-installed"' <<<"$policy")
