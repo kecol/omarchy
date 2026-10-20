@@ -4,6 +4,92 @@ Omarchy currently supports host execution and hardened rootless Podman execution
 
 This document describes the intended architecture before Omarchy makes OpenShell a first-class agent runtime.
 
+## Importing the primary host Pi login
+
+```bash
+omarchy agent openshell provider import pi
+omarchy agent openshell pi --provider pi-codex --model gpt-6.1-sol "Reply only OK"
+```
+
+The Pi importer reads `openai-codex` OAuth state from
+`${PI_CODING_AGENT_DIR:-~/.pi/agent}/auth.json` (`PI_AUTH_FILE` can override the path).
+It rejects expired credentials and stores only the access token and account ID in
+OpenShell provider `pi-codex` (or `--name <name>`). Sandbox processes still receive
+opaque handles, not raw credentials; no host auth directory is mounted.
+
+This is a snapshot, not independent gateway refresh. Pi retains exclusive ownership
+of its rotating refresh token: sharing it could invalidate the host login. Once
+host Pi refreshes its login, update the snapshot with:
+
+```bash
+omarchy agent openshell provider import pi --force
+```
+
+Provider replacement may be blocked while sandboxes reference it. Do not delete
+unrelated sandboxes to work around that. Automatic access-token synchronization is
+future work. The older `import codex` path remains available and unchanged.
+
+## Model catalog sync and doctor
+
+```bash
+omarchy agent openshell models sync                  # preview; no changes or model calls
+omarchy agent openshell models sync --apply          # write user catalog
+omarchy agent openshell models doctor                # offline schema/version/refresh checks
+omarchy agent openshell models doctor --live --model gpt-6.1-sol
+omarchy agent openshell models doctor --live         # test every catalog entry; consumes usage
+```
+
+Sync exports exact model metadata from the installed host Pi's `openai-codex`
+catalog using a trusted metadata-only extension. It adds text-compatible GPT
+candidates, retains catalog-only entries, and never changes the selected default.
+Pi's catalog can include models unavailable to your account: additions are marked
+unverified until live-tested. Sync does not remove models automatically.
+
+The default output is `$XDG_CONFIG_HOME/omarchy/openshell/pi-models.json` (normally
+`~/.config/omarchy/openshell/pi-models.json`). `--models-file <path>` selects an
+existing alternate catalog for either command. Existing metadata overrides are
+preserved on first sync. A companion `.pi-baseline.json` records upstream values;
+subsequent syncs update fields unchanged since the last sync and preserve user
+edits. Keep this baseline beside the catalog. Preview prints differences from Pi.
+
+Doctor defaults to provider `pi-codex` (`--provider` overrides it). Offline checks
+cannot prove token validity or model availability. Explicit `--live` runs tiny
+no-tool requests through disposable OpenShell sandboxes, never through host Pi's
+raw credentials. Repeat `--model` to limit probes. Authentication/access errors
+stop the batch; unsupported models, rate limits, network failures and timeouts
+are reported separately where recognizable. A timeout may leave sandbox cleanup
+pending. Doctor never rewrites the catalog or refreshes credentials.
+
+## Configuring Pi bridge models
+
+The Pi bridge defaults to `gpt-6.1-sol`. Its bundled catalog is
+`containers/harnesses/pi/extensions/openshell-codex-models.json`.
+After building the catalog-aware image once (`omarchy harness build pi 1.3.0`),
+model changes do not require another image rebuild:
+
+```bash
+mkdir -p ~/.config/omarchy/openshell
+cp "$OMARCHY_PATH/containers/harnesses/pi/extensions/openshell-codex-models.json" \
+  ~/.config/omarchy/openshell/pi-models.json
+# Edit that JSON array to add or remove model definitions.
+omarchy agent openshell pi --model gpt-6.1-sol "Hello"
+# Alternatively choose a separate catalog:
+omarchy agent openshell pi --models-file ./models.json --model gpt-6.1-sol "Hello"
+```
+
+Each entry requires a unique `id`, `name`, `reasoning` boolean, `input: ["text"]`,
+positive integer `contextWindow` and `maxTokens`, and nonnegative `cost` fields
+(`input`, `output`, `cacheRead`, `cacheWrite`). The bridge is currently text-only.
+Bundled model limits follow Pi 1.3.0 metadata; zero costs mean unknown,
+not free. The catalog includes `gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-luna`,
+`gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`.
+All passed host account smoke tests. `gpt-5.5`, `gpt-5.3-codex-spark`,
+and `gpt-6.1-terra` were rejected and are not bundled. Use verified metadata when adding entries. Catalog metadata is passed
+as a non-secret environment variable; host config and auth directories are not mounted.
+Adding a model does not grant account access. `gpt-6.1-sol` passed a host account
+test; `gpt-6.1-terra` was rejected, so it is not bundled. OpenShell credentials
+must independently be valid. HTTP failures now produce errors rather than empty success.
+
 ## Goals
 
 - Keep host execution available, but explicit.

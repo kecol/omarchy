@@ -85,6 +85,30 @@ grep -Fq -- 'provider refresh configure codex --credential-key CODEX_AUTH_ACCESS
   fail "Codex provider import configures gateway-owned refresh" "$(cat "$test_tmp/openshell-log-text")"
 pass "Codex account import stores minimal OpenShell provider credentials without printing secrets"
 
+pi_auth="$test_tmp/pi-auth.json"
+jq -n --argjson expires "$(( $(date +%s) * 1000 + 3600000 ))" '
+  {"openai-codex": {type: "oauth", access: "pi-access-secret-test", accountId: "pi-account-test",
+    refresh: "pi-refresh-never-import", expires: $expires}}
+' >"$pi_auth"
+: >"$openshell_log"
+output=$(env HOME="$test_home" PI_AUTH_FILE="$pi_auth" OMARCHY_TEST_OPENSHELL_LOG="$openshell_log" PATH="$mock_bin:$ROOT/bin:/usr/bin" \
+  "$ROOT/bin/omarchy-agent-openshell-provider-import" pi)
+[[ $output == *"Imported Pi Codex access-token snapshot"* ]] || fail "Pi importer reports snapshot" "$output"
+tr '\0' ' ' <"$openshell_log" >"$test_tmp/pi-import-log"
+grep -Fq 'provider create --name pi-codex --type codex' "$test_tmp/pi-import-log" || fail "Pi import uses dedicated provider" ""
+if grep -Eq 'provider refresh|pi-access-secret-test|pi-refresh-never-import' "$test_tmp/pi-import-log" ||
+  grep -Eq 'pi-access-secret-test|pi-refresh-never-import' <<<"$output"; then
+  fail "Pi importer must not share refresh ownership or print secrets" ""
+fi
+jq '.["openai-codex"].expires = 1' "$pi_auth" >"$test_tmp/expired-auth.json"
+: >"$openshell_log"
+if env HOME="$test_home" PI_AUTH_FILE="$test_tmp/expired-auth.json" OMARCHY_TEST_OPENSHELL_LOG="$openshell_log" PATH="$mock_bin:$ROOT/bin:/usr/bin" \
+  "$ROOT/bin/omarchy-agent-openshell-provider-import" pi >"$test_tmp/pi-error" 2>&1; then
+  fail "expired Pi credentials must be rejected" ""
+fi
+if grep -aq 'provider create' "$openshell_log"; then fail "expired credentials must not be imported" ""; fi
+pass "Pi import snapshots access credentials without importing refresh material and rejects expiry"
+
 : >"$openshell_log"
 output=$(env HOME="$test_home" OMARCHY_TEST_PROVIDER_EXISTS=true OMARCHY_TEST_OPENSHELL_LOG="$openshell_log" PATH="$mock_bin:$ROOT/bin:/usr/bin" \
   "$ROOT/bin/omarchy-agent-openshell-prompt" --provider codex "hello openshell")
@@ -97,7 +121,7 @@ pass "OpenShell prompt smoke runs a disposable provider-backed sandbox"
 
 : >"$openshell_log"
 output=$(env HOME="$test_home" OMARCHY_TEST_PROVIDER_EXISTS=true OMARCHY_TEST_OPENSHELL_LOG="$openshell_log" PATH="$mock_bin:$ROOT/bin:/usr/bin" \
-  "$ROOT/bin/omarchy-agent-openshell-pi" --model gpt-5.5 "hello pi")
+  "$ROOT/bin/omarchy-agent-openshell-pi" --model gpt-6.1-sol "hello pi")
 [[ $output == *"OpenShell provider: codex"* ]] || fail "OpenShell Pi proof invokes sandbox" "$output"
 tr '\0' ' ' <"$openshell_log" >"$test_tmp/openshell-pi-log-text"
 grep -Fq -- 'sandbox create --no-keep --no-tty --from localhost/omarchy-harness-pi:latest --provider codex' "$test_tmp/openshell-pi-log-text" ||
@@ -111,7 +135,7 @@ pass "OpenShell Pi proof wires the OpenShell Codex Pi extension"
 
 : >"$openshell_log"
 output=$(env HOME="$test_home" OMARCHY_TEST_PROVIDER_EXISTS=true OMARCHY_TEST_OPENSHELL_LOG="$openshell_log" PATH="$mock_bin:$ROOT/bin:/usr/bin" \
-  "$ROOT/bin/omarchy-agent-openshell-pi" --tools --model gpt-5.5 "use tools")
+  "$ROOT/bin/omarchy-agent-openshell-pi" --tools --model gpt-6.1-sol "use tools")
 [[ $output == *"Pi tools:      true"* ]] || fail "OpenShell Pi proof reports tools mode" "$output"
 tr '\0' ' ' <"$openshell_log" >"$test_tmp/openshell-pi-tools-log-text"
 grep -Fq -- '--env OMARCHY_OPEN_SHELL_TOOLS=true' "$test_tmp/openshell-pi-tools-log-text" ||
@@ -119,3 +143,18 @@ grep -Fq -- '--env OMARCHY_OPEN_SHELL_TOOLS=true' "$test_tmp/openshell-pi-tools-
 grep -Fq -- 'tools_flag="--no-tools"' "$test_tmp/openshell-pi-tools-log-text" ||
   fail "OpenShell Pi proof keeps no-tool mode explicit by default in sandbox script" "$(cat "$test_tmp/openshell-pi-tools-log-text")"
 pass "OpenShell Pi proof supports explicit Pi tools mode"
+
+catalog="$ROOT/containers/harnesses/pi/extensions/openshell-codex-models.json"
+jq '.[0].id = "test-sol"' "$catalog" >"$test_tmp/models.json"
+: >"$openshell_log"
+output=$(env HOME="$test_home" OMARCHY_TEST_PROVIDER_EXISTS=true OMARCHY_TEST_OPENSHELL_LOG="$openshell_log" PATH="$mock_bin:$ROOT/bin:/usr/bin" \
+  "$ROOT/bin/omarchy-agent-openshell-pi" --models-file "$test_tmp/models.json" --model test-sol "hello")
+tr '\0' ' ' <"$openshell_log" >"$test_tmp/catalog-log"
+grep -Fq 'OMARCHY_OPEN_SHELL_MODELS_JSON=' "$test_tmp/catalog-log" || fail "catalog is passed to sandbox" "$output"
+grep -Fq 'test-sol' "$test_tmp/catalog-log" || fail "custom model is passed to sandbox" "$output"
+if env HOME="$test_home" PATH="$mock_bin:$ROOT/bin:/usr/bin" \
+  "$ROOT/bin/omarchy-agent-openshell-pi" --models-file "$test_tmp/models.json" --model missing "hello" >"$test_tmp/error" 2>&1; then
+  fail "unknown model must be rejected" ""
+fi
+grep -Fq 'Model not in catalog' "$test_tmp/error" || fail "unknown model has useful error" ""
+pass "OpenShell Pi accepts custom catalogs and rejects missing models"

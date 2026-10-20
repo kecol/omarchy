@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+# omarchy:summary=Sync Pi model metadata or diagnose the OpenShell model catalog
+# omarchy:args=<sync|doctor> [--apply] [--live] [--provider <name>] [--model <id>] [--models-file <path>]
+
+import argparse
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+
+ROOT = Path(os.environ.get('OMARCHY_PATH', Path(__file__).resolve().parent.parent))
+BUNDLED = ROOT / 'containers/harnesses/pi/extensions/openshell-codex-models.json'
+USER = Path(os.environ.get('XDG_CONFIG_HOME', str(Path.home() / '.config'))) / 'omarchy/openshell/pi-models.json'
+FIELDS = ('id', 'name', 'reasoning', 'input', 'cost', 'contextWindow', 'maxTokens')
+
+
+def run(command, **kwargs):
+    return subprocess.run(command, capture_output=True, text=True, timeout=kwargs.pop('timeout', 30), **kwargs)
+
+
+def read_catalog(path):
+    models = json.loads(path.read_text())
+    if not isinstance(models, list) or not models:
+        raise ValueError('catalog must be a nonempty array')
+    ids = set()
+    for m in models:
+        if not isinstance(m, dict) or not isinstance(m.get('id'), str) or not m['id'] or m['id'] in ids:
+            raise ValueError('catalog model IDs must be nonempty and unique')
+        ids.add(m['id'])
+        if (not isinstance(m.get('name'), str) or not isinstance(m.get('reasoning'), bool)
+                or m.get('input') != ['text']):
+            raise ValueError(f'{m["id"]}: name, reasoning and text-only input required')
+        for key in ('contextWindow', 'maxTokens'):
+            if type(m.get(key)) is not int or m[key] <= 0:
+                raise ValueError(f'{m["id"]}: invalid {key}')
+        for key in ('input', 'output', 'cacheRead', 'cacheWrite'):
+            value = m.get('cost', {}).get(key)
+            if type(value) not in (int, float) or not 0 <= value < float('inf'):
+                raise ValueError(f'{m["id"]}: invalid cost.{key}')
+    return models
+
+
+def installed_models():
+    with tempfile.TemporaryDirectory(prefix='omarchy-models-') as directory:
+        destination = Path(directory) / 'models.json'
+        env = dict(os.environ, OMARCHY_OPEN_SHELL_MODEL_EXPORT=str(destination))
+        result = run(['pi', '--offline', '--no-extensions', '--no-mcp', '--no-skills',
+                      '--no-context-files', '--no-prompt-templates', '--no-themes',
+                      '--extension', str(ROOT / 'default/agents/openshell/export-models.ts'),
+                      '--list-models', 'openai-codex'], env=env, cwd=directory)
+        if result.returncode or not destination.exists():
+            raise ValueError('could not export installed Pi model metadata; check Pi version/API compatibility')
+        raw = json.loads(destination.read_text())
+    models = []
+    for m in raw:
+        if not m['id'].startswith('gpt-') or 'text' not in m['input']:
+            continue
+        model = {key: m[key] for key in FIELDS}
+        model['input'] = ['text']  # Bridge cannot transmit image content yet.
+        models.append(model)
+    if not models:
+        raise ValueError('installed Pi has no compatible GPT models')
+    return models
+
+
+def atomic_json(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix='.models-', dir=path.parent)
+    try:
+        with os.fdopen(fd, 'w') as output:
+            json.dump(data, output, indent=2)
+            output.write('\n')
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Manual catalog sync and opt-in OpenShell live verification')
+    parser.add_argument('action', choices=['sync', 'doctor'])
+    parser.add_argument('--models-file', type=Path)
+    parser.add_argument('--apply', action='store_true', help='write sync results (otherwise preview only)')
+    parser.add_argument('--live', action='store_true', help='doctor: make billable OpenShell test requests')
+    parser.add_argument('--provider', default='pi-codex')
+    parser.add_argument('--model', action='append', default=[], help='doctor: test only this ID (repeatable)')
+    args = parser.parse_args()
+    if args.apply and args.action != 'sync' or args.live and args.action != 'doctor':
+        parser.error('--apply is for sync; --live is for doctor')
+    path = args.models_file or (USER if USER.exists() else BUNDLED)
+    current = read_catalog(path)
+    upstream = {m['id']: m for m in installed_models()}
+    local = {m['id']: m for m in current}
+    print(f'Catalog: {path}')
+    for model in sorted(upstream.keys() - local.keys()):
+        print(f'Pi-only (unverified): {model}')
+    for model in sorted(local.keys() - upstream.keys()):
+        print(f'Catalog-only (preserved): {model}')
+    for model in sorted(local.keys() & upstream.keys()):
+        differences = [key for key in FIELDS if local[model].get(key) != upstream[model].get(key)]
+        if differences:
+            print(f'Metadata differs: {model}: {", ".join(differences)}')
+
+    if args.action == 'sync':
+        target = args.models_file or USER
+        baseline_path = target.with_name(target.name + '.pi-baseline.json')
+        baseline = {m['id']: m for m in read_catalog(baseline_path)} if baseline_path.exists() else {}
+        merged = []
+        for model in current:
+            candidate = dict(model)
+            # Only fields previously written by sync are updated. Initial existing
+            # entries are treated as user overrides, not overwritten on first sync.
+            previous = baseline.get(model['id'], {})
+            fresh = upstream.get(model['id'], {})
+            for key in FIELDS:
+                if key in previous and key in fresh and candidate.get(key) == previous[key]:
+                    candidate[key] = fresh[key]
+            merged.append(candidate)
+        merged.extend(upstream[key] for key in sorted(upstream.keys() - local.keys()))
+        print(f'{"Writing" if args.apply else "Preview only; --apply writes"}: {target}')
+        print('Existing overrides and catalog-only models are preserved; default model is unchanged.')
+        print('Pi metadata is NOT proof of account access. Run doctor --live to verify candidates.')
+        if args.apply:
+            # Save Pi's metadata, not the overrides. Differences from this
+            # snapshot remain user-owned on subsequent syncs.
+            atomic_json(baseline_path, list(upstream.values()))
+            atomic_json(target, merged)
+        return 0
+
+    print('Catalog schema: OK (text-only bridge)')
+    host = run(['pi', '--version'])
+    print(f'Host Pi: {host.stdout.strip() or "unknown"}')
+    failures = 0
+    try:
+        image = run(['podman', 'run', '--rm', '--entrypoint', '/opt/pi/pi',
+                     'localhost/omarchy-harness-pi:latest', '--version'], timeout=45)
+        print(f'Harness Pi: {image.stdout.strip() if image.returncode == 0 else "unavailable"}')
+        if image.returncode or image.stdout.strip() != host.stdout.strip():
+            failures += 1
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        print('Harness Pi: unavailable')
+        failures += 1
+    try:
+        status = run(['openshell', 'provider', 'refresh', 'status', args.provider])
+        if status.returncode:
+            print(f'Provider {args.provider}: status unavailable')
+            failures += 1
+        elif 'investigation_required' in status.stdout:
+            print(f'Provider {args.provider}: refresh requires investigation')
+            failures += 1
+        else:
+            print(f'Provider {args.provider}: no reported refresh failure; credentials not verified offline')
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        print('OpenShell provider status: unavailable')
+        failures += 1
+    if not args.live:
+        print('Live checks skipped. Use --live [--model ID] (consumes model usage).')
+        return 1 if failures else 0
+    selected = args.model or list(local)
+    for model in selected:
+        if model not in local:
+            raise ValueError(f'model not in catalog: {model}')
+    for model in selected:
+        try:
+            result = run([str(ROOT / 'bin/omarchy-agent-openshell-pi'), '--provider', args.provider,
+                          '--models-file', str(path), '--model', model, 'Reply with only OK.'], timeout=180)
+            text = result.stdout + result.stderr
+            if result.returncode == 0 and 'OK' in result.stdout.splitlines():
+                print(f'{model}: live OK')
+                continue
+            failures += 1
+            if '401' in text or '403' in text:
+                print(f'{model}: authentication/access failure; stopping live checks')
+                break
+            if 'not supported' in text or 'model_not_found' in text:
+                reason = 'unsupported model'
+            elif '429' in text or 'rate_limit' in text:
+                reason = 'rate limited'
+            elif 'curl exited' in text:
+                reason = 'HTTP/network failure'
+            else:
+                reason = 'probe failed or did not return OK'
+            print(f'{model}: {reason}')
+        except subprocess.TimeoutExpired:
+            print(f'{model}: timed out (sandbox cleanup may be pending)')
+            failures += 1
+    return 1 if failures else 0
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except (ValueError, OSError, KeyError, subprocess.TimeoutExpired) as error:
+        print(f'Model catalog error: {error}', file=sys.stderr)
+        sys.exit(1)

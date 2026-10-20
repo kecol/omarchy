@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { promises as fs } from "node:fs";
+import { promises as fs, readFileSync } from "node:fs";
 import {
 	type Api,
 	type AssistantMessage,
@@ -20,26 +20,28 @@ const PROVIDER = "openshell-codex";
 const BASE_URL = "https://chatgpt.com/backend-api";
 const RESPONSES_URL = `${BASE_URL}/codex/responses`;
 
-const MODELS = [
-	{
-		id: "gpt-5.5",
-		name: "GPT-5.5 (OpenShell Codex)",
-		reasoning: true,
-		input: ["text", "image"],
-		cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 },
-		contextWindow: 272000,
-		maxTokens: 128000,
-	},
-	{
-		id: "gpt-5.6-sol",
-		name: "GPT-5.6 Sol (OpenShell Codex)",
-		reasoning: true,
-		input: ["text", "image"],
-		cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 },
-		contextWindow: 272000,
-		maxTokens: 128000,
-	},
-];
+// Catalog contents are non-secret metadata, passed from the host without mounting
+// its config directory. The bundled catalog also supports standalone image use.
+function loadModels() {
+	const raw = process.env.OMARCHY_OPEN_SHELL_MODELS_JSON ??
+		readFileSync(new URL("./openshell-codex-models.json", import.meta.url), "utf8");
+	const models = JSON.parse(raw);
+	if (!Array.isArray(models) || models.length === 0) throw new Error("OpenShell model catalog must be a nonempty array");
+	const ids = new Set<string>();
+	for (const model of models) {
+		if (typeof model.id !== "string" || !model.id || ids.has(model.id) ||
+			typeof model.name !== "string" || typeof model.reasoning !== "boolean" ||
+			JSON.stringify(model.input) !== '["text"]' ||
+			!Number.isInteger(model.contextWindow) || model.contextWindow <= 0 ||
+			!Number.isInteger(model.maxTokens) || model.maxTokens <= 0 ||
+			!["input", "output", "cacheRead", "cacheWrite"].every((key) =>
+				typeof model.cost?.[key] === "number" && Number.isFinite(model.cost[key]) && model.cost[key] >= 0)) {
+			throw new Error("Invalid OpenShell model catalog entry (unique ID, text input, limits and costs required)");
+		}
+		ids.add(model.id);
+	}
+	return models;
+}
 
 function textFromContent(content: any): string {
 	if (typeof content === "string") return content;
@@ -112,12 +114,15 @@ async function curlResponses(accessToken: string, payload: any, signal?: AbortSi
 	let sseBuffer = "";
 	let text = "";
 	let usage: any = null;
+	let completed = false;
 	const toolCalls = new Map<string, { id: string; call_id: string; name: string; arguments: string }>();
 
 	await new Promise<void>((resolve, reject) => {
 		const child = spawn("curl", [
 			"-N",
 			"-sS",
+			"--fail",
+			"--max-time", "120",
 			"-H",
 			`Authorization: Bearer ${accessToken}`,
 			"-H",
@@ -156,6 +161,7 @@ async function curlResponses(accessToken: string, payload: any, signal?: AbortSi
 				} else if (event.type === "response.output_text.delta") {
 					text += event.delta ?? "";
 				} else if (event.type === "response.completed") {
+					completed = true;
 					usage = event.response?.usage ?? null;
 				} else if (event.type === "error") {
 					reject(new Error(JSON.stringify(event)));
@@ -169,6 +175,7 @@ async function curlResponses(accessToken: string, payload: any, signal?: AbortSi
 		});
 	});
 
+	if (!completed) throw new Error("OpenShell Codex response ended without response.completed");
 	return { text, usage, toolCalls: [...toolCalls.values()] };
 }
 
@@ -306,7 +313,7 @@ export default function (pi: ExtensionAPI) {
 		baseUrl: BASE_URL,
 		apiKey: "$OPENSHELL_CODEX_AUTH_ACCESS_TOKEN",
 		api: "openshell-codex-responses",
-		models: MODELS,
+		models: loadModels(),
 		streamSimple: streamOpenShellCodex,
 	});
 }

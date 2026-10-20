@@ -1,13 +1,15 @@
 #!/bin/bash
 
 # omarchy:summary=Run a minimal Pi one-shot inside OpenShell with Codex credentials
-# omarchy:args=[--provider <name>] [--model <model>] [--from <image>] [--tools] <prompt...>
-# omarchy:examples=omarchy agent openshell pi --model gpt-5.5 "who are you?" | omarchy agent openshell pi --tools "inspect this workspace"
+# omarchy:args=[--provider <name>] [--model <model>] [--models-file <path>] [--from <image>] [--tools] <prompt...>
+# omarchy:examples=omarchy agent openshell pi --model gpt-6.1-sol "who are you?" | omarchy agent openshell pi --tools "inspect this workspace"
 
 set -euo pipefail
 
 provider=codex
-model=gpt-5.5
+model=gpt-6.1-sol
+models_file=${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/openshell/pi-models.json
+models_explicit=false
 image=localhost/omarchy-harness-pi:latest
 tools=false
 while (($#)); do
@@ -24,21 +26,29 @@ while (($#)); do
       image=${2:?--from needs an image reference}
       shift 2
       ;;
+    --models-file)
+      models_file=${2:?--models-file needs a path}
+      models_explicit=true
+      shift 2
+      ;;
     --tools)
       tools=true
       shift
       ;;
     -h|--help)
       cat <<USAGE
-Usage: omarchy agent openshell pi [--provider <name>] [--model <model>] [--from <image>] [--tools] <prompt...>
+Usage: omarchy agent openshell pi [--provider <name>] [--model <model>] [--models-file <path>] [--from <image>] [--tools] <prompt...>
 
 Runs Pi in a disposable OpenShell sandbox with an imported Codex provider. By
 default this is a minimal no-tool proof for OpenShell + provider credentials +
 Pi model selection. Pass --tools to expose Pi's default local tools inside the
 OpenShell sandbox. It does not mount your host Pi home or auth directories.
 
-Default model: gpt-5.5 on Pi provider openshell-codex
+Default model: gpt-6.1-sol on Pi provider openshell-codex
 Default image: localhost/omarchy-harness-pi:latest
+Model catalog: ~/.config/omarchy/openshell/pi-models.json (if present)
+Override catalog: --models-file <path>
+Catalog changes do not require rebuilding the image after initial support.
 USAGE
       exit 0
       ;;
@@ -57,6 +67,18 @@ if (( $# == 0 )); then
   exit 1
 fi
 prompt=$*
+
+if [[ ! -f $models_file && $models_explicit == false ]]; then
+  source_root=${OMARCHY_PATH:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}
+  models_file="$source_root/containers/harnesses/pi/extensions/openshell-codex-models.json"
+fi
+[[ -f $models_file ]] || { echo "Model catalog not found: $models_file" >&2; exit 1; }
+models_json=$(jq -ce 'if type == "array" and length > 0 then . else error("expected nonempty model array") end' "$models_file") || {
+  echo "Invalid model catalog: $models_file" >&2; exit 1;
+}
+jq -e --arg model "$model" 'any(.[]; .id == $model)' <<<"$models_json" >/dev/null || {
+  echo "Model not in catalog: $model ($models_file)" >&2; exit 1;
+}
 
 command -v openshell >/dev/null 2>&1 || { echo "OpenShell is not installed. Run: omarchy agent openshell install" >&2; exit 1; }
 openshell provider get "$provider" >/dev/null 2>&1 || {
@@ -106,6 +128,7 @@ exec openshell sandbox create \
   --policy "$policy_file" \
   --env "OMARCHY_OPEN_SHELL_PROMPT=$prompt" \
   --env "OMARCHY_OPEN_SHELL_MODEL=$model" \
+  --env "OMARCHY_OPEN_SHELL_MODELS_JSON=$models_json" \
   --env "OMARCHY_OPEN_SHELL_SESSION=$session_id" \
   --env "OMARCHY_OPEN_SHELL_TOOLS=$tools" \
   -- sh -lc '

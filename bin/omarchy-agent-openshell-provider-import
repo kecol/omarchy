@@ -2,7 +2,7 @@
 
 # omarchy:summary=Import host account credentials into OpenShell provider storage
 # omarchy:args=<provider> [--name <name>] [--force]
-# omarchy:examples=omarchy agent openshell provider import codex | omarchy agent openshell provider import codex --name codex
+# omarchy:examples=omarchy agent openshell provider import pi | omarchy agent openshell provider import codex --name codex
 
 set -euo pipefail
 
@@ -14,6 +14,7 @@ fi
 provider=$1
 shift
 name=$provider
+[[ $provider != pi ]] || name=pi-codex
 force=false
 while (($#)); do
   case "$1" in
@@ -37,10 +38,10 @@ while (($#)); do
 done
 
 case "$provider" in
-  codex) ;;
+  codex|pi) ;;
   *)
     echo "Unsupported OpenShell provider import: $provider" >&2
-    echo "Supported now: codex" >&2
+    echo "Supported now: codex, pi (openai-codex access-token snapshot)" >&2
     exit 1
     ;;
 esac
@@ -50,17 +51,34 @@ command -v openshell >/dev/null 2>&1 || { echo "OpenShell is not installed. Run:
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 "$script_dir/omarchy-agent-openshell-doctor" --quick >/dev/null
 
-auth_file=${CODEX_AUTH_FILE:-$HOME/.codex/auth.json}
-if [[ ! -f $auth_file ]]; then
-  echo "Codex auth file not found: $auth_file" >&2
-  echo "Log in with Codex on the host first, then rerun this import." >&2
-  exit 1
+if [[ $provider == pi ]]; then
+  auth_file=${PI_AUTH_FILE:-${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/auth.json}
+  [[ -f $auth_file ]] || { echo "Pi auth file not found: $auth_file" >&2; exit 1; }
+  # Snapshot only: sharing a rotating refresh token with the gateway could
+  # invalidate the host Pi login. Host Pi remains the sole refresh owner.
+  jq -e --argjson now "$(date +%s)" '
+    .["openai-codex"] | .type == "oauth" and
+    (.expires | type == "number") and (.expires > ($now * 1000))
+  ' "$auth_file" >/dev/null || {
+    echo "Pi openai-codex OAuth credentials are missing or expired. Refresh the host Pi login first." >&2
+    exit 1
+  }
+  access_token=$(jq -er '.["openai-codex"].access | select(type == "string" and length > 0)' "$auth_file") || { echo "Pi access token is missing" >&2; exit 1; }
+  account_id=$(jq -er '.["openai-codex"].accountId | select(type == "string" and length > 0)' "$auth_file") || { echo "Pi account ID is missing" >&2; exit 1; }
+  refresh_token=""
+  id_token=""
+else
+  auth_file=${CODEX_AUTH_FILE:-$HOME/.codex/auth.json}
+  if [[ ! -f $auth_file ]]; then
+    echo "Codex auth file not found: $auth_file" >&2
+    echo "Log in with Codex on the host first, then rerun this import." >&2
+    exit 1
+  fi
+  access_token=$(jq -er '.tokens.access_token' "$auth_file") || { echo "Codex access token is missing in $auth_file" >&2; exit 1; }
+  account_id=$(jq -er '.tokens.account_id' "$auth_file") || { echo "Codex account id is missing in $auth_file" >&2; exit 1; }
+  refresh_token=$(jq -er '.tokens.refresh_token' "$auth_file") || { echo "Codex refresh token is missing in $auth_file" >&2; exit 1; }
+  id_token=$(jq -er '.tokens.id_token // empty' "$auth_file" || true)
 fi
-
-access_token=$(jq -er '.tokens.access_token' "$auth_file") || { echo "Codex access token is missing in $auth_file" >&2; exit 1; }
-account_id=$(jq -er '.tokens.account_id' "$auth_file") || { echo "Codex account id is missing in $auth_file" >&2; exit 1; }
-refresh_token=$(jq -er '.tokens.refresh_token' "$auth_file") || { echo "Codex refresh token is missing in $auth_file" >&2; exit 1; }
-id_token=$(jq -er '.tokens.id_token // empty' "$auth_file" || true)
 
 tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
@@ -142,7 +160,7 @@ if openshell provider get "$name" >/dev/null 2>&1; then
   openshell provider delete "$name" >/dev/null
 fi
 
-if openshell profile describe codex >/dev/null 2>&1 && [[ $force == true ]]; then
+if openshell profile describe codex >/dev/null 2>&1 && [[ $force == true && $provider == codex ]]; then
   openshell profile delete codex >/dev/null || true
 fi
 if ! openshell profile describe codex >/dev/null 2>&1; then
@@ -161,14 +179,20 @@ env \
     --credential CODEX_AUTH_ACCOUNT_ID \
     ${id_token:+--credential CODEX_AUTH_ID_TOKEN} >/dev/null
 
-env CODEX_AUTH_REFRESH_TOKEN="$refresh_token" \
-  openshell provider refresh configure "$name" \
-    --credential-key CODEX_AUTH_ACCESS_TOKEN \
-    --strategy oauth2-refresh-token \
-    --material client_id=app_EMoamEEZ73f0CkXaXp7hrann \
-    --secret-material-env refresh_token=CODEX_AUTH_REFRESH_TOKEN >/dev/null
+if [[ $provider == pi ]]; then
+  echo "Imported Pi Codex access-token snapshot into OpenShell provider: $name"
+  echo "Host Pi retains refresh ownership. No refresh token was imported."
+  echo "After host Pi refreshes, rerun: omarchy agent openshell provider import pi --name $name --force"
+else
+  env CODEX_AUTH_REFRESH_TOKEN="$refresh_token" \
+    openshell provider refresh configure "$name" \
+      --credential-key CODEX_AUTH_ACCESS_TOKEN \
+      --strategy oauth2-refresh-token \
+      --material client_id=app_EMoamEEZ73f0CkXaXp7hrann \
+      --secret-material-env refresh_token=CODEX_AUTH_REFRESH_TOKEN >/dev/null
 
-openshell provider refresh rotate "$name" --credential-key CODEX_AUTH_ACCESS_TOKEN >/dev/null || true
+  openshell provider refresh rotate "$name" --credential-key CODEX_AUTH_ACCESS_TOKEN >/dev/null || true
 
-echo "Imported Codex credentials into OpenShell provider: $name"
-echo "Stored credential values were not printed. Refresh material is held by the OpenShell gateway."
+  echo "Imported Codex credentials into OpenShell provider: $name"
+  echo "Stored credential values were not printed. Refresh material is held by the OpenShell gateway."
+fi
