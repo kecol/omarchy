@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { promises as fs, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
+import { StringDecoder } from "node:string_decoder";
 import {
 	type Api,
 	type AssistantMessage,
@@ -12,6 +13,7 @@ import {
 	type Model,
 	type SimpleStreamOptions,
 	type TextContent,
+	type ToolCall,
 	type TranscriptContext,
 } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -56,14 +58,28 @@ function textFromContent(content: any): string {
 		.join("\n");
 }
 
-function toResponsesInput(context: TranscriptContext) {
-	const transcript = collapseSystemMessages(context);
-	return transcript.messages
-		.filter((message) => message.role === "user" || message.role === "assistant")
-		.map((message) => ({
-			role: message.role,
-			content: [{ type: message.role === "assistant" ? "output_text" : "input_text", text: textFromContent((message as any).content) }],
-		}));
+export function toResponsesInput(context: TranscriptContext) {
+	const input: any[] = [];
+	for (const message of collapseSystemMessages(context).messages) {
+		if (message.role === "toolResult") {
+			// Tool results are messages, not content blocks in user messages.
+			const [callId] = message.toolCallId.split("|");
+			input.push({ type: "function_call_output", call_id: callId, output: textFromContent(message.content) });
+		} else if (message.role === "user") {
+			input.push({ role: "user", content: [{ type: "input_text", text: textFromContent(message.content) }] });
+		} else if (message.role === "assistant") {
+			for (const part of message.content) {
+				if (part.type === "text" && part.text) {
+					input.push({ role: "assistant", content: [{ type: "output_text", text: part.text }] });
+				} else if (part.type === "toolCall") {
+					const [callId, itemId] = part.id.split("|");
+					input.push({ type: "function_call", ...(itemId ? { id: itemId } : {}),
+						call_id: callId, name: part.name, arguments: JSON.stringify(part.arguments) });
+				}
+			}
+		}
+	}
+	return input;
 }
 
 function strictSchema(schema: any): any {
@@ -115,6 +131,8 @@ async function curlResponses(accessToken: string, payload: any, signal?: AbortSi
 	let text = "";
 	let usage: any = null;
 	let completed = false;
+	const decoder = new StringDecoder("utf8");
+	if (signal?.aborted) throw new Error("Request was aborted");
 	const toolCalls = new Map<string, { id: string; call_id: string; name: string; arguments: string }>();
 
 	await new Promise<void>((resolve, reject) => {
@@ -133,13 +151,16 @@ async function curlResponses(accessToken: string, payload: any, signal?: AbortSi
 			"-d",
 			"@-",
 		]);
-		signal?.addEventListener("abort", () => child.kill("SIGTERM"), { once: true });
+		const abort = () => child.kill("SIGTERM");
+		signal?.addEventListener("abort", abort, { once: true });
+		if (signal?.aborted) abort();
+		child.stdin.on("error", reject);
 		child.stdin.end(JSON.stringify(payload));
 		child.stderr.on("data", (chunk) => {
 			stderr += chunk.toString();
 		});
 		child.stdout.on("data", (chunk) => {
-			sseBuffer += chunk.toString();
+			sseBuffer += decoder.write(chunk).replace(/\r\n/g, "\n");
 			const parsed = parseSseBuffer(sseBuffer);
 			sseBuffer = parsed.rest;
 			for (const event of parsed.events) {
@@ -170,7 +191,9 @@ async function curlResponses(accessToken: string, payload: any, signal?: AbortSi
 		});
 		child.on("error", reject);
 		child.on("close", (code) => {
-			if (code === 0) resolve();
+			signal?.removeEventListener("abort", abort);
+			if (signal?.aborted) reject(new Error("Request was aborted"));
+			else if (code === 0) resolve();
 			else reject(new Error(`curl exited with ${code}${stderr ? `: ${stderr}` : ""}`));
 		});
 	});
@@ -179,51 +202,7 @@ async function curlResponses(accessToken: string, payload: any, signal?: AbortSi
 	return { text, usage, toolCalls: [...toolCalls.values()] };
 }
 
-async function executeTool(name: string, args: any): Promise<string> {
-	if (name === "bash") {
-		return await new Promise((resolve) => {
-			const child = spawn("bash", ["-lc", String(args.command ?? "")], { cwd: process.cwd() });
-			let stdout = "";
-			let stderr = "";
-			const timeout = typeof args.timeout === "number" ? setTimeout(() => child.kill("SIGTERM"), args.timeout * 1000) : null;
-			child.stdout.on("data", (chunk) => (stdout += chunk.toString()));
-			child.stderr.on("data", (chunk) => (stderr += chunk.toString()));
-			child.on("close", (code) => {
-				if (timeout) clearTimeout(timeout);
-				resolve(`${stdout}${stderr ? `\n[stderr]\n${stderr}` : ""}${code ? `\n[exit ${code}]` : ""}`);
-			});
-		});
-	}
-	if (name === "read") {
-		const data = await fs.readFile(String(args.path), "utf8");
-		const lines = data.split(/\r?\n/);
-		const start = Math.max(0, Number(args.offset ?? 1) - 1);
-		const end = args.limit == null ? lines.length : start + Number(args.limit);
-		return lines.slice(start, end).join("\n");
-	}
-	if (name === "write") {
-		await fs.mkdir(String(args.path).split("/").slice(0, -1).join("/") || ".", { recursive: true });
-		await fs.writeFile(String(args.path), String(args.content ?? ""));
-		return `Wrote ${args.path}`;
-	}
-	if (name === "edit") {
-		const path = String(args.path);
-		let content = await fs.readFile(path, "utf8");
-		for (const edit of args.edits ?? []) {
-			const oldText = String(edit.oldText ?? "");
-			const newText = String(edit.newText ?? "");
-			const first = content.indexOf(oldText);
-			if (first < 0) throw new Error(`edit target not found in ${path}`);
-			if (content.indexOf(oldText, first + oldText.length) >= 0) throw new Error(`edit target is not unique in ${path}`);
-			content = content.slice(0, first) + newText + content.slice(first + oldText.length);
-		}
-		await fs.writeFile(path, content);
-		return `Edited ${path}`;
-	}
-	return `Tool ${name} is not implemented by the OpenShell Codex bridge yet.`;
-}
-
-function streamOpenShellCodex(model: Model<Api>, context: TranscriptContext, options?: SimpleStreamOptions): AssistantMessageEventStream {
+export function streamOpenShellCodex(model: Model<Api>, context: TranscriptContext, options?: SimpleStreamOptions): AssistantMessageEventStream {
 	const stream = createAssistantMessageEventStream();
 
 	(async () => {
@@ -259,33 +238,29 @@ function streamOpenShellCodex(model: Model<Api>, context: TranscriptContext, opt
 			};
 			if (tools.length > 0) payload.tools = toResponsesTools(tools);
 
+			// One model request per stream. Pi, not this provider, owns tool
+			// execution, validation, permission hooks and continuation turns.
+			const replacement = await options?.onPayload?.(payload, model);
+			const result = await curlResponses(accessToken, replacement ?? payload, options?.signal);
+			if (options?.signal?.aborted) throw new Error("Request was aborted");
 			stream.push({ type: "start", partial: output });
-			let finalText = "";
-			let finalUsage: any = null;
-			for (let turn = 0; turn < 6; turn++) {
-				const result = await curlResponses(accessToken, payload, options?.signal);
-				finalUsage = result.usage ?? finalUsage;
-				if (result.toolCalls.length === 0) {
-					finalText = result.text;
-					break;
-				}
-				for (const call of result.toolCalls) {
-					payload.input.push({ type: "function_call", id: call.id, call_id: call.call_id, name: call.name, arguments: call.arguments });
-					let toolOutput: string;
-					try {
-						toolOutput = await executeTool(call.name, JSON.parse(call.arguments || "{}"));
-					} catch (error) {
-						toolOutput = error instanceof Error ? error.message : String(error);
-					}
-					payload.input.push({ type: "function_call_output", call_id: call.call_id, output: toolOutput });
-				}
+			if (result.text) {
+				(output.content as TextContent[]).push({ type: "text", text: "" });
+				stream.push({ type: "text_start", contentIndex: 0, partial: output });
+				(output.content[0] as TextContent).text = result.text;
+				stream.push({ type: "text_delta", contentIndex: 0, delta: result.text, partial: output });
+				stream.push({ type: "text_end", contentIndex: 0, content: result.text, partial: output });
 			}
-
-			(output.content as TextContent[]).push({ type: "text", text: "" });
-			stream.push({ type: "text_start", contentIndex: 0, partial: output });
-			(output.content[0] as TextContent).text = finalText;
-			stream.push({ type: "text_delta", contentIndex: 0, delta: finalText, partial: output });
-			stream.push({ type: "text_end", contentIndex: 0, content: finalText, partial: output });
+			for (const call of result.toolCalls) {
+				const args = JSON.parse(call.arguments || "{}");
+				const block: ToolCall = { type: "toolCall", id: `${call.call_id}|${call.id}`, name: call.name, arguments: args };
+				output.content.push(block);
+				const contentIndex = output.content.length - 1;
+				stream.push({ type: "toolcall_start", contentIndex, partial: output });
+				stream.push({ type: "toolcall_delta", contentIndex, delta: call.arguments, partial: output });
+				stream.push({ type: "toolcall_end", contentIndex, toolCall: block, partial: output });
+			}
+			const finalUsage = result.usage;
 			if (finalUsage) {
 				output.usage.input = finalUsage.input_tokens ?? 0;
 				output.usage.output = finalUsage.output_tokens ?? 0;
@@ -294,7 +269,7 @@ function streamOpenShellCodex(model: Model<Api>, context: TranscriptContext, opt
 				output.usage.totalTokens = finalUsage.total_tokens ?? output.usage.input + output.usage.output;
 				calculateCost(model, output.usage);
 			}
-			output.stopReason = "stop";
+			output.stopReason = result.toolCalls.length > 0 ? "toolUse" : "stop";
 			stream.push({ type: "done", reason: output.stopReason, message: output });
 			stream.end();
 		} catch (error) {

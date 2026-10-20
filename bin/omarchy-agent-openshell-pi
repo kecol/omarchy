@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-provider=codex
+provider=pi-codex
 model=gpt-6.1-sol
 models_file=${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/openshell/pi-models.json
 models_explicit=false
@@ -42,8 +42,10 @@ Usage: omarchy agent openshell pi [--provider <name>] [--model <model>] [--model
 Runs Pi in a disposable OpenShell sandbox with an imported Codex provider. By
 default this is a minimal no-tool proof for OpenShell + provider credentials +
 Pi model selection. Pass --tools to expose Pi's default local tools inside the
-OpenShell sandbox. It does not mount your host Pi home or auth directories.
+OpenShell sandbox. Pi owns tool execution and its normal validation/hooks.
+It does not mount your host Pi home or auth directories.
 
+Default credential provider: pi-codex (import with: omarchy agent openshell provider import pi)
 Default model: gpt-6.1-sol on Pi provider openshell-codex
 Default image: localhost/omarchy-harness-pi:latest
 Model catalog: ~/.config/omarchy/openshell/pi-models.json (if present)
@@ -83,7 +85,8 @@ jq -e --arg model "$model" 'any(.[]; .id == $model)' <<<"$models_json" >/dev/nul
 command -v openshell >/dev/null 2>&1 || { echo "OpenShell is not installed. Run: omarchy agent openshell install" >&2; exit 1; }
 openshell provider get "$provider" >/dev/null 2>&1 || {
   echo "OpenShell provider is missing: $provider" >&2
-  echo "For Codex: omarchy agent openshell provider import codex --force" >&2
+  echo "For Pi: omarchy agent openshell provider import pi" >&2
+  echo "For Codex: omarchy agent openshell provider import codex" >&2
   exit 1
 }
 
@@ -147,7 +150,7 @@ tools_flag="--no-tools"
 tools_value=""
 if [ "${OMARCHY_OPEN_SHELL_TOOLS:-false}" = true ]; then
   tools_flag="--tools"
-  tools_value="*"
+  tools_value="read,bash,edit,write"
 fi
 printf "Sandbox credential env: CODEX_AUTH_ACCESS_TOKEN=opaque CODEX_AUTH_ACCOUNT_ID=set\n"
 printf "Running Pi model: openshell-codex/%s\n" "$OMARCHY_OPEN_SHELL_MODEL"
@@ -160,6 +163,8 @@ printf "%s" "$OMARCHY_OPEN_SHELL_PROMPT" | HOME="$HOME" PI_CODING_AGENT_DIR="$ag
   --offline \
   "$tools_flag" ${tools_value:+"$tools_value"} \
   --no-context-files \
+  --no-extensions \
+  --no-mcp \
   --no-skills \
   --no-prompt-templates \
   --no-themes

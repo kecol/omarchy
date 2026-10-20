@@ -124,13 +124,12 @@ output=$(env HOME="$test_home" OMARCHY_TEST_PROVIDER_EXISTS=true OMARCHY_TEST_OP
   "$ROOT/bin/omarchy-agent-openshell-pi" --model gpt-6.1-sol "hello pi")
 [[ $output == *"OpenShell provider: codex"* ]] || fail "OpenShell Pi proof invokes sandbox" "$output"
 tr '\0' ' ' <"$openshell_log" >"$test_tmp/openshell-pi-log-text"
-grep -Fq -- 'sandbox create --no-keep --no-tty --from localhost/omarchy-harness-pi:latest --provider codex' "$test_tmp/openshell-pi-log-text" ||
+grep -Fq -- 'sandbox create --no-keep --no-tty --from localhost/omarchy-harness-pi:latest --provider pi-codex' "$test_tmp/openshell-pi-log-text" ||
   fail "OpenShell Pi proof creates a disposable Pi sandbox" "$(cat "$test_tmp/openshell-pi-log-text")"
 grep -Fq -- '--extension /opt/omarchy/pi/extensions/openshell-codex.ts' "$test_tmp/openshell-pi-log-text" ||
   fail "OpenShell Pi proof loads the OpenShell Codex Pi extension" "$(cat "$test_tmp/openshell-pi-log-text")"
-if grep -Fq -- '--no-extensions' "$test_tmp/openshell-pi-log-text"; then
-  fail "OpenShell Pi proof must not disable its provider extension" "$(cat "$test_tmp/openshell-pi-log-text")"
-fi
+grep -Fq -- '--no-extensions' "$test_tmp/openshell-pi-log-text" || fail "disable ambient extensions (explicit provider remains loaded)" ""
+grep -Fq -- '--no-mcp' "$test_tmp/openshell-pi-log-text" || fail "disable ambient MCP" ""
 pass "OpenShell Pi proof wires the OpenShell Codex Pi extension"
 
 : >"$openshell_log"
@@ -142,6 +141,7 @@ grep -Fq -- '--env OMARCHY_OPEN_SHELL_TOOLS=true' "$test_tmp/openshell-pi-tools-
   fail "OpenShell Pi proof passes tools mode into sandbox" "$(cat "$test_tmp/openshell-pi-tools-log-text")"
 grep -Fq -- 'tools_flag="--no-tools"' "$test_tmp/openshell-pi-tools-log-text" ||
   fail "OpenShell Pi proof keeps no-tool mode explicit by default in sandbox script" "$(cat "$test_tmp/openshell-pi-tools-log-text")"
+grep -Fq 'tools_value="read,bash,edit,write"' "$test_tmp/openshell-pi-tools-log-text" || fail "enable only the native default tools" ""
 pass "OpenShell Pi proof supports explicit Pi tools mode"
 
 catalog="$ROOT/containers/harnesses/pi/extensions/openshell-codex-models.json"

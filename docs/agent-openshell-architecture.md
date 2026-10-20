@@ -4,6 +4,29 @@ Omarchy currently supports host execution and hardened rootless Podman execution
 
 This document describes the intended architecture before Omarchy makes OpenShell a first-class agent runtime.
 
+## Native Pi tools in OpenShell
+
+The Pi command defaults to credential provider `pi-codex`; use `--provider codex`
+only when intentionally using a separate Codex import. Missing providers fail
+explicitly rather than silently falling back to another account.
+
+```bash
+omarchy agent openshell pi --tools "Use bash to run pwd"
+```
+
+`--tools` exposes Pi's native `read`, `bash`, `edit`, and `write` tools. The provider
+performs one model request per turn and returns tool-call events to Pi. Pi owns
+argument validation, tool execution, lifecycle/permission hooks, result formatting,
+truncation and continuation. The bridge no longer implements substitute file or
+shell tools. Tool results are encoded as Responses function-call outputs on the
+next model turn. Ambient extension discovery and MCP are disabled; the explicit
+OpenShell provider extension remains loaded.
+
+OpenShell remains the outer filesystem/network boundary. Tool writes remain in
+the disposable sandbox, not the host project. The provider is still text-only
+and currently buffers each model response before handing it to Pi. Rebuild once
+after this provider change: `omarchy harness build pi 1.3.0`.
+
 ## Importing the primary host Pi login
 
 ```bash
