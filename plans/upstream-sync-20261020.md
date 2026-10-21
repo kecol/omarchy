@@ -2,7 +2,7 @@
 
 ## Decision
 
-The source merge is in draft PR #7. The packaged stable-to-RC VM upgrade passed, and individual fork VM checks now pass after fixture corrections. The earlier input-method startup failure was not reproduced in three fresh-overlay runs with diagnostics enabled. Keep the PR draft until the full corrected graphical suite runs together and the earlier intermittent failure is recorded for review. Do not activate this checkout on the current desktop yet. Matching host packages and completed acceptance validation remain deployment gates. Passing source tests does not prove that a package update, migration run, or reboot will succeed.
+The source merge is in draft PR #7. The packaged stable-to-RC VM upgrade passed, and many individual fork VM checks pass after fixture corrections. The later complete graphical run exposed an OCR false negative and an intermittent monitor-placement failure. The OCR helper is corrected; monitor placement and a subsequent synthetic-typing failure remain under investigation. The earlier input-method startup failure was not reproduced in three fresh-overlay runs or the later graphical aggregate. Keep the PR draft until the remaining graphical findings are resolved or explained and reviewed. Do not activate this checkout on the current desktop yet. Matching host packages and completed acceptance validation remain deployment gates. Passing source tests does not prove that a package update, migration run, or reboot will succeed.
 
 ## Pinned inputs and isolation
 
@@ -104,7 +104,7 @@ Current individual graphical results:
 | SSH/security acceptance with normalized prerequisite | Pass | Pass |
 | Core system and package checks with explicit prerequisites | Pass | Pass |
 | Weather/panels | Pass | Pass |
-| Overlay-monitor geometry | Pass | Pass |
+| Overlay-monitor geometry | Pass | Initial standalone passes; later aggregate placement failure under investigation |
 | Menu and bar-position navigation | Pass | Pass |
 | Shell surfaces and app launch through the dock grid | Pass | Pass |
 | Full input-method sequence | Pass | Three later fresh-overlay passes; earlier GTK startup failure not reproduced |
@@ -117,13 +117,23 @@ The input-method follow-up adds per-engine/toolkit application startup logs and 
 
 The diagnostic evidence is in `input-startup-diagnostics/`, `input-startup-diagnostics-02/`, and `input-startup-diagnostics-03/` beneath the comparison evidence directory. Three passing isolated reruns are not proof that the earlier intermittent startup failure is fixed. The complete graphical aggregate still needs a clean run with the corrected tests.
 
-Comparison evidence is under `~/VMs/omarchy-sync-review/triage-evidence/`. The `menu-route-compat/results.csv` and `updated-ui-tests/results.csv` record the successful corrected menu and app-grid comparisons. `final-ui-checks/input-methods.log` records the remaining GTK-window failure. These results are individual reruns, not a claim that the complete graphical aggregate suite is green.
+Comparison evidence is under `~/VMs/omarchy-sync-review/triage-evidence/`. The `menu-route-compat/results.csv` and `updated-ui-tests/results.csv` record the successful corrected menu and app-grid comparisons. `final-ui-checks/input-methods.log` preserves the earlier GTK-window failure, which later runs did not reproduce. These results are individual reruns, not a claim that the complete graphical aggregate suite is green.
 
 The host was returned to packaged Omarchy 4.0.6 after the old dev checkout showed Qt 6.12 palette errors. The packaged desktop renders normally. Keep it unlinked during remaining validation. Host Btrfs corruption counters stayed at the historical value 10 during the later VM runs; this does not establish that the original storage problem is repaired.
 
+## Complete graphical aggregate and focus investigation
+
+At `92abe8ba8`, the complete graphical suite ran in a fresh fork overlay with guest idle disabled and the documented package and SSH prerequisites checked. It exited 1 after 229 seconds. Only the menu bar-submenu visibility check and the second overlay-monitor placement check failed. The full input-method sequence passed. Evidence is in `triage-evidence/full-corrected-acceptance/`.
+
+The failed menu screenshot visibly contains Position Bar. OCR of that saved image splits Position and Bar across lines, which the helper's line-oriented literal match rejects. Commit `19411dd65` normalizes OCR whitespace without fuzzy matching or skipping words. Its mocked regression rejects absent, merged, and nonadjacent words as well as capture/OCR errors. The corrected menu test also passed inside a fresh fork VM.
+
+For monitor diagnosis, temporary focus/screen-selection logging was added only inside a disposable VM, not to production source in this PR. Four consecutive full overlay-monitor tests passed. Attempt five passed placement but failed later when `wtype "keybindings"` arrived as `keybiindngs`; the failure screenshot shows that exact misspelled query and no matches. This is a different failure from the original wrong-output placement. Focus logs show the intended output was selected throughout these five attempts. Neither an original-placement root cause nor a production fix is established. Evidence is in `triage-evidence/menu-monitor-diagnostics/`.
+
+The isolated diagnostic run recorded zero memory-cap, OOM, and task-limit events, with host Btrfs counters unchanged. A further fresh-overlay full-sequence diagnostic run was launched with the OCR correction and temporary focus logging; its result is pending review under `triage-evidence/full-focus-diagnostics/`. A pass with diagnostic logging would not by itself prove the intermittent failures fixed. The final corrected aggregate must also be validated without that VM-only logging.
+
 ## Remaining review gates
 
-1. Run the complete corrected graphical aggregate in a fresh fork VM overlay with the documented prerequisites and guest idle disabled. Keep startup logging enabled, and investigate any recurrence of the intermittent GTK startup failure without weakening composition assertions.
+1. Investigate the aggregate monitor-placement failure and subsequent synthetic-typing permutation, then rerun the complete corrected graphical suite in a fresh VM without temporary focus logging. Keep the readiness, placement, recovery, search, and composition assertions intact.
 2. Record the exhaustive i18n completeness failure as upstream translation drift; do not describe the aggregate suite as fully green.
 3. Review the fixture changes and repeated-test evidence, then decide whether PR #7 can leave draft. Do not merge automatically.
 4. Plan any host RC/package transition separately. The packaged host is working, and no dev relink is needed to continue VM testing.
