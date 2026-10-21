@@ -2,7 +2,7 @@
 
 ## Decision
 
-The source merge remains in draft PR #7. The packaged stable-to-RC VM upgrade passed. The corrected full graphical suite at `4b4d20fb9` passed all 10 test files in one fresh VM overlay without temporary shell logging. The OCR false negative and an invalid duplicate-shell diagnostic setup are corrected. Earlier intermittent GTK-startup, monitor-placement, and synthetic-typing failures have not been assigned confirmed root causes. Keep the PR draft pending review of these findings and the known upstream i18n completeness failure. Do not activate this checkout on the current desktop yet. Matching host packages and completed acceptance validation remain deployment gates. Passing source tests does not prove that a package update, migration run, or reboot will succeed.
+The source merge is ready for review in PR #7, not for automatic merge or host deployment. The packaged stable-to-RC VM upgrade passed. The corrected full graphical suite passed all 10 files twice in separate fresh overlays, without temporary shell logging. After correcting two independently reproduced test-helper races, the final full non-graphical rerun has only the known upstream i18n completeness failure out of 478 shell files; CLI passes. Earlier intermittent GTK-startup, monitor-placement, and synthetic-typing failures remain recorded without claims that their causes are fixed. Review these limitations and the explicit VM prerequisites before merging. Do not activate this checkout on the current desktop yet. Matching host packages and completed acceptance validation remain deployment gates. Passing source tests does not prove that a package update, migration run, or reboot will succeed.
 
 ## Pinned inputs and isolation
 
@@ -143,14 +143,34 @@ The complete graphical suite at `4b4d20fb9` then passed all 10 files in 262 seco
 
 Final evidence is in `triage-evidence/single-shell-ocr-capture-02/`: `acceptance.log`, preflight/postflight records, raw OCR files and screenshots under `omarchy-single-shell-ocr/`, and host resource/storage snapshots. Memory-cap, OOM, and task-limit events were zero. Host storage counters remained corruption 10 and all other error counters zero. All VMs were stopped after collection.
 
-This is one clean complete graphical pass, not proof that all earlier intermittent failures are eliminated. The exhaustive upstream i18n failure, missing-default-package upgrade distinction, and SSH no-final-newline edge case remain documented separately. The full non-graphical aggregate was not rerun after adding the OCR regression; the focused new regression and actual-frame replay passed.
+This first clean complete graphical pass did not prove that all earlier intermittent failures were eliminated. The subsequent full non-graphical rerun and second graphical pass are documented below. The exhaustive upstream i18n failure, missing-default-package upgrade distinction, and SSH no-final-newline edge case remain documented separately.
 
-## Remaining review gates
+## Final review validation and deterministic test observers
 
-1. Review the clean complete graphical pass alongside the earlier intermittent GTK-startup, monitor-placement, and synthetic-typing failures. Do not describe their causes as fixed or confirmed merely because later runs pass.
-2. Record the exhaustive i18n completeness failure as upstream translation drift; do not describe the aggregate suite as fully green.
-3. Review the fixture changes and repeated-test evidence, then decide whether PR #7 can leave draft. Do not merge automatically.
-4. Plan any host RC/package transition separately. The packaged host is working, and no dev relink is needed to continue VM testing.
+A fresh-overlay run pinned to `70f3da454` repeated both suites. CLI passed. The shell suite initially reported three failures out of 478 files: known i18n drift, a privileged-heredoc fixture assertion, and a Windows-VM FD-count assertion. The complete graphical suite then passed all 10 files in 255 seconds, including input methods, menu/bar navigation, monitor recovery, and notifications. Session preflight and postflight passed with a single shell owning notifications. Recovery and notification screenshots were inspected. This provides a second complete graphical pass, after the earlier 262-second pass.
+
+Both newly failing security tests and the Windows command under test match pinned upstream. Their original standalone tests subsequently passed three times each. Independent no-application-work controls identified the observer races rather than assuming that rerun success proves correctness:
+
+- The parent-process FD counter returned different totals twice in 500 unchanged-state comparisons. It observes the parent's transient command-substitution pipe ends. A builtin snapshot of the counting subshell's inherited FDs had zero mismatches and measured a deliberate descriptor open/close as 4, 5, 4. Commit `ca1ad61a3` uses that observer and adds an open/close calibration. Existing exact-count, ancestry, mount-safety, and race assertions remain intact.
+- The actual heredoc finding text contains the expected substring, but `grep -q` can exit before its producer finishes. In 1,000 controls, the producer once exited 141 while grep exited 0; consuming grep had zero failures. Commit `efcfcf9ff` consumes the complete stream under pipefail and retains the literal finding assertion. The privileged-write scanner and production commands are unchanged.
+
+Both corrected tests passed three consecutive VM runs each. The complete CLI/shell suite then ran again in a separate fresh overlay with those frozen candidate files. CLI passed. Only `test/shell.d/i18n-test.sh` failed among 478 shell files, with skipped checks in 43 files. The aggregate exit remains 1 and is not relabeled green. Its Danish catalog mismatch is the same failure already reproduced on unchanged upstream. Session postflight and the evidence collector exited 0.
+
+The frozen files match the committed fixture fixes byte-for-byte. The second graphical run validated the same production and acceptance-test code: only these two non-graphical fixture files and the host planning document changed afterward. No production behavior or graphical assertions were changed to obtain the final results.
+
+Evidence directories under `~/VMs/omarchy-sync-review/triage-evidence/`:
+
+- `final-sync-validation/`: pinned source identity, initial complete CLI/shell output, second full graphical pass, screenshots, session health, and resource/storage snapshots.
+- `final-fixture-controls/`: no-application-work controls and repeated original security-test results.
+- `fixed-unit-final-validation/`: frozen candidate files and hashes, exact patch, six corrected focused-test passes, final full CLI/shell output, and postflight results.
+
+All final validation jobs retained the existing task, memory, CPU, and one-VM limits. Memory-cap, OOM, and task-limit events stayed zero. Host storage counters remained corruption 10 and all other error counters zero. All VMs were stopped after collection. These are manual VM results, not a claim of green GitHub CI or complete hardware coverage.
+
+## Review closure and deployment gates
+
+1. PR #7 may leave draft for human review. The remaining reproducible test failure is pinned-upstream i18n completeness drift; the earlier intermittent failures remain documented limitations rather than claimed fixes.
+2. Review the fixture changes, repeated graphical evidence, skipped checks, explicit new-package prerequisites, and SSH final-newline edge case before merging. Do not merge automatically.
+3. Keep the working packaged host unlinked. A separately approved coherent RC transition, recovery preparation, and any later source activation follow `plans/host-rc-transition.md`. That document is a plan only; no host transition was executed.
 
 ## Initial gates (superseded by the follow-up above)
 
