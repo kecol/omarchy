@@ -2,7 +2,7 @@
 
 ## Decision
 
-The source merge is in draft PR #7. The packaged stable-to-RC VM upgrade passed, and many individual fork VM checks pass after fixture corrections. The later complete graphical run exposed an OCR false negative and an intermittent monitor-placement failure. The OCR helper is corrected; monitor placement and a subsequent synthetic-typing failure remain under investigation. The earlier input-method startup failure was not reproduced in three fresh-overlay runs or the later graphical aggregate. Keep the PR draft until the remaining graphical findings are resolved or explained and reviewed. Do not activate this checkout on the current desktop yet. Matching host packages and completed acceptance validation remain deployment gates. Passing source tests does not prove that a package update, migration run, or reboot will succeed.
+The source merge remains in draft PR #7. The packaged stable-to-RC VM upgrade passed. The corrected full graphical suite at `4b4d20fb9` passed all 10 test files in one fresh VM overlay without temporary shell logging. The OCR false negative and an invalid duplicate-shell diagnostic setup are corrected. Earlier intermittent GTK-startup, monitor-placement, and synthetic-typing failures have not been assigned confirmed root causes. Keep the PR draft pending review of these findings and the known upstream i18n completeness failure. Do not activate this checkout on the current desktop yet. Matching host packages and completed acceptance validation remain deployment gates. Passing source tests does not prove that a package update, migration run, or reboot will succeed.
 
 ## Pinned inputs and isolation
 
@@ -97,14 +97,14 @@ Initial graphical failures included VM display power-off during the long SSH-dri
 
 The SSH acceptance test also exposed an existing setup edge case: the VM bootstrap's authorized_keys file had no final newline, so the setup command appended its test key onto the existing line. This reproduced on packaged RC. Normalizing the test prerequisite made the acceptance check pass, but no product fix for no-final-newline input is claimed.
 
-Current individual graphical results:
+Graphical coverage (see complete-suite evidence below):
 
 | Check | Packaged RC | Fork |
 | --- | --- | --- |
 | SSH/security acceptance with normalized prerequisite | Pass | Pass |
 | Core system and package checks with explicit prerequisites | Pass | Pass |
 | Weather/panels | Pass | Pass |
-| Overlay-monitor geometry | Pass | Initial standalone passes; later aggregate placement failure under investigation |
+| Overlay-monitor geometry | Pass | Pass in corrected complete suite; earlier intermittent placement failure retained for review |
 | Menu and bar-position navigation | Pass | Pass |
 | Shell surfaces and app launch through the dock grid | Pass | Pass |
 | Full input-method sequence | Pass | Three later fresh-overlay passes; earlier GTK startup failure not reproduced |
@@ -115,9 +115,9 @@ A host process-exhaustion interruption invalidated part of the first comparison.
 
 The input-method follow-up adds per-engine/toolkit application startup logs and captures clients, failed user units, the user journal, process metadata, and memory state before failure cleanup. Composition, window-readiness, and notification assertions are unchanged. The instrumented full sequence passed three consecutive times in separate fresh fork overlays, including Chewing GTK and Cangjie terminal/GTK/Qt/browser checks. All three runs recorded zero host memory-cap, OOM, and task-limit events. Startup logs showed nonfatal Mesa EGL warnings. No fatal startup error or confirmed root cause for the earlier failure was established. Successful Chewing GTK and Cangjie browser screenshots were inspected. The source production code did not change during these reruns.
 
-The diagnostic evidence is in `input-startup-diagnostics/`, `input-startup-diagnostics-02/`, and `input-startup-diagnostics-03/` beneath the comparison evidence directory. Three passing isolated reruns are not proof that the earlier intermittent startup failure is fixed. The complete graphical aggregate still needs a clean run with the corrected tests.
+The diagnostic evidence is in `input-startup-diagnostics/`, `input-startup-diagnostics-02/`, and `input-startup-diagnostics-03/` beneath the comparison evidence directory. Three passing isolated reruns are not proof that the earlier intermittent startup failure is fixed. The complete graphical aggregate subsequently passed after the OCR/session-preflight corrections below; those corrections do not establish a cause for the earlier GTK startup failure.
 
-Comparison evidence is under `~/VMs/omarchy-sync-review/triage-evidence/`. The `menu-route-compat/results.csv` and `updated-ui-tests/results.csv` record the successful corrected menu and app-grid comparisons. `final-ui-checks/input-methods.log` preserves the earlier GTK-window failure, which later runs did not reproduce. These results are individual reruns, not a claim that the complete graphical aggregate suite is green.
+Comparison evidence is under `~/VMs/omarchy-sync-review/triage-evidence/`. The `menu-route-compat/results.csv` and `updated-ui-tests/results.csv` record the successful corrected menu and app-grid comparisons. `final-ui-checks/input-methods.log` preserves the earlier GTK-window failure, which later runs did not reproduce. These directories contain individual reruns; the later complete-suite result and its distinct evidence directory are recorded below.
 
 The host was returned to packaged Omarchy 4.0.6 after the old dev checkout showed Qt 6.12 palette errors. The packaged desktop renders normally. Keep it unlinked during remaining validation. Host Btrfs corruption counters stayed at the historical value 10 during the later VM runs; this does not establish that the original storage problem is repaired.
 
@@ -129,11 +129,25 @@ The failed menu screenshot visibly contains Position Bar. OCR of that saved imag
 
 For monitor diagnosis, temporary focus/screen-selection logging was added only inside a disposable VM, not to production source in this PR. Four consecutive full overlay-monitor tests passed. Attempt five passed placement but failed later when `wtype "keybindings"` arrived as `keybiindngs`; the failure screenshot shows that exact misspelled query and no matches. This is a different failure from the original wrong-output placement. Focus logs show the intended output was selected throughout these five attempts. Neither an original-placement root cause nor a production fix is established. Evidence is in `triage-evidence/menu-monitor-diagnostics/`.
 
-The isolated diagnostic run recorded zero memory-cap, OOM, and task-limit events, with host Btrfs counters unchanged. A further fresh-overlay full-sequence diagnostic run was launched with the OCR correction and temporary focus logging; its result is pending review under `triage-evidence/full-focus-diagnostics/`. A pass with diagnostic logging would not by itself prove the intermittent failures fixed. The final corrected aggregate must also be validated without that VM-only logging.
+The isolated diagnostic run recorded zero memory-cap, OOM, and task-limit events, with host Btrfs counters unchanged. The later full-sequence run under `triage-evidence/full-focus-diagnostics/` exited 1 after 342 seconds, with menu and notification visibility failures. That diagnostic run is invalid for judging normal shell behavior: its screenshots show two bars, and its journal records simultaneous shell PIDs 854 and 942, socket replacement, and competing notification-server registrations. The local runner called restart before checking that initial session startup had settled. No production restart fix is claimed.
+
+## Corrected single-shell aggregate
+
+The local runner now avoids restarting during guest startup. It waits for exactly one Quickshell instance and a responsive notification service. Before testing, it checks that the notification D-Bus owner is that same shell PID. It records instance and ownership data again after the suite. No QML instrumentation is applied.
+
+The first such fresh-overlay run passed 9 of 10 files in 280 seconds, including notifications, input methods, and monitor recovery. Only the menu OCR check failed. The helper now preserves its actual scaled capture, raw OCR output, errors, and match status. That evidence shows sparse-layout OCR reading the visible word Bar as CED. Normalizing whitespace alone cannot repair this segmentation error. Evidence is in `triage-evidence/single-shell-ocr-capture/`.
+
+Commit `4b4d20fb9` retries sparse-layout misses using block-layout OCR on the same captured pixels. Both modes still require the literal expected phrase, with only whitespace and case normalization. No fuzzy match or weakened menu assertion is used. Mocked regression tests cover the fallback, absent/merged/nonadjacent words, capture/OCR errors, and retained diagnostics. Replaying the actual failed VM frame through the real OCR helper recovered Position Bar with mode 6 and still rejected Position Foo. That replay used a mock capture command, not the host desktop.
+
+The complete graphical suite at `4b4d20fb9` then passed all 10 files in 262 seconds in another fresh fork overlay. The test runner and evidence collector both exited 0. All package, SSH, and stay-awake prerequisites remained explicit. Preflight and postflight each show one shell, PID 844, which also owns the notification service. The bar-position, notification, and shorter-screen recovery screenshots were inspected. The bar-position OCR status confirms successful mode-6 matching. No temporary QML focus logging or production source changes were used.
+
+Final evidence is in `triage-evidence/single-shell-ocr-capture-02/`: `acceptance.log`, preflight/postflight records, raw OCR files and screenshots under `omarchy-single-shell-ocr/`, and host resource/storage snapshots. Memory-cap, OOM, and task-limit events were zero. Host storage counters remained corruption 10 and all other error counters zero. All VMs were stopped after collection.
+
+This is one clean complete graphical pass, not proof that all earlier intermittent failures are eliminated. The exhaustive upstream i18n failure, missing-default-package upgrade distinction, and SSH no-final-newline edge case remain documented separately. The full non-graphical aggregate was not rerun after adding the OCR regression; the focused new regression and actual-frame replay passed.
 
 ## Remaining review gates
 
-1. Investigate the aggregate monitor-placement failure and subsequent synthetic-typing permutation, then rerun the complete corrected graphical suite in a fresh VM without temporary focus logging. Keep the readiness, placement, recovery, search, and composition assertions intact.
+1. Review the clean complete graphical pass alongside the earlier intermittent GTK-startup, monitor-placement, and synthetic-typing failures. Do not describe their causes as fixed or confirmed merely because later runs pass.
 2. Record the exhaustive i18n completeness failure as upstream translation drift; do not describe the aggregate suite as fully green.
 3. Review the fixture changes and repeated-test evidence, then decide whether PR #7 can leave draft. Do not merge automatically.
 4. Plan any host RC/package transition separately. The packaged host is working, and no dev relink is needed to continue VM testing.
