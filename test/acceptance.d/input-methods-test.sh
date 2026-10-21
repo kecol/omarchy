@@ -27,6 +27,15 @@ python "$ROOT/test/acceptance.d/input-method-state.py" backup "$work/state" "${p
 notification_monitor=""
 cleanup() {
   local status=$?
+  if (( status != 0 )); then
+    # Capture before closing the fixture: launch_app normally discards stderr,
+    # and a missing window alone cannot distinguish startup failure from timing.
+    hyprctl -j clients > "$ARTIFACTS/input-failure-clients.json" 2>&1 || true
+    systemctl --user --failed --no-pager > "$ARTIFACTS/input-failure-units.log" 2>&1 || true
+    journalctl --user -b -n 200 --no-pager > "$ARTIFACTS/input-failure-journal.log" 2>&1 || true
+    ps -u "$(id -u)" -o pid,ppid,etime,rss,args > "$ARTIFACTS/input-failure-processes.log" 2>&1 || true
+    free -h > "$ARTIFACTS/input-failure-memory.log" 2>&1 || true
+  fi
   if [[ -n $notification_monitor ]]; then
     kill "$notification_monitor" 2>/dev/null || true
     wait "$notification_monitor" 2>/dev/null || true
@@ -174,7 +183,8 @@ for method in mozc hangul pinyin chewing cangjie5; do
       qt) command="qml6 $work/entry.qml"; class='^org\.qt-project\.qml6?$' ;;
       browser) command="chromium --user-data-dir=$work/chromium --no-first-run --app=file://$work/omarchy-ime-entry.html"; class='^chrome-.*_omarchy-ime-entry\.html-Default$' ;;
     esac
-    launch_app "uwsm app -- $command"
+    startup_log="$ARTIFACTS/startup-$method-$toolkit.log"
+    launch_app "uwsm app -- $command >$(printf '%q' "$startup_log") 2>&1"
     wait_until "$method $toolkit opens" 30 window_present "$class"
     sleep 1
     compose

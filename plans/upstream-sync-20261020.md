@@ -2,7 +2,7 @@
 
 ## Decision
 
-The source merge is in draft PR #7. The packaged stable-to-RC VM upgrade passed, and most fork VM checks now pass after fixture corrections. Keep the PR draft while the remaining input-method failure is investigated. Do not activate this checkout on the current desktop yet. Matching host packages and completed acceptance validation remain deployment gates. Passing source tests does not prove that a package update, migration run, or reboot will succeed.
+The source merge is in draft PR #7. The packaged stable-to-RC VM upgrade passed, and individual fork VM checks now pass after fixture corrections. The earlier input-method startup failure was not reproduced in three fresh-overlay runs with diagnostics enabled. Keep the PR draft until the full corrected graphical suite runs together and the earlier intermittent failure is recorded for review. Do not activate this checkout on the current desktop yet. Matching host packages and completed acceptance validation remain deployment gates. Passing source tests does not prove that a package update, migration run, or reboot will succeed.
 
 ## Pinned inputs and isolation
 
@@ -107,11 +107,15 @@ Current individual graphical results:
 | Overlay-monitor geometry | Pass | Pass |
 | Menu and bar-position navigation | Pass | Pass |
 | Shell surfaces and app launch through the dock grid | Pass | Pass |
-| Full input-method sequence | Pass | Fails opening the Chewing GTK test window |
+| Full input-method sequence | Pass | Three later fresh-overlay passes; earlier GTK startup failure not reproduced |
 
 The two shared menu/app-launch failures were stale test expectations. Changes in `2381f3dd6` derive the bar-position route from the product's own menu declarations instead of fixed keyboard row counts, and assert on `omarchy-dock-apps` after the Apps action hands off to the dock. Both corrected tests passed on packaged RC and fork VM overlays. Bar-position screenshots were inspected on both products.
 
-A host process-exhaustion interruption invalidated part of the first comparison. Subsequent jobs ran with 512 host tasks maximum, 6 GiB host memory maximum, a 400% CPU quota, and one 4 GiB VM at a time. In that bounded rerun, fork input testing passed Japanese, Korean, and Pinyin terminal/GTK/Qt/browser composition and Chewing terminal composition, then failed to open the Chewing GTK fixture. This is still an unresolved test/application-startup failure, not a credential failure. No relevant error was found in the retained previous-boot journal query; the fixture discarded application startup output, so that query does not establish a cause. Capture startup output before another focused reproduction.
+A host process-exhaustion interruption invalidated part of the first comparison. Subsequent jobs ran with 512 host tasks maximum, 6 GiB host memory maximum, a 400% CPU quota, and one 4 GiB VM at a time. In that bounded rerun, fork input testing passed Japanese, Korean, and Pinyin terminal/GTK/Qt/browser composition and Chewing terminal composition, then failed to open the Chewing GTK fixture. This was a test/application-startup failure, not a credential failure. No relevant error was found in the retained previous-boot journal query; the fixture discarded application startup output, so that query did not establish a cause. The subsequent instrumented reruns below did not reproduce it.
+
+The input-method follow-up adds per-engine/toolkit application startup logs and captures clients, failed user units, the user journal, process metadata, and memory state before failure cleanup. Composition, window-readiness, and notification assertions are unchanged. The instrumented full sequence passed three consecutive times in separate fresh fork overlays, including Chewing GTK and Cangjie terminal/GTK/Qt/browser checks. All three runs recorded zero host memory-cap, OOM, and task-limit events. Startup logs showed nonfatal Mesa EGL warnings. No fatal startup error or confirmed root cause for the earlier failure was established. Successful Chewing GTK and Cangjie browser screenshots were inspected. The source production code did not change during these reruns.
+
+The diagnostic evidence is in `input-startup-diagnostics/`, `input-startup-diagnostics-02/`, and `input-startup-diagnostics-03/` beneath the comparison evidence directory. Three passing isolated reruns are not proof that the earlier intermittent startup failure is fixed. The complete graphical aggregate still needs a clean run with the corrected tests.
 
 Comparison evidence is under `~/VMs/omarchy-sync-review/triage-evidence/`. The `menu-route-compat/results.csv` and `updated-ui-tests/results.csv` record the successful corrected menu and app-grid comparisons. `final-ui-checks/input-methods.log` records the remaining GTK-window failure. These results are individual reruns, not a claim that the complete graphical aggregate suite is green.
 
@@ -119,7 +123,7 @@ The host was returned to packaged Omarchy 4.0.6 after the old dev checkout showe
 
 ## Remaining review gates
 
-1. Capture the GTK fixture's startup output and resolve or explain the fork input-method failure without weakening its composition assertions.
+1. Run the complete corrected graphical aggregate in a fresh fork VM overlay with the documented prerequisites and guest idle disabled. Keep startup logging enabled, and investigate any recurrence of the intermittent GTK startup failure without weakening composition assertions.
 2. Record the exhaustive i18n completeness failure as upstream translation drift; do not describe the aggregate suite as fully green.
 3. Review the fixture changes and repeated-test evidence, then decide whether PR #7 can leave draft. Do not merge automatically.
 4. Plan any host RC/package transition separately. The packaged host is working, and no dev relink is needed to continue VM testing.
