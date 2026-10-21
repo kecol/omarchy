@@ -46,7 +46,7 @@ case "$provider" in
     ;;
 esac
 
-command -v openshell >/dev/null 2>&1 || { echo "OpenShell is not installed. Run: omarchy agent openshell install" >&2; exit 1; }
+omarchy-cmd-present openshell || { echo "OpenShell is not installed. Run: omarchy agent openshell install" >&2; exit 1; }
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 "$script_dir/omarchy-agent-openshell-doctor" --quick >/dev/null

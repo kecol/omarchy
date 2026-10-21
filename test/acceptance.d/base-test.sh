@@ -35,17 +35,45 @@ screenshot() {
 screen_contains() {
   local text="$1"
   local snapshot="/tmp/omarchy-acceptance-ocr-$$.png"
+  local label=${text,,}
+  label=${label//[^a-z0-9]/-}
+  local evidence="$ARTIFACTS/ocr-${label:0:80}"
+  printf '%s\n' "$text" >"$evidence.expected.txt"
 
   # Capture at 2x scale: tesseract routinely drops small caption text at
   # native resolution (the weather panel's detail labels, for one).
-  if ! timeout 10 grim -s 2 "$snapshot" 2>/dev/null; then
+  if ! timeout 10 grim -s 2 "$snapshot" 2>"$evidence.capture-stderr.txt"; then
+    printf 'capture-failed %s\n' "$EPOCHREALTIME" >"$evidence.status.txt"
     rm -f "$snapshot"
     return 1
   fi
-  tesseract "$snapshot" stdout --psm 11 2>/dev/null | grep -Fi -- "$text" >/dev/null
-  local status=$?
+  local recognized status=0 ocr_ok=0 mode=11
+  if recognized=$(tesseract "$snapshot" stdout --psm 11 2>"$evidence.ocr-stderr.txt"); then
+    ocr_ok=1
+    # Sparse-text OCR can split one visible label across lines (for example
+    # "Position" and "Bar"). Preserve exact words while normalizing spacing.
+    printf '%s\n' "$recognized" | tr '[:space:]' ' ' | tr -s ' ' | grep -Fi -- "$text" >/dev/null || status=$?
+  else
+    status=1
+  fi
+  if ((status)); then
+    cp "$snapshot" "$evidence.last-miss.png"
+    printf '%s\n' "$recognized" >"$evidence.last-miss.txt"
+  fi
+  if ((status && ocr_ok)); then
+    # Sparse layout can mis-segment a label beside an icon or pointer. Retry
+    # the same pixels as a text block, still requiring the exact phrase.
+    local fallback
+    mode=6
+    if fallback=$(tesseract "$snapshot" stdout --psm 6 2>"$evidence.block-stderr.txt"); then
+      status=0
+      printf '%s\n' "$fallback" | tr '[:space:]' ' ' | tr -s ' ' | grep -Fi -- "$text" >/dev/null || status=$?
+    fi
+    printf '%s\n' "$fallback" >"$evidence.block-output.txt"
+  fi
+  printf 'match-status=%s mode=%s %s\n' "$status" "$mode" "$EPOCHREALTIME" >"$evidence.status.txt"
   rm -f "$snapshot"
-  return $status
+  return "$status"
 }
 
 # Poll a command until it succeeds; screenshot and fail on timeout.

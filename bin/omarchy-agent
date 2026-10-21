@@ -78,7 +78,11 @@ if [[ -z $agent ]]; then
 fi
 
 execution_mode=${execution_mode_override:-$(omarchy-agent-mode)}
-if [[ $execution_mode == "host" ]] && omarchy-cmd-missing "$agent"; then
+# OpenClaw's launcher sets OpenClaw up when the package became the seed before
+# this user's OpenClaw moved, so with the package a missing command is its to fix.
+# Container launches resolve their command inside the harness, not on the host.
+if [[ $execution_mode == "host" ]] && omarchy-cmd-missing "$agent" &&
+  ! { [[ $agent == "openclaw" ]] && omarchy-pkg-present openclaw; }; then
   echo "$agent is not installed. Choose an installed agent with: omarchy default agent <name>" >&2
   exit 1
 fi
@@ -179,6 +183,14 @@ pi)
     fi
   fi
   ;;
+kimi)
+  # --prompt is non-interactive print mode only; it cannot combine with --yolo.
+  if [[ -n ${prompt:-} ]]; then
+    command=(kimi --prompt "$prompt")
+  else
+    command=(kimi --yolo)
+  fi
+  ;;
 *)
   echo "Unsupported default agent: $agent" >&2
   exit 1
@@ -199,6 +211,14 @@ if [[ $oneshot == "true" ]]; then
     echo "One-shot prompts are not supported for $agent yet." >&2
     exit 1
   fi
+fi
+
+# A user-installed Cursor or Muse still wins in the agent launcher even when
+# mise's system lazy shim is earlier on PATH.
+if [[ $execution_mode == "host" && ( $agent == "cursor-agent" || $agent == "muse" ) ]] &&
+  [[ -f $HOME/.local/bin/$agent && -x $HOME/.local/bin/$agent ]] &&
+  { [[ -L $HOME/.local/bin/$agent ]] || ! grep -q '^mise use -g' "$HOME/.local/bin/$agent"; }; then
+  command[0]="$HOME/.local/bin/$agent"
 fi
 
 # A new session uses the current selection rather than its parent's account

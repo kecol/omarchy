@@ -30,7 +30,7 @@ policy=$(omarchy-agent-policy --json)
 if openshell_status=$("$script_dir/omarchy-agent-openshell-doctor" --json --quick 2>/dev/null); then
   openshell_status=$(jq '.available = true' <<<"$openshell_status")
 else
-  if command -v openshell >/dev/null 2>&1; then
+  if omarchy-cmd-present openshell; then
     openshell_status=$(jq -n '{ok: false, available: true, quick: true, checks: [{name: "openshell", status: "warn", detail: "OpenShell quick doctor failed"}]}')
   else
     openshell_status=$(jq -n '{ok: false, available: false, quick: true, checks: [{name: "openshell", status: "warn", detail: "openshell is not installed"}]}')

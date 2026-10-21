@@ -354,6 +354,18 @@ case "$1 ${2:-}" in
 esac
 SH
 chmod +x "$mock_bin/openshell"
+# The readiness probe must not depend on the developer's real Podman service.
+mkdir -p "$test_tmp/runtime"
+common_env+=(XDG_RUNTIME_DIR="$test_tmp/runtime")
+cat >"$mock_bin/systemctl" <<'SH'
+#!/bin/bash
+if [[ $* == "--user is-enabled podman.socket" ]]; then
+  exit "${OMARCHY_TEST_PODMAN_SOCKET_STATUS:-0}"
+fi
+echo "unexpected systemctl call: $*" >&2
+exit 1
+SH
+chmod +x "$mock_bin/systemctl"
 openshell_log="$test_tmp/openshell-log"
 
 openshell_json=$(env "${common_env[@]}" OMARCHY_TEST_OPEN_SHELL_LOG="$openshell_log" PATH="$mock_bin:$ROOT/bin:/usr/bin" \
@@ -361,6 +373,14 @@ openshell_json=$(env "${common_env[@]}" OMARCHY_TEST_OPEN_SHELL_LOG="$openshell_
 [[ $(jq -r '.ok' <<<"$openshell_json") == "true" ]] || fail "OpenShell doctor quick check passes with a reachable gateway" "$openshell_json"
 [[ $(jq -r '.checks[] | select(.name == "gateway_selected") | .status' <<<"$openshell_json") == "pass" ]] || fail "OpenShell doctor reports selected gateway readiness" "$openshell_json"
 pass "OpenShell doctor reports CLI and gateway readiness"
+
+if env "${common_env[@]}" OMARCHY_TEST_PODMAN_SOCKET_STATUS=1 PATH="$mock_bin:$ROOT/bin:/usr/bin" \
+  "$ROOT/bin/omarchy-agent-openshell-doctor" --json --quick >"$test_tmp/socket-missing"; then
+  fail "OpenShell doctor must reject a disabled missing Podman socket"
+fi
+[[ $(jq -r '.checks[] | select(.name == "podman_socket") | .status' "$test_tmp/socket-missing") == "fail" ]] ||
+  fail "OpenShell doctor explains the missing socket" "$(<"$test_tmp/socket-missing")"
+pass "OpenShell doctor fails closed when its mocked Podman socket is unavailable"
 
 openshell_json=$(env "${common_env[@]}" OMARCHY_TEST_OPEN_SHELL_LOG="$openshell_log" PATH="$mock_bin:$ROOT/bin:/usr/bin" \
   "$ROOT/bin/omarchy-agent-openshell-doctor" --json)

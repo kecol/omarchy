@@ -853,7 +853,9 @@ fixture_flags() {
 
   ((${#FINDINGS[@]} > 0)) || fail "$description" "$fixture produced no finding"
   if [[ -n $expected ]]; then
-    printf '%s\n' "${FINDINGS[@]}" | grep -qF -- "$expected" ||
+    # Consume the full stream: an early-exiting grep can give printf SIGPIPE
+    # under pipefail even when the expected finding is present.
+    printf '%s\n' "${FINDINGS[@]}" | grep -F -- "$expected" >/dev/null ||
       fail "$description" "expected \"$expected\" in:$(printf '\n%s' "${FINDINGS[@]}")"
   fi
   pass "$description"

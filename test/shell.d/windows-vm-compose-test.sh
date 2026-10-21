@@ -20,6 +20,15 @@ export OMARCHY_WINDOWS_DIR="$TMPDIR/win"
 export HOME="$TMPDIR/home"
 mkdir -p "$HOME"
 
+# The command refuses any CPU but x86_64 before defining anything, and sourcing
+# it there would exit this test with it. What is under test is the x86_64 path,
+# so omarchy-hw-x86 answers as one.
+STUB_BIN="$TMPDIR/bin"
+mkdir -p "$STUB_BIN"
+printf '#!/bin/bash\nexit 0\n' >"$STUB_BIN/omarchy-hw-x86"
+chmod +x "$STUB_BIN/omarchy-hw-x86"
+PATH="$STUB_BIN:$PATH"
+
 set -- help
 source "$ROOT/bin/omarchy-windows-vm" >/dev/null 2>&1
 COMPOSE="$OMARCHY_WINDOWS_DIR/docker-compose.yml"
@@ -44,7 +53,17 @@ write() { # RAM CORES DISK USER PASS TZ
     "$@" | __priv_write_compose
 }
 
-fd_count() { find "/proc/$$/fd" -mindepth 1 -maxdepth 1 -printf x | wc -c; }
+# Count this subshell's own inherited descriptors, not the parent's transient
+# command-substitution pipe ends. Avoid spawning observers during the count.
+fd_count() { local -a fds=(/proc/$BASHPID/fd/*); printf '%s\n' "${#fds[@]}"; }
+
+before_fds=$(fd_count)
+exec {probe_fd}</dev/null
+during_fds=$(fd_count)
+((during_fds == before_fds + 1)) || fail "FD observer detects an intentionally opened descriptor"
+exec {probe_fd}<&-
+[[ $(fd_count) == "$before_fds" ]] || fail "FD observer detects the descriptor closing"
+pass "FD observer detects real opens and closes without observing parent capture pipes"
 
 reset_case() {
   unmount_all
