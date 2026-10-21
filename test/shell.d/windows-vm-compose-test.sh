@@ -53,7 +53,17 @@ write() { # RAM CORES DISK USER PASS TZ
     "$@" | __priv_write_compose
 }
 
-fd_count() { find "/proc/$$/fd" -mindepth 1 -maxdepth 1 -printf x | wc -c; }
+# Count this subshell's own inherited descriptors, not the parent's transient
+# command-substitution pipe ends. Avoid spawning observers during the count.
+fd_count() { local -a fds=(/proc/$BASHPID/fd/*); printf '%s\n' "${#fds[@]}"; }
+
+before_fds=$(fd_count)
+exec {probe_fd}</dev/null
+during_fds=$(fd_count)
+((during_fds == before_fds + 1)) || fail "FD observer detects an intentionally opened descriptor"
+exec {probe_fd}<&-
+[[ $(fd_count) == "$before_fds" ]] || fail "FD observer detects the descriptor closing"
+pass "FD observer detects real opens and closes without observing parent capture pipes"
 
 reset_case() {
   unmount_all
