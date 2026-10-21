@@ -67,23 +67,25 @@ wait_until "root menu opens" 15 layer_on_overlay "omarchy-menu"
 wait_until "root menu content is visible" 15 screen_contains "Apps"
 screenshot "success-menu-01-root"
 
-wtype -k Down -k Down -k Down
+# Fixed Down counts can open Look'n'Feel instead of the bar submenu. Resolve
+# the product's route: RC has trigger.appearance, newer source has appearance.
+position_route=$(awk -F '"' '/"label"[[:space:]]*:[[:space:]]*"Position Bar"/ { print $2; exit }' \
+  "$OMARCHY_PATH/default/omarchy/omarchy-menu.jsonc")
+[[ -n $position_route ]] || fail "the product declares a bar position menu"
+
+omarchy-menu summon "${position_route%.position}" >/dev/null
+wait_until "menu bar submenu is visible" 15 screen_contains "Position Bar"
+screenshot "success-menu-02-menu-bar-submenu"
+
+omarchy-menu summon "$position_route" >/dev/null
+wait_until "position submenu is visible" 15 screen_contains "Left Bar"
+screenshot "success-menu-03-position-submenu"
+
+# Select through the visible UI, not by calling the configuration command.
+wtype "Left Bar"
 sleep 1
-screenshot "success-menu-02-style-selected"
+screenshot "success-menu-04-left-bar-search"
 wtype -k Return
-
-wait_until "style submenu is visible" 15 screen_contains "Theme"
-screenshot "success-menu-03-style-submenu"
-
-wtype -k Down -k Down -k Down -k Down -k Return
-sleep 1
-screenshot "success-menu-04-menu-bar-submenu"
-
-wtype -k Return
-sleep 1
-screenshot "success-menu-05-position-submenu"
-
-wtype -k Down -k Down -k Return
 wait_until "menu bar position changes to left" 20 bar_position_is "left"
 wait_until "menu bar becomes vertical" 20 bar_is_vertical
 wait_until "menu closes after selecting a position" 15 layer_absent "omarchy-menu"
