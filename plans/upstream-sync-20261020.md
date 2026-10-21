@@ -166,11 +166,19 @@ Evidence directories under `~/VMs/omarchy-sync-review/triage-evidence/`:
 
 All final validation jobs retained the existing task, memory, CPU, and one-VM limits. Memory-cap, OOM, and task-limit events stayed zero. Host storage counters remained corruption 10 and all other error counters zero. All VMs were stopped after collection. These are manual VM results, not a claim of green GitHub CI or complete hardware coverage.
 
+## Final minor review finding
+
+The final review found that the native-tool fixture checked for Pi on PATH before honoring `OMARCHY_TEST_PI_BINARY`. The guard now checks Python independently, resolves the explicit binary first, and handles a missing PATH fallback without exiting under errexit. Executable and lazy-shim checks remain intact.
+
+A new dependency-guard regression covers an explicit binary outside PATH, absent Pi, absent Python, ordinary PATH fallback, an invalid explicit override, and rejected lazy shims. It fails against the previous guard and passes with the correction. The real offline native-tool fixture passes both normally and with a real explicit Pi binary while PATH contains no Pi or mise. Both runs exercise native read/write/edit/bash execution and the blocking hook using fake model transport, scratch state, and no personal credentials or model requests.
+
+The earlier full non-graphical result covers 478 files. The newly added guard regression and changed native-tool fixture were tested directly; no new full 479-file aggregate is claimed. Production and graphical acceptance code did not change.
+
 ## Review closure and deployment gates
 
 1. PR #7 may leave draft for human review. The remaining reproducible test failure is pinned-upstream i18n completeness drift; the earlier intermittent failures remain documented limitations rather than claimed fixes.
 2. Review the fixture changes, repeated graphical evidence, skipped checks, explicit new-package prerequisites, and SSH final-newline edge case before merging. Do not merge automatically.
-3. Keep the working packaged host unlinked. A separately approved coherent RC transition, recovery preparation, and any later source activation follow `plans/host-rc-transition.md`. That document is a plan only; no host transition was executed.
+3. Following separate user approval, the host completed the packaged RC 4.5.0rc1 transition and a successful fresh boot. Root snapshot #14 and a root-private boot archive were prepared before the package transition. All 52 pending migration markers are complete. Fresh-boot checks show matching kernel/headers, one responsive packaged shell, no Hyprland configuration errors, no failed system/user units, and unchanged storage counters. The user confirms normal desktop operation. The host remains unlinked; any fork source activation still requires separate approval. See `plans/host-rc-transition.md`.
 
 ## Initial gates (superseded by the follow-up above)
 

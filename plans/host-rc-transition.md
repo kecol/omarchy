@@ -2,11 +2,11 @@
 
 ## Scope and approval
 
-This is a planning document, not an executed upgrade. Do not change the host channel, packages, migrations, or dev link as part of PR #7 validation. Marking the PR ready for review does not authorize merging it or deploying it.
+This document records the original transition plan. The packaged RC transition was subsequently completed with separate user approval, outside PR #7 validation. Fresh-boot checks and user-confirmed desktop operation passed; the host now runs packaged Omarchy/settings 4.5.0rc1-1 at `/usr/share/omarchy`. Root snapshot #14 and a root-private boot archive were prepared beforehand. Fork source activation has not occurred and still requires separate approval. Marking or merging the PR does not itself authorize deployment.
 
 Use the supported Omarchy update and dev-link workflows during a separately approved maintenance window. Keep package signature and certificate verification enabled.
 
-## Observed host baseline
+## Observed host baseline before transition
 
 Read-only inspection during the final VM validation found:
 
