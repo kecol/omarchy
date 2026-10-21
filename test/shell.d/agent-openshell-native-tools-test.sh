@@ -2,14 +2,14 @@
 # Offline integration test: real host Pi, fake curl, no credentials or model usage.
 set -euo pipefail
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/base-test.sh"
-if ! command -v pi >/dev/null || ! command -v python3 >/dev/null; then
-  skip 'native OpenShell provider test needs installed Pi and python3'
+if ! command -v python3 >/dev/null; then
+  skip 'native OpenShell provider test needs python3'
   exit 0
 fi
 # Resolve before replacing HOME/PATH. A lazy mise shim would otherwise try to
 # install Pi through the fake model transport below. Tests must not log in or
 # install tools implicitly; callers can provide a preinstalled binary explicitly.
-pi_binary=${OMARCHY_TEST_PI_BINARY:-$(command -v pi)}
+pi_binary=${OMARCHY_TEST_PI_BINARY:-$(command -v pi || true)}
 if [[ -z ${OMARCHY_TEST_PI_BINARY:-} ]] && command -v mise >/dev/null; then
   resolved_pi=$(mise which pi 2>/dev/null || true)
   if [[ -n $resolved_pi && -x $resolved_pi ]]; then
