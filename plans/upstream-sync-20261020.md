@@ -2,7 +2,7 @@
 
 ## Decision
 
-The source merge is suitable for a review PR, subject to the known upstream translation-test failure. Do not activate this checkout on the current desktop yet. Matching system packages and a disposable VM acceptance run remain deployment gates. Passing source tests does not prove that a package update, migration run, or reboot will succeed.
+The source merge is in draft PR #7. The packaged stable-to-RC VM upgrade passed, and most fork VM checks now pass after fixture corrections. Keep the PR draft while the remaining input-method failure is investigated. Do not activate this checkout on the current desktop yet. Matching host packages and completed acceptance validation remain deployment gates. Passing source tests does not prove that a package update, migration run, or reboot will succeed.
 
 ## Pinned inputs and isolation
 
@@ -69,7 +69,7 @@ Important deployment effects:
 - The update flow retains its fast-forward-only dev pull, adds blob-filtered fetching, and adds platform boot-verification dispatch after package/AUR work. The generic x86 boot-verification dispatch may be a no-op; it is not a guarantee that this machine's boot images are valid.
 - Channel switching adds platform-template checks. Do not change channels merely to hide a missing package prerequisite.
 
-## Current host deployment blockers
+## Host deployment blockers at initial review
 
 Read-only inspection found:
 
@@ -83,7 +83,48 @@ Read-only inspection found:
 
 The cached pacman metadata was also old. It is not evidence that matching packages are unavailable in current repositories. Do not install new dependencies selectively from another channel. Establish a coherent package/settings/mise version set before deployment.
 
-## Remaining gates
+## VM follow-up and fixture corrections
+
+Draft PR: <https://github.com/kecol/omarchy/pull/7>.
+
+The official stable 4.0.6 VM image passed its SHA-256 check before boot. Tests used separate disk overlays without host-home mounts, account credentials, or SSH agent forwarding. A newly generated VM-only SSH identity controls the guest; its private key remains on the host with mode 0600.
+
+The packaged stable 4.0.6 to RC 4.5.0rc1 upgrade passed all 13 checks. It ran 84 migrations, skipped none, rebooted without intervention, and reached a healthy desktop with no failed units or undefined shell theme bindings. Evidence is in `~/VMs/omarchy-sync-review/rc-upgrade-evidence/`.
+
+The corrected full VM CLI/shell rerun has only the known upstream i18n completeness failure out of 477 files. The incoming workflow's structural i18n mode and extraction scan passed separately. Changes in `2bc25c8bd` resolve the installed Pi executable before installing fake transport fixtures and mock the Podman socket readiness check, including a negative unavailable-socket assertion. No provider credentials are needed for these tests. The security and T3 tests passed three repeated standalone runs against both upstream and fork source; their earlier aggregate failures were not reproduced, so no production security fix is claimed.
+
+Initial graphical failures included VM display power-off during the long SSH-driven run. Later comparisons disabled guest idle and used an independent overlay per case. Two new default packages, `fcitx5-table-extra` and `superwhisper-bin`, were installed explicitly inside the test guest before the comparison. The original stable-to-RC upgrade did not install them; its success is not a claim that it supplies every new-install default.
+
+The SSH acceptance test also exposed an existing setup edge case: the VM bootstrap's authorized_keys file had no final newline, so the setup command appended its test key onto the existing line. This reproduced on packaged RC. Normalizing the test prerequisite made the acceptance check pass, but no product fix for no-final-newline input is claimed.
+
+Current individual graphical results:
+
+| Check | Packaged RC | Fork |
+| --- | --- | --- |
+| SSH/security acceptance with normalized prerequisite | Pass | Pass |
+| Core system and package checks with explicit prerequisites | Pass | Pass |
+| Weather/panels | Pass | Pass |
+| Overlay-monitor geometry | Pass | Pass |
+| Menu and bar-position navigation | Pass | Pass |
+| Shell surfaces and app launch through the dock grid | Pass | Pass |
+| Full input-method sequence | Pass | Fails opening the Chewing GTK test window |
+
+The two shared menu/app-launch failures were stale test expectations. Changes in `2381f3dd6` derive the bar-position route from the product's own menu declarations instead of fixed keyboard row counts, and assert on `omarchy-dock-apps` after the Apps action hands off to the dock. Both corrected tests passed on packaged RC and fork VM overlays. Bar-position screenshots were inspected on both products.
+
+A host process-exhaustion interruption invalidated part of the first comparison. Subsequent jobs ran with 512 host tasks maximum, 6 GiB host memory maximum, a 400% CPU quota, and one 4 GiB VM at a time. In that bounded rerun, fork input testing passed Japanese, Korean, and Pinyin terminal/GTK/Qt/browser composition and Chewing terminal composition, then failed to open the Chewing GTK fixture. This is still an unresolved test/application-startup failure, not a credential failure. No relevant error was found in the retained previous-boot journal query; the fixture discarded application startup output, so that query does not establish a cause. Capture startup output before another focused reproduction.
+
+Comparison evidence is under `~/VMs/omarchy-sync-review/triage-evidence/`. The `menu-route-compat/results.csv` and `updated-ui-tests/results.csv` record the successful corrected menu and app-grid comparisons. `final-ui-checks/input-methods.log` records the remaining GTK-window failure. These results are individual reruns, not a claim that the complete graphical aggregate suite is green.
+
+The host was returned to packaged Omarchy 4.0.6 after the old dev checkout showed Qt 6.12 palette errors. The packaged desktop renders normally. Keep it unlinked during remaining validation. Host Btrfs corruption counters stayed at the historical value 10 during the later VM runs; this does not establish that the original storage problem is repaired.
+
+## Remaining review gates
+
+1. Capture the GTK fixture's startup output and resolve or explain the fork input-method failure without weakening its composition assertions.
+2. Record the exhaustive i18n completeness failure as upstream translation drift; do not describe the aggregate suite as fully green.
+3. Review the fixture changes and repeated-test evidence, then decide whether PR #7 can leave draft. Do not merge automatically.
+4. Plan any host RC/package transition separately. The packaged host is working, and no dev relink is needed to continue VM testing.
+
+## Initial gates (superseded by the follow-up above)
 
 1. Commit the merge resolution and command-style compatibility changes on the integration branch.
 2. Submit a review PR into the fork's `quattro` branch. Include the baseline translation failure rather than describing the suite as fully green.
