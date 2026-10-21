@@ -3,9 +3,24 @@
 set -euo pipefail
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/base-test.sh"
 if ! command -v pi >/dev/null || ! command -v python3 >/dev/null; then
-  echo 'skip - native OpenShell provider test needs Pi and python3'
+  skip 'native OpenShell provider test needs installed Pi and python3'
   exit 0
 fi
+# Resolve before replacing HOME/PATH. A lazy mise shim would otherwise try to
+# install Pi through the fake model transport below. Tests must not log in or
+# install tools implicitly; callers can provide a preinstalled binary explicitly.
+pi_binary=${OMARCHY_TEST_PI_BINARY:-$(command -v pi)}
+if [[ -z ${OMARCHY_TEST_PI_BINARY:-} ]] && command -v mise >/dev/null; then
+  resolved_pi=$(mise which pi 2>/dev/null || true)
+  if [[ -n $resolved_pi && -x $resolved_pi ]]; then
+    pi_binary=$resolved_pi
+  fi
+fi
+if [[ ! -x $pi_binary || $pi_binary == */shims/pi ]]; then
+  skip 'install Pi before the offline native-tool test (or set OMARCHY_TEST_PI_BINARY)'
+  exit 0
+fi
+pi_binary=$(realpath "$pi_binary")
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin" "$tmp/home" "$tmp/agent"
@@ -62,7 +77,7 @@ export OPENSHELL_CODEX_AUTH_ACCESS_TOKEN='openshell:resolve:env:offline-test'
 export OMARCHY_OPEN_SHELL_MODELS_JSON
 OMARCHY_OPEN_SHELL_MODELS_JSON=$(<"$ROOT/containers/harnesses/pi/extensions/openshell-codex-models.json")
 cd "$tmp"
-printf 'Test tools' | timeout 60s pi --print --no-session --offline --provider openshell-codex --model gpt-6.1-sol \
+printf 'Test tools' | timeout 60s "$pi_binary" --print --no-session --offline --provider openshell-codex --model gpt-6.1-sol \
   --no-extensions --extension "$ROOT/containers/harnesses/pi/extensions/openshell-codex.ts" --extension "$tmp/observer.ts" \
   --tools read,bash,edit,write --no-mcp --no-context-files --no-skills --no-prompt-templates --no-themes >"$tmp/output" 2>&1 ||
   fail 'native Pi loop must complete with fake transport' "$(<"$tmp/output")"
@@ -78,7 +93,7 @@ for name in ('read', 'bash', 'edit', 'write'):
 PY
 pass 'OpenShell provider delegates read/write/edit/bash to Pi and forwards native results and hooks'
 export TEST_BLOCK=1
-printf 'Test blocked tool' | timeout 60s pi --print --no-session --offline --provider openshell-codex --model gpt-6.1-sol \
+printf 'Test blocked tool' | timeout 60s "$pi_binary" --print --no-session --offline --provider openshell-codex --model gpt-6.1-sol \
   --no-extensions --extension "$ROOT/containers/harnesses/pi/extensions/openshell-codex.ts" --extension "$tmp/observer.ts" \
   --tools read,bash,edit,write --no-mcp --no-context-files --no-skills --no-prompt-templates --no-themes >"$tmp/blocked-output" 2>&1 ||
   fail 'blocked tool must be returned as a native tool error' "$(<"$tmp/blocked-output")"
