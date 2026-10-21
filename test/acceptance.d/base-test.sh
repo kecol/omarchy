@@ -42,10 +42,16 @@ screen_contains() {
     rm -f "$snapshot"
     return 1
   fi
-  tesseract "$snapshot" stdout --psm 11 2>/dev/null | grep -Fi -- "$text" >/dev/null
-  local status=$?
+  local recognized status=0
+  if recognized=$(tesseract "$snapshot" stdout --psm 11 2>/dev/null); then
+    # Sparse-text OCR can split one visible label across lines (for example
+    # "Position" and "Bar"). Preserve exact words while normalizing spacing.
+    printf '%s\n' "$recognized" | tr '[:space:]' ' ' | tr -s ' ' | grep -Fi -- "$text" >/dev/null || status=$?
+  else
+    status=1
+  fi
   rm -f "$snapshot"
-  return $status
+  return "$status"
 }
 
 # Poll a command until it succeeds; screenshot and fail on timeout.
