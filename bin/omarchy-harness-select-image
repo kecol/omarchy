@@ -1,0 +1,98 @@
+#!/bin/bash
+
+# omarchy:summary=Select and pin a harness image before an agent launch
+# omarchy:args=[--interactive] <agent> <harness>
+# omarchy:hidden=true
+
+set -euo pipefail
+
+interactive=false
+if [[ ${1:-} == "--interactive" ]]; then
+  interactive=true
+  shift
+fi
+if (( $# != 2 )) || [[ ! $1 =~ ^[a-z0-9][a-z0-9._-]*$ || ! $2 =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
+  echo "Usage: omarchy-harness-select-image [--interactive] <agent> <harness>" >&2
+  exit 1
+fi
+agent=$1
+harness=$2
+reference="localhost/omarchy-harness-$harness:latest"
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# Menus are an explicit launcher feature, not a side effect of allocating a PTY.
+if [[ ! -t 0 || ! -t 2 || ${OMARCHY_AGENT_MANAGED:-false} == "true" || ${OMARCHY_AGENT_ONESHOT:-false} == "true" || ${OMARCHY_AGENT_ONESHOT:-0} == "1" ]]; then
+  interactive=false
+fi
+
+while true; do
+  image_id=
+  version=
+  created=
+  if podman image exists "$reference"; then
+    metadata=$(podman image inspect --format '{{json .}}' "$reference")
+    if ! jq -e --arg harness "$harness" '
+      (.Id | type == "string" and test("^(sha256:)?[a-f0-9]{64}$"))
+      and .Labels["org.omarchy.harness"] == $harness
+    ' <<<"$metadata" >/dev/null; then
+      echo "Harness image label mismatch or invalid metadata for $reference" >&2
+      exit 1
+    fi
+    image_id=$(jq -r '.Id' <<<"$metadata")
+    image_id="sha256:${image_id#sha256:}"
+    version=$(jq -r '.Labels["org.omarchy.harness.version"] // "unknown"' <<<"$metadata")
+    created=$(jq -r '.Created // "unknown"' <<<"$metadata")
+    # Image labels are untrusted terminal text. Do not render escape sequences.
+    [[ $version =~ ^[0-9A-Za-z.+_-]+$ ]] || version=unknown
+    [[ $created =~ ^[0-9A-Za-z.:+_-]+$ ]] || created=unknown
+  fi
+
+  if [[ $interactive == "false" ]]; then
+    if [[ -z $image_id ]]; then
+      echo "Harness image is missing. Build it with: omarchy harness build $harness" >&2
+      exit 1
+    fi
+    printf '%s\n' "$image_id"
+    exit 0
+  fi
+
+  if [[ -n $image_id ]]; then
+    printf '\nAgent: %s · Mode: container\nHarness: %s · Version: %s\nImage: %s\nID: %s\nBuilt: %s\n\n' \
+      "$agent" "$harness" "$version" "$reference" "$image_id" "$created" >&2
+    choice=$(gum choose "Run" "Update to latest release" "Exit") || exit 130
+  else
+    printf '\nAgent: %s · Mode: container\nImage missing: %s\n\n' "$agent" "$reference" >&2
+    choice=$(gum choose "Build latest" "Exit") || exit 130
+  fi
+  case "$choice" in
+    Run)
+      [[ -n $image_id ]] || exit 1
+      printf '%s\n' "$image_id"
+      exit 0
+      ;;
+    "Update to latest release"|"Build latest")
+      if omarchy-cmd-missing mise; then
+        echo "Mise is required to resolve the latest Pi version." >&2
+        continue
+      fi
+      if [[ $harness != "pi" ]]; then
+        echo "Automatic builds are not supported for harness: $harness" >&2
+        continue
+      fi
+      if ! target=$(MISE_MINIMUM_RELEASE_AGE=0 mise latest pi); then
+        echo "Could not resolve the latest Pi release. The current image is unchanged." >&2
+        continue
+      fi
+      if [[ ! $target =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?([+-][A-Za-z0-9.-]+)?$ ]]; then
+        echo "Invalid Pi release returned by mise." >&2
+        continue
+      fi
+      if gum confirm "Build Pi ${version:-not installed} → $target? Existing sessions will not change."; then
+        if ! "$script_dir/omarchy-harness-build" "$harness" "$target" >&2; then
+          echo "Update failed. The previous image remains available." >&2
+        fi
+      fi
+      ;;
+    Exit) exit 130 ;;
+    *) exit 130 ;;
+  esac
+done

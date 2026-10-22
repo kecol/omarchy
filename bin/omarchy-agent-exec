@@ -18,6 +18,12 @@ case "${1:-}" in
     ;;
 esac
 
+image_options=()
+if [[ ${1:-} == "--select-image" ]]; then
+  image_options=(--select-image)
+  shift
+fi
+
 if (( $# < 3 )) || [[ $2 != "--" ]]; then
   usage
   exit 1
@@ -70,7 +76,7 @@ fi
 
 case "$runtime" in
   podman)
-    exec omarchy-agent-run-podman "$agent" "$harness" -- "${command[@]}"
+    exec omarchy-agent-run-podman "${image_options[@]}" "$agent" "$harness" -- "${command[@]}"
     ;;
   *)
     echo "Unsupported runtime for agent $agent: $runtime" >&2

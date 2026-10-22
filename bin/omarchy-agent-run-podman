@@ -10,6 +10,12 @@ usage() {
   echo "Usage: omarchy-agent-run-podman <agent> <harness> -- <command...>" >&2
 }
 
+select_image=false
+if [[ ${1:-} == "--select-image" ]]; then
+  select_image=true
+  shift
+fi
+
 if (( $# < 4 )) || [[ $3 != "--" ]]; then
   usage
   exit 1
@@ -34,16 +40,18 @@ if ! "$script_dir/omarchy-agent-container-doctor" --quick >/dev/null; then
   exit 1
 fi
 
-image="localhost/omarchy-harness-$harness:latest"
-if ! podman image exists "$image"; then
-  echo "Harness image is missing. Build it with: omarchy harness build $harness" >&2
-  exit 1
+image_options=()
+if [[ $select_image == "true" && ${OMARCHY_AGENT_MANAGED:-false} != "true" && ${OMARCHY_AGENT_ONESHOT:-false} != "true" && ${OMARCHY_AGENT_ONESHOT:-0} != "1" ]] && [[ -t 0 && -t 1 ]]; then
+  image_options=(--interactive)
 fi
-
-image_harness=$(podman image inspect --format '{{ index .Labels "org.omarchy.harness" }}' "$image")
-if [[ $image_harness != "$harness" ]]; then
-  echo "Harness image label mismatch for $image: ${image_harness:-<missing>}" >&2
-  exit 1
+# The selector returns an immutable ID, never the mutable :latest alias.
+if image=$("$script_dir/omarchy-harness-select-image" "${image_options[@]}" "$agent" "$harness"); then
+  :
+else
+  status=$?
+  # A cancelled interactive selection exits without creating state or volumes.
+  [[ $status == "130" ]] && exit 0
+  exit "$status"
 fi
 
 workspace=$(realpath -e "$PWD")
@@ -99,6 +107,7 @@ cpus_limit=$(jq -r '.resources.cpus // ""' <<<"$policy")
 podman_args=(
   run
   --rm
+  --pull=never
   --name="$container_name"
   --label=org.omarchy.managed=agent
   --label="org.omarchy.instance=$instance_id"
@@ -149,7 +158,7 @@ if [[ $managed == "true" ]]; then
   )
 fi
 
-if [[ ${OMARCHY_AGENT_ONESHOT:-false} != "true" ]]; then
+if [[ ${OMARCHY_AGENT_ONESHOT:-false} != "true" && ${OMARCHY_AGENT_ONESHOT:-0} != "1" ]]; then
   podman_args+=(--interactive)
   if [[ -t 0 && -t 1 ]]; then
     podman_args+=(--tty)

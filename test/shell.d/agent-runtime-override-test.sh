@@ -51,7 +51,7 @@ mapfile -d '' -t launch_args <"$launch_log"
 
 "$ROOT/bin/omarchy-agent" --container
 mapfile -d '' -t launch_args <"$launch_log"
-[[ ${launch_args[*]} == "--app-id=org.omarchy.agent $ROOT/bin/omarchy-agent-exec --container opencode -- opencode --auto" ]] ||
+[[ ${launch_args[*]} == "--app-id=org.omarchy.agent $ROOT/bin/omarchy-agent-exec --container --select-image opencode -- opencode --auto" ]] ||
   fail "agent launcher can force a container launch" "${launch_args[*]}"
 
 OMARCHY_TEST_AGENT_MODE=container "$ROOT/bin/omarchy-agent" --host
@@ -61,7 +61,7 @@ mapfile -d '' -t launch_args <"$launch_log"
 
 "$ROOT/bin/omarchy-agent-prompt" --container "review this"
 mapfile -d '' -t launch_args <"$launch_log"
-[[ ${launch_args[*]} == "--app-id=org.omarchy.agent $ROOT/bin/omarchy-agent-exec --container opencode -- opencode --auto --prompt review this" ]] ||
+[[ ${launch_args[*]} == "--app-id=org.omarchy.agent $ROOT/bin/omarchy-agent-exec --container --select-image opencode -- opencode --auto --prompt review this" ]] ||
   fail "agent prompt can force a container launch" "${launch_args[*]}"
 
 OMARCHY_TEST_AGENT_MODE=container "$ROOT/bin/omarchy-agent-prompt" --host "review this"
