@@ -104,6 +104,16 @@ memory_limit=$(jq -r '.resources.memory' <<<"$policy")
 pids_limit=$(jq -r '.resources.pids' <<<"$policy")
 cpus_limit=$(jq -r '.resources.cpus // ""' <<<"$policy")
 
+harness_assets=()
+if [[ $harness == "pi" && ${command[0]} == "pi" ]]; then
+  # Expose only this public, read-only runtime asset, not the Omarchy tree or
+  # host Pi home/auth. The extension uses the container's own Pi model runtime.
+  recovery="$OMARCHY_PATH/default/agents/pi/model-recovery.ts"
+  [[ -f $recovery && ! -L $recovery ]] || { echo "Pi model recovery asset is missing or unsafe." >&2; exit 1; }
+  harness_assets=(--volume="$recovery:/opt/omarchy/pi/model-recovery.ts:ro,rprivate" --label=org.omarchy.harness.model-recovery=read-only)
+  command=(pi --extension /opt/omarchy/pi/model-recovery.ts "${command[@]:1}")
+fi
+
 podman_args=(
   run
   --rm
@@ -135,6 +145,8 @@ podman_args=(
   --workdir="$container_workspace"
   --hostname="agent-$agent"
   --env=OMARCHY_AGENT_IN_CONTAINER=1
+  --env="OMARCHY_AGENT_MANAGED=$managed"
+  --env="OMARCHY_AGENT_ONESHOT=${OMARCHY_AGENT_ONESHOT:-false}"
   --env=HOME=/home/agent
   --env=USER=agent
   --env=LOGNAME=agent
@@ -142,6 +154,8 @@ podman_args=(
   --volume="$home_volume:/home/agent:U,rw"
   --entrypoint="${command[0]}"
 )
+
+podman_args+=("${harness_assets[@]}")
 
 if [[ -n $cpus_limit ]]; then
   podman_args+=(

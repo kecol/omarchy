@@ -203,6 +203,10 @@ for expected in \
   "--env=LOGNAME=agent" \
   "--volume=$workspace:$container_workspace:rw,rprivate" \
   "--volume=omarchy-agent-pi-home:/home/agent:U,rw" \
+  "--volume=$ROOT/default/agents/pi/model-recovery.ts:/opt/omarchy/pi/model-recovery.ts:ro,rprivate" \
+  "--env=OMARCHY_AGENT_MANAGED=false" \
+  "--label=org.omarchy.harness.model-recovery=read-only" \
+  "/opt/omarchy/pi/model-recovery.ts" \
   "--entrypoint=pi" \
   "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
   "--version"; do
@@ -242,7 +246,8 @@ for expected in \
   "--label=org.omarchy.role=coder" \
   "--workdir=/workspace/111111112222/333333334444" \
   "--volume=$workspace:/workspace/111111112222/333333334444:rw,rprivate" \
-  "--volume=omarchy-agent-pi-333333334444-home:/home/agent:U,rw"; do
+  "--volume=omarchy-agent-pi-333333334444-home:/home/agent:U,rw" \
+  "--env=OMARCHY_AGENT_MANAGED=true"; do
   grep -Fxq -- "$expected" <<<"$run_joined" || fail "managed Podman launch includes $expected" "$run_joined"
 done
 pass "Podman adapter gives managed assignments task-scoped state and identity"
@@ -281,6 +286,7 @@ run_joined=$(printf '%s\n' "${run_args[@]}")
 ! grep -Fxq -- "--interactive" <<<"$run_joined" || fail "one-shot Podman launch does not keep stdin open" "$run_joined"
 ! grep -Fxq -- "--tty" <<<"$run_joined" || fail "one-shot Podman launch does not allocate a TTY" "$run_joined"
 grep -Fxq -- "--print" <<<"$run_joined" || fail "one-shot Podman launch preserves the agent print flag" "$run_joined"
+grep -Fxq -- "--env=OMARCHY_AGENT_ONESHOT=1" <<<"$run_joined" || fail "one-shot policy reaches the container model guard" "$run_joined"
 pass "Podman adapter honors the launcher's numeric one-shot flag without interactive stdin"
 
 if (

@@ -71,7 +71,7 @@ mapfile -d '' -t launch_args <"$launch_log"
 
 OMARCHY_TEST_DEFAULT_AGENT=pi "$ROOT/bin/omarchy-agent-prompt" --oneshot "print pwd"
 mapfile -d '' -t launch_args <"$launch_log"
-[[ ${launch_args[*]} == "--print print pwd" ]] ||
+[[ ${launch_args[*]} == "--extension $ROOT/default/agents/pi/model-recovery.ts --print print pwd" ]] ||
   fail "agent prompt can run Pi one-shot without opening a TUI" "${launch_args[*]}"
 
 

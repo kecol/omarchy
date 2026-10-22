@@ -170,6 +170,9 @@ ori)
   ;;
 pi)
   command=(pi)
+  if [[ $execution_mode == "host" ]]; then
+    command+=(--extension "$OMARCHY_PATH/default/agents/pi/model-recovery.ts")
+  fi
   if [[ $oneshot == "true" ]]; then
     command+=(--print)
     oneshot_supported=true
