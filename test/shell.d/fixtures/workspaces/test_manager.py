@@ -171,7 +171,7 @@ class StateTests(unittest.TestCase):
     self.home = self.base/'home'
     self.home.mkdir()
     environment = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
-    environment.update(HOME=str(self.home), XDG_DATA_HOME=str(self.base/'data'), OMARCHY_PATH=str(ROOT), GIT_CONFIG_GLOBAL='/dev/null', GIT_CONFIG_NOSYSTEM='1', GIT_TERMINAL_PROMPT='0')
+    environment.update(HOME=str(self.home), XDG_DATA_HOME=str(self.base/'data'), OMARCHY_PATH=str(ROOT), GIT_CONFIG_GLOBAL='/dev/null', GIT_CONFIG_NOSYSTEM='1', GIT_TERMINAL_PROMPT='0', WAYLAND_DISPLAY='test-display')
     self.environment = patch.dict(os.environ, environment, clear=True)
     self.environment.start()
     self.addCleanup(self.environment.stop)
@@ -261,11 +261,31 @@ class StateTests(unittest.TestCase):
       self.assertEqual(settings['remote.SSH.defaultExtensions'], ['openai.chatgpt'])
     windows = [args for args in calls if '--new-window' in args]
     self.assertEqual(len(windows), 2)
-    for flag in ['--user-data-dir', '--extensions-dir', '--folder-uri']:
+    for flag in ['--user-data-dir', '--extensions-dir', '--shared-data-dir', '--agent-plugins-dir', '--agents-user-data-dir', '--agents-extensions-dir', '--folder-uri']:
       self.assertNotEqual(windows[0][windows[0].index(flag)+1], windows[1][windows[1].index(flag)+1])
     for args in calls:
       self.assertEqual(args[args.index('--sync')+1], 'off')
+      for flag, folder in [('--shared-data-dir', 'vscode-shared'), ('--agent-plugins-dir', 'vscode-agent-plugins'), ('--agents-user-data-dir', 'vscode-agents-data'), ('--agents-extensions-dir', 'vscode-agents-extensions')]:
+        path = Path(args[args.index(flag)+1])
+        self.assertEqual(path.name, folder)
+        self.assertEqual(path.parent, Path(args[args.index('--user-data-dir')+1]).parent)
       self.assertNotIn('openai.chatgpt', args)  # Never install Codex locally.
+
+  def test_code_rejects_headless_shell_before_starting_container(self):
+    self.command('create', 'one', str(self.source))
+    with patch.dict(os.environ, DISPLAY='', WAYLAND_DISPLAY=''), patch.object(m, 'start') as start:
+      with self.assertRaisesRegex(RuntimeError, 'No graphical display'):
+        self.command('code', 'one')
+      start.assert_not_called()
+
+  def test_shared_and_agent_state_symlinks_are_refused(self):
+    for folder in ['vscode-shared', 'vscode-agent-plugins', 'vscode-agents-data', 'vscode-agents-extensions']:
+      with self.subTest(folder=folder):
+        directory = self.root/folder
+        directory.mkdir()
+        (directory/folder).symlink_to(self.source, target_is_directory=True)
+        with self.assertRaises(RuntimeError):
+          m.editor_settings(directory, 'alias')
 
   def test_stop_still_works_when_project_or_ssh_files_are_missing(self):
     self.command('create', 'one', str(self.source))

@@ -6,7 +6,7 @@ These workspaces use Remote SSH, not Dev Containers. Do not mount a Docker or Po
 
 ## Requirements
 
-Use VS Code, Python 3, Git, OpenSSH client tools, and rootless Podman with cgroup v2 and the pasta network backend. Run the commands as your desktop user, not under sudo. The dedicated workspace image is separate from the Pi agent harness.
+Use VS Code, Python 3, Git, OpenSSH client tools, and rootless Podman with cgroup v2 and the pasta network backend. Run the commands as your desktop user, not under sudo. Run `workspace code` from a desktop terminal with a graphical display. Headless shells can use `workspace start` and its SSH command, but cannot open the desktop window. The dedicated workspace image is separate from the Pi agent harness.
 
 Building the image downloads its base image and packages. Creating a workspace does not build an image or start a container. Starting and opening a workspace never pull or build images automatically.
 
@@ -28,11 +28,13 @@ omarchy workspace code pi-evolving
 omarchy workspace code other-project
 ```
 
-Each `code` command starts its workspace if needed and opens a new remote VS Code window. It uses a private local user-data directory and extension directory, turns VS Code Settings Sync off, installs the Remote SSH client extension there, and requests installation of `openai.chatgpt` on the remote host. It does not install Codex in the local extension directory. The initial extension installation and server bootstrap need network access.
+Each `code` command starts its workspace if needed and opens a new remote VS Code window. It uses private local user-data, extension, shared-storage, and agent-data directories, turns VS Code Settings Sync off, installs the Remote SSH client extension there, and requests installation of `openai.chatgpt` on the remote host. It does not install Codex in the local extension directory. The initial extension installation and server bootstrap need network access.
 
-Accept Workspace Trust only for code you intend to work on. The launcher does not disable VS Code's trust checks.
+The first launch can show VS Code onboarding. You may select **Continue without Signing In**; a GitHub login is not required for Remote SSH or Codex. Accept Workspace Trust only for code you intend to work on. The launcher does not disable VS Code's trust checks.
 
-Use **Developer: Show Running Extensions** to verify that Codex runs on the remote workspace. Open a remote terminal and check:
+Use **Developer: Show Running Extensions** to verify that Codex runs on the remote workspace. Use **Codex: Open Codex Sidebar** if its panel is not visible. For the checks below, select **Terminal: Create New Terminal (In Active Workspace)**. Do not select **Create New Integrated Terminal (Local)**: that terminal runs on the desktop host, outside the container.
+
+Check the remote terminal:
 
 ```bash
 printf 'HOME=%s\nCODEX_HOME=%s\n' "$HOME" "$CODEX_HOME"

@@ -326,7 +326,7 @@ def start(directory, data):
 
 
 def editor_settings(directory, alias):
-  for path in (directory/"vscode-data", directory/"vscode-data/User", directory/"vscode-extensions"):
+  for path in (directory/"vscode-data", directory/"vscode-data/User", directory/"vscode-extensions", directory/"vscode-shared", directory/"vscode-agent-plugins", directory/"vscode-agents-data", directory/"vscode-agents-extensions"):
     if path.is_symlink():
       fail("VS Code state directories cannot be symlinks")
   user = directory/"vscode-data/User"
@@ -350,7 +350,11 @@ def editor_settings(directory, alias):
   settings.setdefault("window.title", f"${{dirty}}{directory.name} — ${{rootName}} — ${{appName}}")
   private_json(path, settings)
   return ["code", "--user-data-dir", str(directory/"vscode-data"),
-      "--extensions-dir", str(directory/"vscode-extensions"), "--sync", "off"]
+      "--extensions-dir", str(directory/"vscode-extensions"),
+      "--shared-data-dir", str(directory/"vscode-shared"),
+      "--agent-plugins-dir", str(directory/"vscode-agent-plugins"),
+      "--agents-user-data-dir", str(directory/"vscode-agents-data"),
+      "--agents-extensions-dir", str(directory/"vscode-agents-extensions"), "--sync", "off"]
 
 
 def main():
@@ -432,6 +436,8 @@ def main():
       audit(inspect(container), data, directory)
       print("Runtime isolation checks passed. Verify Codex runs remotely with Developer: Show Running Extensions")
     elif args.operation == "code":
+      if not os.environ.get("WAYLAND_DISPLAY") and not os.environ.get("DISPLAY"):
+        fail("No graphical display in this shell. Run workspace code from a desktop terminal; use workspace start for SSH-only access")
       alias = "omarchy-workspace-"+data["id"]
       command = editor_settings(directory, alias)
       start(directory, data)
