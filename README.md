@@ -4,6 +4,10 @@ Omarchy is a beautiful, fun & agentic Linux distribution by DHH.
 
 Read more at [omarchy.org](https://omarchy.org).
 
+## Fork branding
+
+This fork includes an optional **sandboxed agents** boot/login logo and screensaver. Linking the checkout does not install these assets or rebuild boot images. After linking and rebooting, run `omarchy branding apply` to opt in, or `omarchy branding apply --screensaver-only` to leave boot files unchanged. Run `omarchy branding restore` before unlinking to restore stock branding. See [Fork branding](manual/41-branding.md#fork-branding-sandboxed-agents) for installation steps, backup limits, and recovery instructions.
+
 ## The Omarchy Manual
 
 The manual lives in [`manual/`](manual/), which is its authoritative source.

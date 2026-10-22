@@ -2,6 +2,63 @@
 
 Omarchy allows you to set your company logo or personal image for both the boot unlock, the screensaver, and the about screen.
 
+### Fork branding: sandboxed agents
+
+This fork supplies the Omarchy wordmark with a smaller **sandboxed agents** subtitle. The boot and login screens use a PNG image. The screensaver uses the existing text wordmark with a centered subtitle. The stock defaults remain separate.
+
+Installing Omarchy, cloning this fork, and running `omarchy dev link` does not install this branding. Link/unlink does not rebuild boot images. To opt in:
+
+1. Start with a packaged Omarchy release compatible with this fork.
+2. Clone the fork:
+
+   ```bash
+   git clone --branch quattro https://github.com/kecol/omarchy.git ~/omarchy-fork
+   ```
+
+3. Link the checkout:
+
+   ```bash
+   omarchy dev link ~/omarchy-fork
+   ```
+
+4. Accept the reboot prompt and log in again. If you decline the prompt, reboot before continuing so the command environment uses the checkout.
+5. Run one of the following commands as your user, not under sudo.
+
+**Screensaver only, without a boot-image rebuild:**
+
+```bash
+omarchy branding apply --screensaver-only
+```
+
+The command backs up changed screensaver text next to `~/.config/omarchy/branding/screensaver.txt` as `screensaver.txt.bak.<unique-suffix>`. It does not start the screensaver or change idle settings. Use _System > Screensaver_ to view it.
+
+**Boot, login, and screensaver:**
+
+Do not rebuild boot images on a machine with unresolved filesystem checksum errors. Investigate those errors first. Use `--screensaver-only` while boot-image changes are deferred.
+
+The following command replaces the current boot/login theme with the fork logo, a `#1a1b26` background, and white unlock controls. It changes system-wide boot/login assets and only the current user's screensaver. It backs up changed screensaver text, but **does not save a previous custom boot/login theme**. Preserve any custom logo and colors separately before continuing.
+
+```bash
+omarchy branding apply
+```
+
+Confirm the prompt. The command delegates privileged work to the existing Plymouth publisher, which updates the boot and SDDM login assets and rebuilds boot images. It does not reboot automatically. The new boot logo appears on the next boot. Repeating the full command rebuilds boot images again, even if the screensaver text is unchanged.
+
+If the boot helper fails, the command leaves the screensaver unchanged and reports failure. System boot/login assets may already have changed. There is no automatic rollback across boot-image generation and asset publication. Resolve the reported error before rebooting.
+
+**Before unlinking:**
+
+```bash
+omarchy branding restore
+omarchy dev unlink
+```
+
+Confirm the restore and wait for its boot-image rebuild to succeed before unlinking. Restore selects the stock boot/login defaults shipped by the checkout and its stock screensaver text. It does not recover earlier custom boot/login branding. It backs up changed screensaver text; to recover earlier custom text, copy the named backup over `~/.config/omarchy/branding/screensaver.txt`. Use `omarchy branding restore --screensaver-only` to restore text without touching boot/login assets.
+
+If you already unlinked and rebooted into packaged Omarchy, use the packaged commands `omarchy plymouth reset` and `omarchy branding screensaver reset`. The latter opens the screensaver. Boot reset rebuilds boot images and requires administrator access. The fork's apply/restore commands are not available from the packaged command tree.
+
+The branding is a persistent visual label, not a runtime check or a security guarantee. If you unlink without restoring, the fork logo remains until you replace it. Check `$OMARCHY_PATH` to identify the active source tree.
+
 ### Boot unlock
 
 You can use `omarchy plymouth preview` to see what your custom logo and colors would look like. It takes a background color, a text color, a logo png, and a path for the preview image:
