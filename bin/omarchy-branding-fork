@@ -1,0 +1,111 @@
+#!/bin/bash
+
+# omarchy:summary=Implement the explicit fork branding apply and restore commands
+# omarchy:args=<apply|restore> [--screensaver-only]
+# omarchy:hidden=true
+
+set -euo pipefail
+
+usage() {
+  echo "Usage: omarchy branding <apply|restore> [--screensaver-only]"
+  echo "Without --screensaver-only, confirm boot/login replacement and a boot-image rebuild."
+  echo "Run as your user, not under sudo. No automatic reboot or screensaver launch."
+}
+
+if [[ ${1:-} == "--help" || ${1:-} == "-h" ]]; then
+  usage
+  exit 0
+fi
+
+operation=${1:-}
+if [[ $operation != "apply" && $operation != "restore" ]]; then
+  usage >&2
+  exit 1
+fi
+shift
+
+screensaver_only=false
+if (( $# == 1 )) && [[ $1 == "--screensaver-only" ]]; then
+  screensaver_only=true
+elif (( $# == 1 )) && [[ $1 == "--help" || $1 == "-h" ]]; then
+  usage
+  exit 0
+elif (( $# != 0 )); then
+  usage >&2
+  exit 1
+fi
+
+if [[ $operation == "apply" ]]; then
+  source_text="$OMARCHY_PATH/default/branding/fork/screensaver.txt"
+else
+  # Keep the normal defaults unchanged; restore must not select the fork art.
+  source_text="$OMARCHY_PATH/logo.txt"
+fi
+logo="$OMARCHY_PATH/default/branding/fork/logo.png"
+destination="$HOME/.config/omarchy/branding/screensaver.txt"
+
+if [[ ! -f $source_text || -L $source_text ]]; then
+  echo "Missing regular branding text: $source_text" >&2
+  exit 1
+fi
+if ! $screensaver_only && [[ $operation == "apply" ]] && [[ ! -f $logo || -L $logo ]]; then
+  echo "Missing regular branding logo: $logo" >&2
+  exit 1
+fi
+if [[ -L $destination || ( -e $destination && ! -f $destination ) ]]; then
+  echo "Refusing to replace a symlink or non-regular file: $destination" >&2
+  exit 1
+fi
+
+if ! $screensaver_only; then
+  echo "This replaces boot and login branding and rebuilds boot images."
+  echo "Dev link/unlink does not change these logos. No automatic reboot."
+  echo "Only screensaver text is backed up; restore uses stock boot/login defaults."
+  if ! gum confirm "Continue with branding $operation?"; then
+    echo "Cancelled. No files changed."
+    exit 0
+  fi
+fi
+
+# Stage user changes before the boot operation, but publish them only after it
+# succeeds. A boot rebuild failure must not silently replace the screensaver.
+mkdir -p -- "${destination%/*}"
+staged=
+trap '[[ -z $staged ]] || rm -f -- "$staged"' EXIT
+if ! cmp -s -- "$source_text" "$destination"; then
+  if [[ -f $destination ]]; then
+    backup=$(mktemp "$destination.bak.XXXXXXXX")
+    cp -- "$destination" "$backup"
+    echo "Screensaver backup: $backup"
+  fi
+  staged=$(mktemp "${destination%/*}/.screensaver.XXXXXXXX")
+  install -m 0644 -- "$source_text" "$staged"
+fi
+
+if ! $screensaver_only; then
+  boot_status=0
+  if [[ $operation == "apply" ]]; then
+    "$OMARCHY_PATH/bin/omarchy-plymouth-set" '#1a1b26' '#ffffff' "$logo" || boot_status=$?
+  else
+    "$OMARCHY_PATH/bin/omarchy-plymouth-reset" || boot_status=$?
+  fi
+  if (( boot_status != 0 )); then
+    echo "Boot branding failed. Boot/login files may already have changed; do not assume rollback." >&2
+    echo "The screensaver was not changed. Resolve the boot helper's error before rebooting." >&2
+    exit "$boot_status"
+  fi
+fi
+
+if [[ -n $staged ]]; then
+  mv -fT -- "$staged" "$destination"
+  staged=
+fi
+
+if $screensaver_only; then
+  echo "Screensaver branding updated. Boot and login branding were not changed."
+else
+  echo "Boot, login, and screensaver branding updated. The boot logo appears on the next boot."
+fi
+if [[ $operation == "restore" ]]; then
+  echo "Restored the stock defaults shipped by this checkout, not previous custom boot branding."
+fi

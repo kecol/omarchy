@@ -1,0 +1,7 @@
+#!/bin/bash
+
+# omarchy:summary=Apply the fork's sandboxed-agents boot, login, and screensaver branding
+# omarchy:args=[--screensaver-only]
+# omarchy:requires-sudo=true
+
+exec "$OMARCHY_PATH/bin/omarchy-branding-fork" apply "$@"
