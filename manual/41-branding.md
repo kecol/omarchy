@@ -6,6 +6,12 @@ Omarchy allows you to set your company logo or personal image for both the boot 
 
 This fork supplies the Omarchy wordmark with a smaller **sandboxed agents** subtitle. The boot and login screens use a PNG image. The screensaver uses the existing text wordmark with a centered subtitle. The stock defaults remain separate.
 
+The following captures show the boot splash and login screen in a disposable VM:
+
+![Fork boot splash](images/branding-fork-boot.webp)
+
+![Fork login screen](images/branding-fork-login.webp)
+
 Installing Omarchy, cloning this fork, and running `omarchy dev link` does not install this branding. Link/unlink does not rebuild boot images. To opt in:
 
 1. Start with a packaged Omarchy release compatible with this fork.
