@@ -831,10 +831,10 @@ assert_bypass() {
   assert_launched "$agent" "skips permission prompts" "$@"
 }
 
-assert_launch pi pi "Review this project"
+assert_launch pi pi --extension "$ROOT/default/agents/pi/model-recovery.ts" "Review this project"
 printf '%s\n' pi >"$agent_file"
 OMARCHY_AGENT_MANAGED=true omarchy-agent-prompt "Review this" project
-assert_launched pi "keeps managed task prompts in Pi system context" pi --append-system-prompt "Review this project" "Start the managed task now. The task details and safety rules are in your system instructions."
+assert_launched pi "keeps managed task prompts in Pi system context" pi --extension "$ROOT/default/agents/pi/model-recovery.ts" --append-system-prompt "Review this project" "Start the managed task now. The task details and safety rules are in your system instructions."
 assert_launch omp omp --auto-approve -- "Review this project"
 assert_launch opencode opencode --auto --prompt "Review this project"
 assert_launch ori ori code --interactive --prompt "Review this project"
@@ -863,7 +863,7 @@ assert_launched hermes "binds its literal initial prompt" env -u HERMES_SESSION_
   hermes chat --yolo --tui "--query=$literal_hermes_prompt"
 pass "Hermes receives prompted launches as one literal query argument"
 
-assert_bypass pi pi
+assert_bypass pi pi --extension "$ROOT/default/agents/pi/model-recovery.ts"
 assert_bypass omp omp --auto-approve
 assert_bypass opencode opencode --auto
 assert_bypass ori ori code
