@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# omarchy:summary=List workspace names and their independent project directories
+
+exec python3 "$OMARCHY_PATH/default/workspaces/manager.py" list "$@"

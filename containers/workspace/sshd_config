@@ -1,0 +1,25 @@
+Port 2222
+ListenAddress 0.0.0.0
+HostKey /home/workspace/.omarchy-sshd/host_ed25519
+PidFile /run/omarchy-workspace/sshd.pid
+AuthorizedKeysFile /etc/omarchy-workspace/authorized_keys
+StrictModes yes
+AllowUsers workspace
+AuthenticationMethods publickey
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+PermitRootLogin no
+UsePAM no
+UseDNS no
+PermitUserEnvironment no
+AllowAgentForwarding no
+X11Forwarding no
+PermitTunnel no
+GatewayPorts no
+AllowTcpForwarding local
+AllowStreamLocalForwarding local
+PermitOpen 127.0.0.1:* localhost:* [::1]:*
+SetEnv CODEX_HOME=/home/workspace/.codex
+Subsystem sftp internal-sftp
+LogLevel INFO

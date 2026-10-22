@@ -1,0 +1,7 @@
+#!/bin/bash
+
+# omarchy:summary=Create an independent workspace clone or explicitly mount one directory
+# omarchy:args=<name> <directory> [--mount]
+# omarchy:examples=omarchy workspace create project-a ~/Projects/project-a | omarchy workspace create project-b ~/Projects/project-b --mount
+
+exec python3 "$OMARCHY_PATH/default/workspaces/manager.py" create "$@"

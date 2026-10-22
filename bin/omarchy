@@ -100,6 +100,7 @@ GROUP_DESCRIPTIONS[weather]="Weather status"
 GROUP_DESCRIPTIONS[webapp]="Web app launchers"
 GROUP_DESCRIPTIONS[wifi]="Wi-Fi helpers"
 GROUP_DESCRIPTIONS[windows]="Windows VM management"
+GROUP_DESCRIPTIONS[workspace]="Independent container workspaces for VS Code and Codex"
 
 join_words() {
   local separator="$1"

@@ -1,0 +1,6 @@
+#!/bin/bash
+
+# omarchy:summary=Start a workspace's rootless container and pin its SSH host key
+# omarchy:args=<name>
+
+exec python3 "$OMARCHY_PATH/default/workspaces/manager.py" start "$@"

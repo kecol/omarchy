@@ -1,0 +1,6 @@
+#!/bin/bash
+
+# omarchy:summary=Open an isolated remote VS Code window for one workspace
+# omarchy:args=<name>
+
+exec python3 "$OMARCHY_PATH/default/workspaces/manager.py" code "$@"

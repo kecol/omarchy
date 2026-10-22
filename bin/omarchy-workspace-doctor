@@ -1,0 +1,6 @@
+#!/bin/bash
+
+# omarchy:summary=Audit one workspace container's isolation and resource limits
+# omarchy:args=<name>
+
+exec python3 "$OMARCHY_PATH/default/workspaces/manager.py" doctor "$@"

@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# omarchy:summary=Explicitly build the dedicated SSH workspace image, not the Pi harness
+
+exec python3 "$OMARCHY_PATH/default/workspaces/manager.py" build "$@"
