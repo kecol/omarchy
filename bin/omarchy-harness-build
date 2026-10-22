@@ -68,6 +68,16 @@ if [[ ! -f $containerfile ]]; then
   exit 1
 fi
 
+# Build privately first: a failed build or version check must not replace :latest.
+work=$(mktemp -d)
+candidate="$image:build-$(< /proc/sys/kernel/random/uuid)"
+cleanup() {
+  # With no explicit name, Podman untag would remove every tag on this image.
+  podman untag "$candidate" "$candidate" >/dev/null 2>&1 || true
+  rm -rf "$work"
+}
+trap cleanup EXIT
+
 echo "Building $harness harness $version"
 podman build \
   --pull=newer \
@@ -76,9 +86,31 @@ podman build \
   --build-arg "PI_VERSION=$version" \
   --label "org.omarchy.harness=$harness" \
   --label "org.omarchy.harness.version=$version" \
-  --tag "$image:$version" \
-  --tag "$image:latest" \
+  --iidfile "$work/image-id" \
+  --tag "$candidate" \
   --file "$containerfile" \
   "$context"
 
-echo "Built $image:$version and $image:latest"
+image_id=$(<"$work/image-id")
+image_id="sha256:${image_id#sha256:}"
+if [[ ! $image_id =~ ^sha256:[a-f0-9]{64}$ ]]; then
+  echo "Build returned an invalid image ID; current image is unchanged." >&2
+  exit 1
+fi
+actual=$(timeout 60 podman run --rm --pull=never --network=none --read-only \
+  --cap-drop=all --security-opt=no-new-privileges --memory=256m --pids-limit=64 \
+  --tmpfs=/tmp:rw,nosuid,nodev,size=64m --entrypoint=pi "$image_id" --version)
+if [[ $actual != "$version" ]]; then
+  echo "Pi version verification failed: expected $version, got $actual. Current image is unchanged." >&2
+  exit 1
+fi
+
+podman tag "$image_id" "$image:$version"
+if previous=$(podman image inspect --format '{{.Id}}' "$image:latest" 2>/dev/null); then
+  previous="sha256:${previous#sha256:}"
+  if [[ $previous =~ ^sha256:[a-f0-9]{64}$ && $previous != "$image_id" ]]; then
+    podman tag "$previous" "$image:previous"
+  fi
+fi
+podman tag "$image_id" "$image:latest"
+echo "Built $image:$version and $image:latest (verified Pi $actual)"

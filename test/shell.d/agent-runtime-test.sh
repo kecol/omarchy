@@ -47,7 +47,8 @@ case "$1 ${2:-}" in
     [[ ${OMARCHY_TEST_IMAGE_EXISTS:-true} == "true" ]]
     ;;
   "image inspect")
-    printf '%s\n' "${OMARCHY_TEST_IMAGE_HARNESS:-pi}"
+    jq -nc --arg harness "${OMARCHY_TEST_IMAGE_HARNESS:-pi}" \
+      '{Id: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Labels: {"org.omarchy.harness": $harness, "org.omarchy.harness.version": "1.0.0"}, Created: "2026-01-01T00:00:00Z"}'
     ;;
   "volume exists")
     [[ ${OMARCHY_TEST_VOLUME_EXISTS:-false} == "true" ]]
@@ -128,6 +129,15 @@ mapfile -d '' -t exec_args <"$exec_log"
 [[ ${exec_args[*]} == "pi pi -- pi review this" ]] || fail "container mode dispatches the Pi agent to Podman" "${exec_args[*]}"
 pass "container mode resolves the standard Pi agent and its harness"
 
+(
+  cd "$workspace"
+  env "${common_env[@]}" PATH="$mock_bin:$ROOT/bin:/usr/bin" \
+    "$ROOT/bin/omarchy-agent-exec" --container --select-image pi -- pi
+)
+mapfile -d '' -t exec_args <"$exec_log"
+[[ ${exec_args[*]} == "--select-image pi pi -- pi" ]] || fail "interactive launcher selection reaches the adapter"
+pass "image selection is an explicit launcher option"
+
 if (
   cd "$workspace"
   env "${common_env[@]}" PATH="$mock_bin:$ROOT/bin:/usr/bin" OMARCHY_TEST_AGENT_MODE=container \
@@ -194,7 +204,7 @@ for expected in \
   "--volume=$workspace:$container_workspace:rw,rprivate" \
   "--volume=omarchy-agent-pi-home:/home/agent:U,rw" \
   "--entrypoint=pi" \
-  "localhost/omarchy-harness-pi:latest" \
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
   "--version"; do
   grep -Fxq -- "$expected" <<<"$run_joined" || fail "Podman adapter launches with $expected" "$run_joined"
 done
@@ -263,7 +273,7 @@ pass "Podman adapter reads configurable resource policy"
 
 (
   cd "$workspace"
-  env "${common_env[@]}" PATH="$mock_bin:$ROOT/bin:/usr/bin" OMARCHY_AGENT_ONESHOT=true \
+  env "${common_env[@]}" PATH="$mock_bin:$ROOT/bin:/usr/bin" OMARCHY_AGENT_ONESHOT=1 \
     "$ROOT/bin/omarchy-agent-run-podman" pi pi -- pi --print "2+6"
 )
 mapfile -d '' -t run_args <"$podman_run_log"
@@ -271,7 +281,7 @@ run_joined=$(printf '%s\n' "${run_args[@]}")
 ! grep -Fxq -- "--interactive" <<<"$run_joined" || fail "one-shot Podman launch does not keep stdin open" "$run_joined"
 ! grep -Fxq -- "--tty" <<<"$run_joined" || fail "one-shot Podman launch does not allocate a TTY" "$run_joined"
 grep -Fxq -- "--print" <<<"$run_joined" || fail "one-shot Podman launch preserves the agent print flag" "$run_joined"
-pass "Podman adapter runs one-shot agents without interactive stdin"
+pass "Podman adapter honors the launcher's numeric one-shot flag without interactive stdin"
 
 if (
   cd "$workspace"
@@ -298,6 +308,7 @@ for expected in \
   "--app-id=org.omarchy.agent" \
   "$ROOT/bin/omarchy-agent-exec" \
   "--container" \
+  "--select-image" \
   "pi" \
   "--"; do
   grep -Fxq -- "$expected" <<<"$launch_joined" || fail "agent launcher routes container mode with $expected" "$launch_joined"

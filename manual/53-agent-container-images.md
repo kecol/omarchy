@@ -1,0 +1,43 @@
+# Agent container images
+
+An interactive `omarchy agent` launch in container mode shows the local image before starting the agent. The menu displays the agent, harness version, image reference, immutable image ID, and build time.
+
+- Select **Run** to start the displayed image. This does not check for a new release or build an image.
+- Select **Update to latest release** to resolve the latest Pi release. Confirm the current and target versions before the build starts.
+- Select **Exit**, or press Escape, to leave without starting an agent.
+
+If no local image exists, the menu offers **Build latest** and **Exit**.
+
+After a successful update, the menu shows the new version. Select **Run** to start it. Omarchy checks `pi --version` inside the new image before changing the local `latest` tag. If the build or version check fails, the previous image remains selected.
+
+The `latest` tag means the most recently built and verified local image. It does not check the release server during each launch. The host Pi version and container Pi version can differ.
+
+Updates do not change running containers or delete agent home volumes. Start a new agent session to use an updated image. No desktop reboot is required.
+
+Managed tasks, one-shot prompts, and launches without an interactive terminal do not display this menu and do not update images automatically.
+
+## Build from a command
+
+Build the latest release:
+
+```bash
+omarchy harness build pi
+```
+
+Build a specific version:
+
+```bash
+omarchy harness build pi 1.4.0
+```
+
+Both commands verify the image before selecting it for future launches. Versioned tags remain available. When a different image replaces `latest`, the old image also receives the `previous` tag.
+
+## Restore the previous image
+
+This changes the image for future launches only:
+
+```bash
+podman tag localhost/omarchy-harness-pi:previous localhost/omarchy-harness-pi:latest
+```
+
+The launch menu resolves the displayed reference to an immutable image ID. Retagging `latest` while the menu is open does not change what **Run** executes.
