@@ -208,6 +208,35 @@ class StateTests(unittest.TestCase):
     self.assertEqual((Path(b['directory'])/'tracked.txt').read_text(), 'committed\n')
     self.assertEqual((self.source/'tracked.txt').read_text(), 'committed\n')
 
+  def test_listing_missing_state_has_no_side_effects(self):
+    with patch.dict(os.environ, XDG_DATA_HOME=str(self.base/'absent')):
+      root = m.state_root(create=False)
+      self.assertEqual(m.list_workspaces(root, runtime=True)['workspaces'], [])
+      self.assertFalse((self.base/'absent').exists())
+
+  def test_structured_list_is_read_only_and_reports_runtime_state(self):
+    self.command('create', 'one', str(self.source))
+    self.command('create', 'two', str(self.source), '--mount')
+    _, first = m.load(self.root, 'one')
+    _, second = m.load(self.root, 'two')
+    snapshot = {str(p): (p.stat().st_mtime_ns, p.stat().st_mode) for p in self.root.rglob('*')}
+    containers = [{'Labels': {m.LABEL: data['id']}, 'Names': [m.identifiers(data)[0]], 'State': state}
+      for data, state in [(first, 'running'), (second, 'exited')]]
+    with patch.object(m.subprocess, 'run', return_value=completed(json.dumps(containers))) as run:
+      records = m.list_workspaces(m.state_root(create=False), runtime=True)
+    self.assertEqual([r['state'] for r in records['workspaces']], ['running', 'stopped'])
+    self.assertEqual([r['mode'] for r in records['workspaces']], ['clone', 'mount'])
+    self.assertTrue(records['runtime_available'])
+    self.assertEqual(run.call_args.args[0][:2], ['podman', 'ps'])
+    self.assertEqual(run.call_args.kwargs['timeout'], 5)
+    self.assertEqual(snapshot, {str(p): (p.stat().st_mtime_ns, p.stat().st_mode) for p in self.root.rglob('*')})
+    with patch.object(m.subprocess, 'run', side_effect=subprocess.TimeoutExpired('podman', 5)):
+      records = m.list_workspaces(self.root, runtime=True)
+    self.assertFalse(records['runtime_available'])
+    self.assertEqual([r['state'] for r in records['workspaces']], ['unknown', 'unknown'])
+    with patch.object(m.subprocess, 'run', return_value=completed('[]')):
+      self.assertEqual(m.list_workspaces(self.root, runtime=True)['workspaces'][0]['state'], 'not-created')
+
   def test_mount_is_explicit_and_duplicate_names_fail(self):
     self.command('create', 'one', str(self.source), '--mount')
     _, data = m.load(self.root, 'one')

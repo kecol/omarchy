@@ -16,6 +16,18 @@ omarchy workspace build
 
 The build uses the current user's UID/GID. Each workspace pins the image ID on its first start. Rebuilding the image updates the tag for new workspaces; it does not silently replace existing workspace images.
 
+## Open from the desktop menu
+
+Open **Agents → Workspaces**. Select an existing workspace, or select **Create from Project**, choose a project directory, enter a unique workspace name, and select file access.
+
+**Isolated Git Clone** copies committed Git HEAD only. It does not include uncommitted or untracked files, and it removes the source remote. **Live Host Directory** permits immediate changes to the selected host files, including ignored files. Review that directory for secrets before granting access. Non-Git directories require an explicit live-directory choice; the menu does not make that choice automatically.
+
+A review terminal shows the full paths and access warning before creation or opening. **Cancel is selected by default.** Confirm to create the workspace if needed and open its isolated VS Code window. The first editor setup downloads its server and extensions. The menu does not build or pull container images, install VS Code, start a separate agent harness, or change the default agent execution mode.
+
+If creation succeeds but the editor cannot open, the workspace remains listed. Fix the reported prerequisite, then select that existing workspace to retry. Do not create another workspace with the same name.
+
+The workspace list is read-only. `omarchy workspace list --json` returns names, source and workspace paths, access modes, and a bounded runtime-state snapshot. If the engine cannot answer, the state is `unknown`; this does not mean the container stopped. Listing does not start containers or audit their isolation. Opening still runs the existing backend checks.
+
 ## Two independent projects
 
 By default, create makes an independent clone of committed Git HEAD. It does not include uncommitted or untracked files. It does not use hard links or a shared Git object store, and it removes the clone's source remote. The source checkout is not mounted in the container.

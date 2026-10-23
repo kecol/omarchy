@@ -48,14 +48,18 @@ def private_json(path, data):
       os.unlink(temporary)
 
 
-def state_root():
+def state_root(create=True):
   root = Path(os.environ.get("XDG_DATA_HOME") or str(Path.home()/".local/share")) / "omarchy/workspaces"
   if not root.is_absolute() or any(c in str(root) for c in (":", "\n", "\r")):
     fail("XDG_DATA_HOME must be an absolute path without colons or line breaks")
-  root.mkdir(parents=True, exist_ok=True, mode=0o700)
-  if root.is_symlink() or root.stat().st_uid != os.getuid():
+  if create:
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+  if root.is_symlink() or (root.exists() and (not root.is_dir() or root.stat().st_uid != os.getuid())):
     fail("Workspace state must be a real directory owned by this user")
-  root.chmod(0o700)
+  if create:
+    root.chmod(0o700)
+  elif root.exists() and root.stat().st_mode & 0o077:
+    fail("Workspace state must be private")
   return root.resolve()
 
 
@@ -116,6 +120,33 @@ def load(root, name, require_files=True):
 
 def identifiers(data):
   return "omarchy-workspace-"+data["id"], "omarchy-workspace-"+data["id"]+"-home"
+
+
+def list_workspaces(root, runtime=False):
+  records = []
+  if root.exists():
+    for directory in sorted(root.iterdir()):
+      if NAME.fullmatch(directory.name) and (directory/"workspace.json").is_file():
+        _, data = load(root, directory.name, require_files=False)
+        records.append({key: data[key] for key in ("name", "mode", "source", "directory", "id")})
+  if runtime:
+    states = {}
+    available = True
+    if records:
+      try:
+        result = subprocess.run(["podman", "ps", "--all", "--format=json", "--filter", "label="+LABEL],
+          capture_output=True, text=True, check=True, timeout=5)
+        for container in json.loads(result.stdout):
+          identity = container.get("Labels", {}).get(LABEL)
+          if "omarchy-workspace-"+str(identity) in container.get("Names", []):
+            state = container.get("State")
+            states[identity] = {"running": "running", "paused": "paused", "exited": "stopped", "stopped": "stopped", "created": "created", "configured": "created"}.get(state, "unknown")
+      except (OSError, ValueError, TypeError, AttributeError, subprocess.SubprocessError):
+        available = False
+    for record in records:
+      record["state"] = states.get(record["id"], "not-created") if available else "unknown"
+    return {"workspaces": records, "runtime_available": available}
+  return records
 
 
 def rootless():
@@ -366,7 +397,8 @@ def main():
   create.add_argument("--mount", action="store_true", help="write directly to the supplied host directory instead of cloning")
   for operation in ("start", "code", "stop", "doctor"):
     sub.add_parser(operation).add_argument("name")
-  sub.add_parser("list")
+  listing = sub.add_parser("list")
+  listing.add_argument("--json", action="store_true", help="read-only workspace metadata and a bounded runtime-state snapshot")
   sub.add_parser("build")
   args = parser.parse_args()
   os.umask(0o077)
@@ -380,11 +412,12 @@ def main():
     run(["podman", "build", "--http-proxy=false", "--tls-verify=true", "--pull=missing", "--tag", IMAGE,
       "--build-arg", f"WORKSPACE_UID={os.getuid()}", "--build-arg", f"WORKSPACE_GID={os.getgid()}", str(context)])
     return
-  root = state_root()
+  root = state_root(create=args.operation != "list")
   if args.operation == "list":
-    for directory in sorted(root.iterdir()):
-      if NAME.fullmatch(directory.name) and (directory/"workspace.json").is_file():
-        _, data = load(root, directory.name, require_files=False)
+    if args.json:
+      print(json.dumps(list_workspaces(root, runtime=True)))
+    else:
+      for data in list_workspaces(root):
         print(f"{data['name']}\t{data['mode']}\t{data['directory']}")
     return
   if args.operation == "create":

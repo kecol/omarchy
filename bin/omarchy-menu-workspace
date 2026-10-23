@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# omarchy:summary=Select or create a container workspace and open it in VS Code
+
+exec python3 "$OMARCHY_PATH/default/workspaces/menu.py" "$@"
