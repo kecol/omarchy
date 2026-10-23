@@ -26,7 +26,7 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: |
           git fetch origin "$BASE_REF"
-          if git diff --name-only "origin/$BASE_REF...HEAD" | grep -qE '^(default/i18n/|default/omarchy/omarchy-menu\.jsonc|shell/|bin/|manual/|scripts/i18n-sync\.py|test/shell\.d/i18n-test\.sh|\.github/workflows/i18n-)'; then
+          if git diff --name-only "origin/$BASE_REF...HEAD" | grep -qE '^(default/i18n/|default/omarchy/omarchy-menu\.jsonc|shell/|bin/|manual/|scripts/i18n-sync\.py|test/shell\.d/i18n(-sync-workflow)?-test\.sh|\.github/workflows/i18n-)'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
@@ -36,9 +36,11 @@ jobs:
         if: steps.relevant.outputs.relevant == 'true'
         with:
           node-version: 24
-      - name: Structural i18n test
+      - name: Structural i18n and sync workflow tests
         if: steps.relevant.outputs.relevant == 'true'
-        run: I18N_STRUCTURAL=1 bash test/shell.d/i18n-test.sh
+        run: |
+          I18N_STRUCTURAL=1 bash test/shell.d/i18n-test.sh
+          bash test/shell.d/i18n-sync-workflow-test.sh
       - name: No embedded English literals
         if: steps.relevant.outputs.relevant == 'true'
         run: python3 scripts/i18n-sync.py extract-scan --check
