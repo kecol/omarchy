@@ -55,12 +55,18 @@ while true; do
     exit 0
   fi
 
+  saved_model=
+  if [[ $harness == "pi" ]]; then
+    saved_model=$(python3 "$OMARCHY_PATH/default/agents/pi/saved-default.py" "$agent")
+  fi
   if [[ -n $image_id ]]; then
     printf '\nAgent: %s · Mode: container\nHarness: %s · Version: %s\nImage: %s\nID: %s\nBuilt: %s\n\n' \
       "$agent" "$harness" "$version" "$reference" "$image_id" "$created" >&2
+    [[ -z $saved_model ]] || printf 'Saved Pi default: %s\n\n' "$saved_model" >&2
     choice=$(gum choose "Run" "Update to latest release" "Exit") || exit 130
   else
     printf '\nAgent: %s · Mode: container\nImage missing: %s\n\n' "$agent" "$reference" >&2
+    [[ -z $saved_model ]] || printf 'Saved Pi default: %s\n\n' "$saved_model" >&2
     choice=$(gum choose "Build latest" "Exit") || exit 130
   fi
   case "$choice" in

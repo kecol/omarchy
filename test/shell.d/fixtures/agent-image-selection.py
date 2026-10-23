@@ -43,6 +43,8 @@ elif args[:2]==['image','inspect']:
  else:
   print(json.dumps({'Id':current,'Labels':{'org.omarchy.harness':os.environ.get('HARNESS','pi'),'org.omarchy.harness.version':'1.4.0' if current==new else '1.0.0'},'Created':'2026-01-01T00:00:00Z'}))
   if os.environ.get('RETAG'):write('current',new)
+elif args[:2]==['volume','inspect']:
+ sys.exit(1)
 elif args[0]=='build':
  if os.environ.get('BUILD_FAIL'):sys.exit(1)
  Path(args[args.index('--iidfile')+1]).write_text(new+'\n')
@@ -126,6 +128,7 @@ def called(calls, program, action):
 code, image, text, calls = run(['Run'])
 check(code == 0 and image == OLD and 'Version: 1.0.0' in text and OLD in text,
       'interactive Run shows metadata and returns the displayed immutable image')
+check('Saved Pi default:' in text, 'interactive launch previews the saved container model before Run')
 check(not called(calls, 'mise', 'latest') and not called(calls, 'podman', 'build'),
       'Run does not check the network or build')
 code, image, _, _ = run(['Run'], current=OLD.removeprefix('sha256:'))
@@ -152,7 +155,7 @@ for choice in ('Exit', 'CANCEL'):
         choice + ' leaves without selecting or updating')
 code, _, text, calls = run(['Exit'], adapter=True)
 check(code == 0 and 'Version: 1.0.0' in text and
-      not any(c[0] == 'podman' and c[1] in ('volume', 'run') for c in calls),
+      not any(c[:3] == ['podman', 'volume', 'create'] or c[:2] == ['podman', 'run'] for c in calls),
       'adapter Exit succeeds without creating volumes, starting an agent, or recording state')
 for terminal, interactive, extra in (
     (False, True, {}), (True, False, {}),
