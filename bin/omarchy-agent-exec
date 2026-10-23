@@ -18,6 +18,12 @@ case "${1:-}" in
     ;;
 esac
 
+checking=false
+if [[ ${1:-} == "--check" ]]; then
+  checking=true
+  shift
+fi
+
 image_options=()
 if [[ ${1:-} == "--select-image" ]]; then
   image_options=(--select-image)
@@ -40,7 +46,15 @@ fi
 
 mode=${execution_mode_override:-$(omarchy-agent-mode)}
 if [[ $mode == "host" ]]; then
-  exec "${command[@]}"
+  if [[ $checking == "true" ]]; then
+    exit 0
+  else
+    exec "${command[@]}"
+  fi
+fi
+if [[ $mode != "container" ]]; then
+  echo "Invalid agent execution mode: $mode" >&2
+  exit 1
 fi
 
 user_definition="$HOME/.config/omarchy/agents/$agent.json"
@@ -76,6 +90,9 @@ fi
 
 case "$runtime" in
   podman)
+    if [[ $checking == "true" ]]; then
+      exit 0
+    fi
     exec omarchy-agent-run-podman "${image_options[@]}" "$agent" "$harness" -- "${command[@]}"
     ;;
   *)

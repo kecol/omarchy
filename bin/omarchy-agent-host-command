@@ -1,0 +1,43 @@
+#!/bin/bash
+
+# omarchy:summary=Resolve an installed host agent executable without launching or installing it
+# omarchy:args=<agent>
+# omarchy:hidden=true
+
+set -euo pipefail
+
+if (( $# != 1 )) || [[ ! $1 =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
+  echo "Usage: omarchy-agent-host-command <agent>" >&2
+  exit 1
+fi
+agent=$1
+legacy_shim() {
+  LC_ALL=C head -c 4096 -- "$1" | grep -q '^mise use -g'
+}
+if ! omarchy-cmd-present "$agent"; then
+  echo "Host agent is not installed: $agent" >&2
+  exit 1
+fi
+path=$(type -P -- "$agent")
+
+# Preserve the launcher's precedence for user-installed Cursor and Muse.
+if [[ $agent == "cursor-agent" || $agent == "muse" ]] &&
+  [[ -f $HOME/.local/bin/$agent && -x $HOME/.local/bin/$agent ]] &&
+  { [[ -L $HOME/.local/bin/$agent ]] || ! legacy_shim "$HOME/.local/bin/$agent"; }; then
+  path="$HOME/.local/bin/$agent"
+fi
+
+# Do not invoke a lazy shim to discover whether its tool is installed. Resolve
+# the existing binary with an offline lookup from HOME, not the project config.
+if [[ $path == */mise/shims/* || $(readlink -f -- "$path") == */mise ]] ||
+  { [[ -f $path ]] && legacy_shim "$path"; }; then
+  path=$(MISE_OFFLINE=true timeout 5 mise -C "$HOME" which "$agent" 2>/dev/null) || {
+    echo "Install $agent explicitly before starting it from this menu." >&2
+    exit 1
+  }
+fi
+if [[ $path != /* || ! -f $path || ! -x $path || $path == */mise/shims/* ]]; then
+  echo "No installed host executable found for $agent" >&2
+  exit 1
+fi
+printf '%s\n' "$path"

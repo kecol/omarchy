@@ -23,6 +23,7 @@
   // Root Menu
   "apps": {"icon":"󰀻","label":"Apps","aliases":["app","applications"],"provider":"apps","action":"omarchy-shell omarchy.dock apps"},
   "agents": {"icon":"󰚩","label":"Agents"},
+  "agents.start": {"icon":"󰚩","label":"Start Agent","description":"Choose project, agent and Host or Container execution","action":"omarchy-menu-agent"},
   "agents.workspace": {"icon":"","label":"Workspaces","description":"Open VS Code in an independent container workspace","action":"omarchy-menu-workspace"},
   "learn": {"icon":"󰧑","label":"Learn"},
   "appearance": {"icon":"󰏘","label":"Appearance","aliases":["style"]},
