@@ -36,3 +36,6 @@ fi
 [[ -f $tmp/calls && $(wc -l <"$tmp/calls") == 1 ]] || fail "provider rejection must not replay input" "$(<"$tmp/rejected.log")"
 grep -Fq 'Omarchy model guard:' "$tmp/rejected.log" || fail "provider rejection provides recovery instructions" "$(<"$tmp/rejected.log")"
 pass "real Pi reports synthetic model rejection without retrying or switching models"
+
+python3 "$ROOT/test/shell.d/fixtures/model-default-relaunch.py" "$ROOT" "$pi_binary"
+pass "Save default Enter survives quit and a fresh Pi launch without invoking a provider"

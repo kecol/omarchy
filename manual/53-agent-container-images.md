@@ -1,6 +1,6 @@
 # Agent container images
 
-An interactive `omarchy agent` launch in container mode shows the local image before starting the agent. The menu displays the agent, harness version, image reference, immutable image ID, and build time.
+An interactive `omarchy agent` launch in container mode shows the local image before starting the agent. The menu displays the agent, harness version, image reference, immutable image ID, build time, and saved Pi default from the container's persistent home. The saved default is a metadata preview; project settings or a resumed session can override it, and Pi checks availability after launch.
 
 - Select **Run** to start the displayed image. This does not check for a new release or build an image.
 - Select **Update to latest release** to resolve the latest Pi release. Confirm the current and target versions before the build starts.

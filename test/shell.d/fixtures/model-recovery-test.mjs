@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
-const { default: install, classifyModelError, startupIssue } = await import(pathToFileURL(process.argv[2]));
+const { default: install, classifyModelError, startupIssue, saveDefaultModel } = await import(pathToFileURL(process.argv[2]));
 const old = { provider: 'openai', id: 'retired-model' };
 const good = { provider: 'openai', id: 'available-model' };
 const key = (m) => `${m.provider}/${m.id}`;
@@ -64,8 +64,8 @@ pass('resumed model and absent authentication are diagnosed separately');
 for (const choice of ['Choose a model for this session', 'Choose and save a new default']) {
   f = fixture({ settings, choices: [choice] });
   await f.emit('session_start');
-  assert.equal(f.draft(), '/model');
-  assert.ok(f.notices.some(([text]) => text.includes(choice.includes('default') ? 'Ctrl+S' : 'this session only')));
+  assert.equal(f.draft(), choice.includes('default') ? '/model-recovery save' : '/model');
+  assert.ok(f.notices.some(([text]) => text.includes(choice.includes('default') ? 'save the default' : 'this session only')));
   assert.deepEqual(await f.emit('cache_warming_decision'), { action: 'stop' });
   assert.deepEqual(await f.emit('input', { text: 'do not send this', source: 'interactive' }), { action: 'handled' });
   await f.emit('model_select', { model: good, source: 'restore' });
@@ -197,3 +197,44 @@ for (const status of [401, 403, 429, 503]) {
   assert.deepEqual(await f.emit('input', { text: 'native handling' }), { action: 'continue' });
 }
 pass('auth and transient errors keep native error handling and do not change model policy');
+
+for (const scenario of ['save', 'cancel', 'no-auth', 'read-error', 'write-error']) {
+  f = fixture();
+  const trace = [];
+  let drain = 0;
+  const preferences = {
+    drainErrors: () => {
+      drain++;
+      return (scenario === 'read-error' && drain === 1) || (scenario === 'write-error' && drain === 2) ? ['synthetic error'] : [];
+    },
+    setDefaultModelAndProvider: (provider, id) => { trace.push(['persist', provider, id]); },
+    flush: async () => { trace.push(['flush']); },
+  };
+  const sdk = {
+    ModelSelectorComponent: class {
+      constructor(...args) {
+        trace.push(['native-picker']);
+        if (scenario === 'cancel') args[5]();
+        else args[4](good); // Enter, not Ctrl+S.
+      }
+      render() { return []; }
+    },
+    SettingsManager: { create: (_cwd, dir, options) => { assert.equal(dir, '/fixture/pi'); assert.equal(options.projectTrusted, false); return preferences; } },
+    getAgentDir: () => '/fixture/pi',
+  };
+  f.ctx.ui.custom = async (factory) => {
+    let selected;
+    factory({}, { fg: (_name, text) => text }, {}, (value) => { selected = value; });
+    return selected;
+  };
+  f.ctx.reload = async () => { trace.push(['reload']); };
+  const pi = { getSettings: () => ({}), setModel: async (model) => { assert.equal(model, good); trace.push(['select']); return scenario !== 'no-auth'; } };
+  await saveDefaultModel(pi, f.ctx, sdk);
+  if (scenario === 'save') {
+    assert.deepEqual(trace, [['native-picker'], ['select'], ['persist', good.provider, good.id], ['flush'], ['reload']]);
+  } else {
+    assert.ok(!trace.some(([action]) => action === 'reload'));
+    if (['cancel', 'no-auth', 'read-error'].includes(scenario)) assert.ok(!trace.some(([action]) => action === 'persist'));
+  }
+}
+pass('Save default Enter persists through Pi settings API, flushes, and reloads; cancellation and errors do not report success');

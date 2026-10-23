@@ -13,9 +13,11 @@ The recovery menu offers:
 - **Refresh model catalog**
 - **Exit Pi**
 
-Choosing either model option prepares `/model` in an empty editor. Press Enter to open Pi's native picker. Press Enter on a model to select it for this session, or press Ctrl+S to save it as the default. The recovery menu itself does not save a model. If the editor already contains a draft, Omarchy leaves it unchanged and tells you how to open the native picker.
+The session option prepares `/model` in an empty editor. Press Enter to open Pi's native picker, then Enter on a model to select it for this session.
 
-Pi owns model selection, provider authentication, and default persistence. The guard does not maintain a second model picker, write settings files, or copy host credentials into a container.
+The default option prepares `/model-recovery save`. Press Enter to open Pi's native picker in **Save default** mode. Press Enter on a model to save it for future launches; Ctrl+S also saves it. There is no additional save gesture. Omarchy uses Pi's settings API, waits for the write to finish, and reloads Pi's in-memory settings. It does not send or replay a prompt.
+
+If the editor contains a draft, Omarchy leaves it unchanged and tells you which command to open. Pi owns model selection, provider authentication, and settings file handling. The guard does not implement its own model list or copy host credentials into a container.
 
 You can open the recovery menu at any time:
 
@@ -44,6 +46,8 @@ For managed tasks, one-shot prompts, and other noninteractive runs, an unavailab
 While a selection is blocked, the guard also prevents idle cache warming. This guard is not a security boundary against other trusted extensions that make their own model calls.
 
 ## Container behavior
+
+Before **Run**, the image menu displays the saved default from the container's persistent Pi home. This is a bounded, read-only metadata check, not a check of account access. Project settings and resumed sessions can override this saved default; Pi validates the effective selection after launch.
 
 The guard works with Pi 1.3 and newer, including existing images. Omarchy exposes one public extension file read-only inside the container. It does not expose the Omarchy source directory, host Pi home, host authentication, or engine sockets. Agent homes and authentication remain private to their existing environments.
 

@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 type Reference = { provider: string; id: string };
 type Issue = Reference & { reason: "catalog" | "authentication" | "rejected" };
@@ -50,6 +50,45 @@ export function startupIssue(ctx: ExtensionContext, settings: any, argv: string[
   if (!ctx.modelRegistry.hasConfiguredAuth(found)) return { ...requested, reason: "authentication" };
 }
 
+// Run from a command context: after saving through Pi's locking settings API,
+// reload Pi's in-memory settings too. Do not reuse this context after reload.
+export async function saveDefaultModel(pi: ExtensionAPI, ctx: ExtensionCommandContext, dependencies?: any) {
+  const sdk = dependencies ?? await import("@earendil-works/pi-coding-agent");
+  const runtime = {
+    getAvailableSnapshot: () => ctx.modelRegistry.getAvailable(),
+    getModel: (provider: string, id: string) => ctx.modelRegistry.find(provider, id),
+    getError: () => ctx.modelRegistry.getError(),
+    refresh: (options: any) => ctx.modelRegistry.refresh({ ...options, allowNetwork: !process.argv.includes("--offline") }),
+  };
+  const settings = pi.getSettings();
+  const selected: any = await ctx.ui.custom((tui, theme, _keys, done) => {
+    const picker = new sdk.ModelSelectorComponent(tui, ctx.model, runtime, ctx.scopedModels,
+      (model: any) => done(model), () => done(undefined), undefined, (model: any) => done(model),
+      settings.defaultProvider && settings.defaultModel ? { provider: settings.defaultProvider, id: settings.defaultModel } : undefined);
+    const render = picker.render.bind(picker);
+    picker.render = (width: number) => [theme.fg("accent", "Save default model: Enter saves; Escape cancels".slice(0, width)), ...render(width)];
+    return picker;
+  });
+  if (!selected) return;
+  if (!await pi.setModel(selected)) {
+    ctx.ui.notify("The selected provider has no configured authentication. Default was not changed.", "error");
+    return;
+  }
+  const preferences = sdk.SettingsManager.create(ctx.cwd, sdk.getAgentDir(), { projectTrusted: false });
+  if (preferences.drainErrors().length) {
+    ctx.ui.notify("Selected for this session, but Pi could not read its settings. Default was not saved.", "error");
+    return;
+  }
+  preferences.setDefaultModelAndProvider(selected.provider, selected.id);
+  await preferences.flush();
+  if (preferences.drainErrors().length) {
+    ctx.ui.notify("Selected for this session, but Pi could not save its settings. Default was not saved.", "error");
+    return;
+  }
+  ctx.ui.notify(`Saved default ${label(selected)}. Reloading Pi settings; no prompt will be sent.`, "info");
+  await ctx.reload();
+}
+
 export default function modelRecovery(pi: ExtensionAPI) {
   let issue: Issue | undefined;
   let status: number | undefined;
@@ -78,12 +117,12 @@ export default function modelRecovery(pi: ExtensionAPI) {
       : issue ? `${label(issue)} was rejected as unavailable for this connection. Choose a model; no prompt will be resent.` : "No unavailable model is recorded.";
 
   const preparePicker = (ctx: ExtensionContext, save: boolean) => {
-    const hint = save ? "press Ctrl+S in the picker to save the default" : "press Enter in the picker for this session only";
+    const hint = save ? "press Enter in the picker to save the default" : "press Enter in the picker for this session only";
     if (!ctx.ui.getEditorText()) {
-      ctx.ui.setEditorText("/model");
+      ctx.ui.setEditorText(save ? "/model-recovery save" : "/model");
       ctx.ui.notify(`Press Enter to open Pi's model picker, then ${hint}. No prompt is submitted.`, "info");
     } else {
-      ctx.ui.notify(`Your draft was not changed. Open /model or use Pi's model-selection shortcut, then ${hint}.`, "info");
+      ctx.ui.notify(`Your draft was not changed. Open ${save ? "/model-recovery save" : "/model"}, then ${hint}.`, "info");
     }
   };
 
@@ -135,8 +174,9 @@ export default function modelRecovery(pi: ExtensionAPI) {
 
   pi.registerCommand("model-recovery", {
     description: "Choose an available model or refresh Pi's catalog without resending a prompt",
-    handler: async (_args, ctx) => {
+    handler: async (args, ctx) => {
       if (!supported) ctx.ui.notify(upgradeHint, "error");
+      else if (interactive(ctx) && args.trim() === "save") await saveDefaultModel(pi, ctx);
       else if (interactive(ctx)) await recover(ctx);
       else ctx.ui.notify("Model recovery needs interactive Pi. Set an explicit --provider and --model for automation.", "error");
     },
