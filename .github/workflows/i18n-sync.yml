@@ -7,7 +7,9 @@ name: Sync translations
 # everything as one auto-merging pull request. Modeled on omarchy-site's
 # translate-news workflow; keep the Muse install pin in step with it.
 #
-# Repository settings this needs: the MUSE_API_KEY Actions secret, and an
+# Automatic sync is optional: without MUSE_API_KEY, prepare reports a skip
+# and no extraction, translation, or publishing job runs.
+# Repository settings this needs when enabled: the MUSE_API_KEY Actions secret, and an
 # I18N_SYNC_TOKEN secret (a fine-grained PAT with contents + pull-requests
 # write on this repo) so the bot's pull request triggers checks — PRs
 # created with GITHUB_TOKEN do not. Without it, the PR still opens but a
@@ -19,6 +21,7 @@ on:
   push:
     branches: [quattro]
     paths:
+      - '.github/workflows/i18n-sync.yml'
       - 'default/i18n/en/**'
       - 'default/omarchy/omarchy-menu.jsonc'
       - 'default/hypr/bindings/**'
@@ -42,16 +45,31 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
-      locales: ${{ steps.pending.outputs.locales }}
-      extract: ${{ steps.pending.outputs.extract }}
-      has_work: ${{ steps.pending.outputs.has_work }}
+      locales: ${{ steps.pending.outputs.locales || '[]' }}
+      extract: ${{ steps.pending.outputs.extract || 'false' }}
+      has_work: ${{ steps.pending.outputs.has_work || 'false' }}
     steps:
+      - name: Check translation configuration
+        id: configuration
+        env:
+          MUSE_API_KEY: ${{ secrets.MUSE_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -n ${MUSE_API_KEY:-} ]]; then
+            echo 'enabled=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'enabled=false' >> "$GITHUB_OUTPUT"
+            echo '::notice::Automatic translation sync skipped: MUSE_API_KEY is not configured.'
+            echo 'Automatic translation sync is optional. Configure the repository MUSE_API_KEY Actions secret to enable it. Existing translations and English fallback remain available.' >> "$GITHUB_STEP_SUMMARY"
+          fi
       - uses: actions/checkout@v7
+        if: steps.configuration.outputs.enabled == 'true'
         with:
           ref: quattro
           persist-credentials: false
       - name: Find pending translations and embedded English
         id: pending
+        if: steps.configuration.outputs.enabled == 'true'
         run: |
           python3 scripts/i18n-sync.py pending > "$RUNNER_TEMP/pending.json"
           python3 scripts/i18n-sync.py extract-scan > "$RUNNER_TEMP/scan.json"
