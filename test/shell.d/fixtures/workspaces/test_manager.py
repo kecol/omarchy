@@ -186,8 +186,9 @@ class StateTests(unittest.TestCase):
     (self.source/'untracked.txt').write_text('not included\n')
 
   def command(self, *args):
-    with patch.object(sys, 'argv', ['workspace']+list(args)), patch('sys.stdout', new_callable=io.StringIO):
+    with patch.object(sys, 'argv', ['workspace']+list(args)), patch('sys.stdout', new_callable=io.StringIO) as stream:
       m.main()
+      return stream.getvalue()
 
   def test_two_clones_have_independent_keys_homes_and_no_source_remote(self):
     self.command('create', 'one', str(self.source))
@@ -236,6 +237,27 @@ class StateTests(unittest.TestCase):
     self.assertEqual([r['state'] for r in records['workspaces']], ['unknown', 'unknown'])
     with patch.object(m.subprocess, 'run', return_value=completed('[]')):
       self.assertEqual(m.list_workspaces(self.root, runtime=True)['workspaces'][0]['state'], 'not-created')
+
+  def test_list_table_shows_status_and_keeps_json_contract(self):
+    records = [dict(name=name, mode='clone', state=state, directory='/project '+name)
+      for name, state in [('one', 'running'), ('two', 'stopped'), ('three', 'not-created'), ('four', 'unknown'), ('five', 'paused')]]
+    snapshot = dict(workspaces=records, runtime_available=False)
+    with patch.object(m, 'list_workspaces', return_value=snapshot) as listing:
+      table = self.command('list')
+      self.assertEqual(table.splitlines()[0].split(), ['NAME', 'MODE', 'STATUS', 'DIRECTORY'])
+      for record in records:
+        self.assertIn(record['state'], table)
+        self.assertIn(record['directory'], table)
+      self.assertEqual(json.loads(self.command('list', '--json')), snapshot)
+      self.assertTrue(all(call.kwargs == {'runtime': True} for call in listing.call_args_list))
+    with patch.object(m, 'list_workspaces', return_value=dict(workspaces=[], runtime_available=True)):
+      self.assertEqual(self.command('list'), 'No workspaces.\n')
+    records[0]['directory'] = '/project\x1b[31m\tname'
+    with patch.object(m, 'list_workspaces', return_value=snapshot):
+      table = self.command('list')
+      self.assertNotIn('\x1b', table)
+      self.assertNotIn('\t', table)
+      self.assertIn('\\x1b', table)
 
   def test_mount_is_explicit_and_duplicate_names_fail(self):
     self.command('create', 'one', str(self.source), '--mount')
