@@ -18,7 +18,7 @@ The build uses the current user's UID/GID. Each workspace pins the image ID on i
 
 ## Open from the desktop menu
 
-Open **Agents → Open Container Workspace**. Select an existing workspace, or select **Create from Project**, choose a project directory, enter a unique workspace name, and select file access.
+Open **Agents → Workspaces**. Select an existing workspace, or select **Create from Project**, choose a project directory, enter a unique workspace name, and select file access.
 
 **Isolated Git Clone** copies committed Git HEAD only. It does not include uncommitted or untracked files, and it removes the source remote. **Live Host Directory** permits immediate changes to the selected host files, including ignored files. Review that directory for secrets before granting access. Non-Git directories require an explicit live-directory choice; the menu does not make that choice automatically.
 

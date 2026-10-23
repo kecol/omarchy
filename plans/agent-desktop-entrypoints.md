@@ -1,6 +1,6 @@
 # Agent desktop entry points: staged implementation plan
 
-Status: Phase 1 is implemented on a feature branch and awaits disposable-VM graphical verification. Automated functional checks pass. Phases 2 and 3 remain proposed. The active desktop configuration has not changed.
+Status: Phase 1 is implemented on a feature branch. Automated functional checks and an approved, guarded host UI preview are complete. Activation is pending. Phases 2 and 3 remain proposed. The temporary preview configuration was restored; the active source has not changed.
 
 ## Goal
 
@@ -30,7 +30,7 @@ Expose existing container workspace and agent commands through the Omarchy menu.
 
 ### User flow
 
-1. Open Agents → Open Container Workspace.
+1. Open Agents → Workspaces.
 2. Select an existing workspace or Create from Project.
 3. For an existing workspace, show its project, access type, and current state, then open it through `omarchy workspace code`.
 4. For a new workspace, select a source directory and a unique workspace name.
@@ -126,7 +126,7 @@ If an isolated-copy path needs backend work, implement and test that backend ope
 2. Implement only the current phase and its necessary backend interface.
 3. Add focused tests for menu routing, stable identifiers, argument safety, cancellation, error handling, and relevant backend behavior.
 4. Run focused tests, CLI/metadata checks where applicable, and existing menu performance guards. Keep complete output.
-5. Exercise the real graphical flow in a disposable VM with synthetic project and authentication state. Inspect reference and candidate captures for focus, clipping, stale state, and wrong-target behavior.
+5. For menu-only entry points, use an approved, scoped host UI preview with backend mutations disabled. Use a disposable VM for the graphical acceptance suite and for runtime/isolation changes. Inspect reference and candidate captures for focus, clipping, stale state, and wrong-target behavior.
 6. Use synthetic providers for agent tests. Do not issue live provider requests, copy personal credentials, or use existing independent workspaces as fixtures.
 7. Document behavior and limitations. Present results for review before starting the next phase.
 8. Activate approved changes through a history-preserving merge. Do not reboot the host or interrupt existing sessions. Obtain agreement before any required live shell restart.
