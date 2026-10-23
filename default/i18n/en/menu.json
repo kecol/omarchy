@@ -29,6 +29,17 @@
   "about": {
     "label": "About"
   },
+  "agents": {
+    "label": "Agents"
+  },
+  "agents.start": {
+    "label": "Start Agent",
+    "description": "Choose project, agent and Host or Container execution"
+  },
+  "agents.workspace": {
+    "label": "Workspaces",
+    "description": "Open VS Code in an independent container workspace"
+  },
   "system": {
     "label": "System"
   },
