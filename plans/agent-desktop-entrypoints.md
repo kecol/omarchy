@@ -1,6 +1,6 @@
 # Agent desktop entry points: staged implementation plan
 
-Status: Phase 1 is implemented on a feature branch. Automated functional checks and an approved, guarded host UI preview are complete. Activation is pending. Phases 2 and 3 remain proposed. The temporary preview configuration was restored; the active source has not changed.
+Status: Phase 1 is active. Phase 2 is implemented on a feature branch; automated checks and a guarded host UI preview are complete, with activation pending. Phase 3 remains proposed. Temporary preview configuration was restored. No agent was started during the host preview.
 
 ## Goal
 
@@ -71,9 +71,9 @@ Expose existing container workspace and agent commands through the Omarchy menu.
 
 ### Design gate before implementation
 
-Verify how the existing agent runtime can consume an isolated project copy and whether registered container-workspace projects can be reused through a supported backend interface. Do not read private registry internals from QML, create a second clone manager, mount an engine socket, or assume that an agent harness runs inside the VS Code workspace container.
+Verified: the existing agent runtime mounts its working directory read-write. `workspace create` can prepare a private committed-HEAD clone without starting an editor container. `workspace list --json` provides the validated project path for that named clone. The agent can run through its existing harness with that clone as its explicit working directory; no engine socket or nested container is required.
 
-If an isolated-copy path needs backend work, implement and test that backend operation before exposing it. Do not silently substitute a live mount. Shared editor-and-agent operation is not an automatic part of this phase.
+Workspace Files is an explicit reuse action, not a combined editor/agent launch. Its review states that the project files are the same files the editor uses, while the agent harness, home, authentication, and lifecycle remain separate. Live-mount workspaces retain their host-write warning. A fully prepared, approved clone is retained if subsequent image selection is cancelled or launch fails, and can be selected through Workspace Files on the next launch. No second clone manager or private registry reader was added to QML.
 
 ### Scope
 
@@ -89,7 +89,7 @@ If an isolated-copy path needs backend work, implement and test that backend ope
 - Per-launch agent and execution choices leave saved defaults unchanged.
 - Unsupported agent/runtime combinations fail before launch rather than falling back to Host.
 - A Host launch is visibly different from a Container launch; selecting a directory never implies container isolation.
-- Cancellation leaves no launched agent or partial project preparation.
+- Cancellation before final approval leaves no launched agent, project copy, or recent-project update. A complete clone created after approval is retained if later image selection is cancelled; no partial staging directory is published.
 - Existing direct CLI, managed-task, one-shot, and noninteractive flows retain their behavior.
 - Container image updates remain explicit, and no failed prompt is replayed.
 
@@ -149,4 +149,4 @@ Keep each phase independently reviewable and reversible. Reverting a UI integrat
 2. Agent project/agent selection launcher.
 3. Execution-default menu and bar visibility.
 
-Pause after each phase for review. Phase 1 was authorized. Do not start Phases 2 or 3 without the user's next instruction.
+Pause after each phase for review. Phases 1 and 2 were authorized. Phase 1 is active. Review Phase 2 before activation. Do not start Phase 3 without the user's next instruction.

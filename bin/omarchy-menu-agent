@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# omarchy:summary=Choose a project and agent for a host or container launch
+
+exec python3 -B "$OMARCHY_PATH/default/agents/launch-menu.py" "$@"
