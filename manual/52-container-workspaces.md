@@ -26,7 +26,7 @@ A review terminal shows the full paths and access warning before creation or ope
 
 If creation succeeds but the editor cannot open, the workspace remains listed. Fix the reported prerequisite, then select that existing workspace to retry. Do not create another workspace with the same name.
 
-The workspace list is read-only. `omarchy workspace list --json` returns names, source and workspace paths, access modes, and a bounded runtime-state snapshot. If the engine cannot answer, the state is `unknown`; this does not mean the container stopped. Listing does not start containers or audit their isolation. Opening still runs the existing backend checks.
+The workspace list is read-only. `omarchy workspace list` shows an aligned table with NAME, MODE, STATUS, and DIRECTORY columns. Status can be `running`, `stopped`, `paused`, `created`, `not-created` (no matching container exists), or `unknown`. Use `omarchy workspace list --json` in scripts; it returns names, source and workspace paths, access modes, and the same bounded runtime-state snapshot. If the engine cannot answer, the state is `unknown`; this does not mean the container stopped. Listing does not start containers or audit their isolation. Opening still runs the existing backend checks.
 
 ## Two independent projects
 

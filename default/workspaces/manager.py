@@ -414,11 +414,19 @@ def main():
     return
   root = state_root(create=args.operation != "list")
   if args.operation == "list":
+    snapshot = list_workspaces(root, runtime=True)
     if args.json:
-      print(json.dumps(list_workspaces(root, runtime=True)))
+      print(json.dumps(snapshot))
+    elif not snapshot["workspaces"]:
+      print("No workspaces.")
     else:
-      for data in list_workspaces(root):
-        print(f"{data['name']}\t{data['mode']}\t{data['directory']}")
+      rows = [("NAME", "MODE", "STATUS", "DIRECTORY")]
+      for data in snapshot["workspaces"]:
+        directory = "".join(c if c.isprintable() else ascii(c)[1:-1] for c in data["directory"])
+        rows.append((data["name"], data["mode"], data["state"], directory))
+      widths = [max(len(row[i]) for row in rows) for i in range(3)]
+      for row in rows:
+        print("  ".join(row[i].ljust(widths[i]) for i in range(3))+"  "+row[3])
     return
   if args.operation == "create":
     source = source_path(args.directory, root, mount=args.mount)
