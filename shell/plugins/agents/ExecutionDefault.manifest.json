@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "omarchy.agent-execution",
+  "name": "Agent execution default",
+  "version": "1.0.0",
+  "author": "Omarchy",
+  "license": "MIT",
+  "description": "Local launch-default status without agent usage collectors or provider requests.",
+  "kinds": ["bar-widget"],
+  "activation": "on-demand",
+  "entryPoints": {
+    "barWidget": "ExecutionDefault.qml"
+  },
+  "barWidget": {
+    "displayName": "Agent execution default",
+    "description": "Show the Host, Container, or Unknown launch default. Click to choose the default for future agents.",
+    "category": "AI",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {},
+    "schema": []
+  }
+}
