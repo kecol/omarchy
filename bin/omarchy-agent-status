@@ -1,0 +1,9 @@
+#!/bin/bash
+
+# omarchy:summary=Report identified local agent processes, prioritizing host execution
+# omarchy:args=[--json] [--no-herdr] [--no-podman]
+# omarchy:examples=omarchy agent status | omarchy agent status --json
+
+set -euo pipefail
+
+exec python3 -I -B "$OMARCHY_PATH/default/agents/status.py" "$@"

@@ -4,6 +4,10 @@ Omarchy managed agents run coding tasks through isolated Git workspaces and a
 container runtime. The design goal is to keep agent writes away from the source
 checkout until a human explicitly reviews and applies them.
 
+## Local status and managed inventory
+
+`omarchy agent status` reports recognized current-user processes, including direct host agents and extension-associated processes in local rootless containers. It correlates local Herdr reports without counting the same process twice. It is distinct from `agent list` (configured definitions), `agent ps` (active managed harnesses), and `workspace list` (editor containers). Its structured output and coverage limitations are described in [`manual/56-agent-status.md`](../manual/56-agent-status.md). It is an observation tool, not an isolation audit or agent controller. Remote hosts are not queried.
+
 ## Safety model
 
 A managed task has three important locations:
