@@ -40,6 +40,22 @@
     "label": "Workspaces",
     "description": "Open VS Code in an independent container workspace"
   },
+  "agents.execution": {
+    "label": "Default Execution",
+    "description": "Choose the launch default for future agents only"
+  },
+  "agents.execution.host": {
+    "label": "Host",
+    "description": "Desktop user permissions; project directory is not a sandbox"
+  },
+  "agents.execution.container": {
+    "label": "Container",
+    "description": "Existing harness; project writes depend on selected access"
+  },
+  "agents.execution.unknown": {
+    "label": "Default: Unknown",
+    "description": "Invalid setting; select Host or Container to repair it"
+  },
   "system": {
     "label": "System"
   },

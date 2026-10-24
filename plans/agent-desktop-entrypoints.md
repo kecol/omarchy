@@ -1,6 +1,6 @@
 # Agent desktop entry points: staged implementation plan
 
-Status: Phase 1 is active. Phase 2 is implemented on a feature branch; automated checks and a guarded host UI preview are complete, with activation pending. Phase 3 remains proposed. Temporary preview configuration was restored. No agent was started during the host preview.
+Status: Phases 1 and 2 are active. Phase 3 is authorized and implemented in a separate feature worktree. Functional checks pass; actual visual verification and activation remain pending. The host has approximately 3 GiB available memory, below the disposable VM threshold. No Phase 3 user configuration or execution default has been changed.
 
 ## Goal
 
@@ -108,7 +108,7 @@ Workspace Files is an explicit reuse action, not a combined editor/agent launch.
 - Read and write the existing `omarchy agent mode` setting. Do not add a second preference.
 - Preserve the saved mode and the current unset-mode behavior. Changing the installation default to Container requires a separate, explicit compatibility decision.
 - Refresh menu guards through the existing shared-reader mechanism.
-- Use a shared file watch or command-driven refresh for the bar. Handle file creation and atomic replacement; do not poll or start one watcher process per monitor.
+- Use a shared file watch or command-driven refresh for the bar. Handle file creation and atomic replacement; do not poll or start one watcher process per monitor. The implementation uses one lazy QML singleton and a setter-driven IPC refresh after atomic publication. A save during an in-flight query queues a fresh read. Manual file edits require an explicit refresh or shell reload.
 - Label the value as the launch default, not the execution mode of every running agent. Host and container agents can coexist.
 - Invalid setting data must show an error/unknown state rather than silently displaying Host or Container.
 
@@ -149,4 +149,4 @@ Keep each phase independently reviewable and reversible. Reverting a UI integrat
 2. Agent project/agent selection launcher.
 3. Execution-default menu and bar visibility.
 
-Pause after each phase for review. Phases 1 and 2 were authorized. Phase 1 is active. Review Phase 2 before activation. Do not start Phase 3 without the user's next instruction.
+Pause after each phase for review. Phases 1 and 2 are active. Phase 3 was authorized. Complete its visual verification and present the results before activation. Obtain approval before a required live shell restart or a host preview outside the previously approved menu-only scope.

@@ -18,6 +18,7 @@
     "aliases": ["agents", "model-usage"],
     "allowMultiple": false,
     "defaults": {
+      "showExecutionDefault": false,
       "providers": {
         "claude": { "enabled": true },
         "codex": { "enabled": true },
@@ -32,6 +33,7 @@
       "syncDeviceId": ""
     },
     "schema": [
+      { "key": "showExecutionDefault", "type": "boolean", "label": "Show launch default", "defaultValue": false, "description": "Show Default: Host or Container beside the usage icon. Click the label to choose the future launch default; running agents are unchanged." },
       { "key": "refreshIntervalSec", "type": "integer", "label": "Refresh interval (seconds)", "min": 30, "max": 3600, "step": 30, "defaultValue": 900 },
       { "key": "syncMode", "type": "enum", "label": "Synced aggregation", "options": ["Off", "On"], "defaultValue": "Off", "description": "When On, write this machine's local usage snapshot and merge snapshots from other machines." },
       { "key": "syncDir", "type": "path", "label": "Sync folder", "defaultValue": "", "description": "A folder synced by Syncthing, Dropbox, rsync, etc." },
