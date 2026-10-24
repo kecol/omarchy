@@ -59,7 +59,9 @@ mid-session shows up at the next refresh. Drop the widget with
 
 Agents → Default Execution selects the default for future launches through `omarchy agent mode`. Both choices require confirmation; Cancel is the default. Host runs with desktop user permissions, not project-directory confinement. Container launches keep their existing project-access choices and persistent harness home. Switching the default does not change running agents or workspaces. An unset setting still means Host.
 
-This option does not enable the Agents widget itself. Enabling a previously disabled Agents widget starts its existing usage collectors, which may contact providers; the execution menu does not require it. No existing bar placement is changed automatically.
+For mode status without the usage panel, enable the independent `omarchy.agent-execution` bar widget: `omarchy plugin enable omarchy.agent-execution`. Disable it with `omarchy plugin disable omarchy.agent-execution`. `ExecutionDefault.qml` contains only a mode icon and the existing `execution/Button.qml`. It does not instantiate `Main.qml`, `Panel.qml`, or their collectors. Both icon and text open Default Execution on left-click; other buttons do nothing. It shares the existing singleton with any combined label and all monitors. The standalone widget is optional and is not added to an existing or fresh-install layout automatically.
+
+The combined label option below does not enable the Agents widget itself. Enabling a previously disabled Agents widget starts its existing usage collectors, which may contact providers; the execution menu does not require it. No existing bar placement is changed automatically.
 
 Enable the optional label beside the usage icon with `omarchy bar set omarchy.agents showExecutionDefault true --json`. Disable it with the same command and `false`. The label reads **Default: Host**, **Default: Container**, or **Default: Unknown**. Left-click the label to open the execution menu. The existing robot icon's left, right, and middle actions remain unchanged. Vertical bars rotate the label into a separate slot.
 

@@ -49,15 +49,17 @@ omarchy agent mode container
 omarchy agent mode host
 ```
 
-The label is optional and does not enable the Agents widget automatically. If Agents is absent from your bar, enabling the existing widget with `omarchy plugin enable omarchy.agents` also starts its normal usage collectors, which may contact providers. The Default Execution menu works without enabling that widget.
-
-To show a clickable launch-default label beside an enabled Agents robot icon:
+Use the independent **Agent execution default** widget to show a mode icon and status without enabling the Agents usage panel:
 
 ```bash
-omarchy bar set omarchy.agents showExecutionDefault true --json
+omarchy plugin enable omarchy.agent-execution
 ```
 
-Use `false` to hide it. The label says **Default: Host** or **Default: Container**, not where every running agent executes. Click the label to open Default Execution. The robot icon's existing usage-panel and launch actions remain unchanged.
+It shows a desktop icon for **Default: Host**, a package icon for **Default: Container**, or a warning icon for **Default: Unknown**. This is the launch default, not where every running agent executes. Left-click either the icon or text to open Default Execution. Right and middle clicks do nothing. It reads only the local mode setting, uses no polling, and does not start usage collectors, contact providers, inspect authentication, or launch an agent. Vertical bars stack the icon above a rotated label.
+
+Hide it with `omarchy plugin disable omarchy.agent-execution`. The existing Agents usage widget can remain disabled. No widget or bar placement is enabled automatically.
+
+The older combined label remains available on an already enabled Agents usage widget through `omarchy bar set omarchy.agents showExecutionDefault true --json`; use `false` to hide it. Both labels share one reader. Enabling the usage widget itself starts its normal collectors, which may contact providers. It is not required for the independent indicator.
 
 An invalid or unreadable setting shows **Default: Unknown**, with neither execution row checked. Choose Host or Container and confirm to repair it. Use `omarchy agent mode` to display an error diagnostic. The label updates after changes made through the menu or CLI. After a manual file edit, use `omarchy-shell -q omarchy.agent-execution-default refresh` or reload the shell to refresh it.
 
