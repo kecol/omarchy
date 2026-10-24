@@ -49,7 +49,9 @@ omarchy agent mode container
 omarchy agent mode host
 ```
 
-To show a clickable launch-default label beside the Agents robot icon:
+The label is optional and does not enable the Agents widget automatically. If Agents is absent from your bar, enabling the existing widget with `omarchy plugin enable omarchy.agents` also starts its normal usage collectors, which may contact providers. The Default Execution menu works without enabling that widget.
+
+To show a clickable launch-default label beside an enabled Agents robot icon:
 
 ```bash
 omarchy bar set omarchy.agents showExecutionDefault true --json

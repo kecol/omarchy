@@ -1,6 +1,6 @@
 # Agent desktop entry points: staged implementation plan
 
-Status: Phases 1 and 2 are active. Phase 3 is authorized and implemented in a separate feature worktree. Functional checks pass; actual visual verification and activation remain pending. The host has approximately 3 GiB available memory, below the disposable VM threshold. No Phase 3 user configuration or execution default has been changed.
+Status: Phases 1 and 2 are active. Phase 3 is implemented in a separate feature worktree. Functional checks and an explicitly approved, fixture-backed host preview are complete; activation remains pending. Temporary bar and menu configuration was restored byte-for-byte. The real execution default, container states, and shell processes are unchanged. No disposable VM or fresh-login acceptance suite ran because approximately 3 GiB available host memory was below the approved threshold.
 
 ## Goal
 
@@ -149,4 +149,4 @@ Keep each phase independently reviewable and reversible. Reverting a UI integrat
 2. Agent project/agent selection launcher.
 3. Execution-default menu and bar visibility.
 
-Pause after each phase for review. Phases 1 and 2 are active. Phase 3 was authorized. Complete its visual verification and present the results before activation. Obtain approval before a required live shell restart or a host preview outside the previously approved menu-only scope.
+Pause after each phase for review. Phases 1 and 2 are active. Phase 3 implementation and scoped visual verification are complete. Obtain approval before activation and the brief live shell restart required for its new QML/JavaScript. Do not enable the optional label or previously disabled Agents usage widget automatically.
