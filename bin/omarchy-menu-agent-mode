@@ -1,0 +1,35 @@
+#!/bin/bash
+
+# omarchy:summary=Confirm a default execution mode for future coding agents
+# omarchy:args=[host|container]
+
+set -euo pipefail
+
+valid_mode() {
+  [[ $1 == "host" || $1 == "container" ]]
+}
+
+if (( $# == 1 )) && [[ $1 == "--help" || $1 == "-h" ]]; then
+  echo "Usage: omarchy menu agent mode host|container"
+elif (( $# == 1 )) && valid_mode "$1"; then
+  printf -v command '%q --confirm %q' "$OMARCHY_PATH/bin/omarchy-menu-agent-mode" "$1"
+  exec omarchy-launch-floating-terminal-with-presentation "$command"
+elif (( $# == 2 )) && [[ $1 == "--confirm" ]] && valid_mode "$2"; then
+  mode=$2
+  current=$(omarchy-agent-mode 2>/dev/null) || current="unknown"
+  printf 'Default execution for future agents\n\nCurrent: %s\nRequested: %s\n\n' "$current" "$mode"
+  if [[ $mode == "host" ]]; then
+    echo "WARNING: Host agents run with your desktop user's permissions. A project directory is not a sandbox."
+  else
+    echo "Container launches use the existing agent harness. Their selected project is writable, and the agent has a persistent container home."
+    echo "An explicit live-directory choice can still modify host files. Unsupported agents do not fall back to Host."
+  fi
+  printf '\nThis saves a launch default only. Running agents and workspaces are unchanged.\nPer-launch Host/Container choices still override this default without saving it.\n\n'
+  if gum confirm --default=false --affirmative="Save default" --negative="Cancel" "Save this execution default?"; then
+    omarchy-agent-mode "$mode"
+  fi
+  exit 130
+else
+  echo "Usage: omarchy menu agent mode host|container" >&2
+  exit 1
+fi

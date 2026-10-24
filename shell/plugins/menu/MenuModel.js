@@ -408,6 +408,7 @@ var GUARD_READERS = [
   "omarchy-bar position",
   "omarchy-channel-current",
   "omarchy-default-agent",
+  "omarchy-agent-mode",
   "omarchy-default-browser",
   "omarchy-default-editor",
   "omarchy-default-terminal",

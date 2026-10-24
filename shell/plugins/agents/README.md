@@ -55,6 +55,16 @@ recorded usage, on this machine or a synced one; a CLI installed
 mid-session shows up at the next refresh. Drop the widget with
 `omarchy plugin disable omarchy.agents`.
 
+## Launch default
+
+Agents → Default Execution selects the default for future launches through `omarchy agent mode`. Both choices require confirmation; Cancel is the default. Host runs with desktop user permissions, not project-directory confinement. Container launches keep their existing project-access choices and persistent harness home. Switching the default does not change running agents or workspaces. An unset setting still means Host.
+
+This option does not enable the Agents widget itself. Enabling a previously disabled Agents widget starts its existing usage collectors, which may contact providers; the execution menu does not require it. No existing bar placement is changed automatically.
+
+Enable the optional label beside the usage icon with `omarchy bar set omarchy.agents showExecutionDefault true --json`. Disable it with the same command and `false`. The label reads **Default: Host**, **Default: Container**, or **Default: Unknown**. Left-click the label to open the execution menu. The existing robot icon's left, right, and middle actions remain unchanged. Vertical bars rotate the label into a separate slot.
+
+All enabled labels share one bounded, local mode reader. The setter sends a best-effort IPC refresh after every atomic save, including file creation. The reader refreshes on first load and after explicit refresh requests, not on a timer. A save during a read queues one fresh read. Missing, malformed, unreadable, and timed-out responses never become an assumed Container or Host value; only an absent setting uses the backend's Host default. If a mode file is edited by hand, run `omarchy-shell -q omarchy.agent-execution-default refresh` or reload the shell to refresh loaded labels. No usage refresh, provider request, account switch, or container operation is needed to show or change the launch default.
+
 ## Data
 
 Each agent is one JSON record in `~/.local/state/omarchy/agents/usage/`,
@@ -165,6 +175,7 @@ top-level keys can be set with
 
 | Key | Default | What it does |
 |---|---|---|
+| `showExecutionDefault` | `false` | Show a separate, clickable launch-default label beside the robot icon |
 | `refreshIntervalSec` | `900` | How often the usage records regenerate |
 | `syncMode` | `"Off"` | `"On"` writes this machine's snapshot and merges the others |
 | `syncDir` | `""` | A folder synced by Syncthing, Dropbox, rsync, … |

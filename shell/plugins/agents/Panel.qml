@@ -5,6 +5,7 @@ import Quickshell.Io
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
+import "execution" as Execution
 
 Panel {
   id: root
@@ -854,8 +855,8 @@ Panel {
     keyColumn = 0
     Qt.callLater(function() { if (picking) pointAt("choice", 0) })
   }
-  implicitWidth: button.implicitWidth
-  implicitHeight: button.implicitHeight
+  implicitWidth: vertical ? Math.max(button.implicitWidth, executionLabel.width) : button.implicitWidth + executionLabel.width
+  implicitHeight: vertical ? button.implicitHeight + executionLabel.height : Math.max(button.implicitHeight, executionLabel.height)
 
   onOpenedChanged: if (opened) {
     if (addStage !== "running") addStage = ""
@@ -952,7 +953,8 @@ Panel {
 
   BarIconButton {
     id: button
-    anchors.fill: parent
+    width: root.vertical ? root.width : implicitWidth
+    height: root.vertical ? implicitHeight : root.height
     bar: root.bar
     text: "󱚣"
     active: root.alarming
@@ -960,6 +962,19 @@ Panel {
       if (buttonCode === Qt.RightButton) root.launchAgent()
       else if (buttonCode === Qt.MiddleButton) root.refreshNow()
       else root.toggle()
+    }
+  }
+
+  Loader {
+    id: executionLabel
+    active: root.setting("showExecutionDefault", false) === true
+    visible: active
+    x: root.vertical ? 0 : button.width
+    y: root.vertical ? button.height : 0
+    width: item ? item.implicitWidth : 0
+    height: item ? item.implicitHeight : 0
+    sourceComponent: Component {
+      Execution.Button { bar: root.bar }
     }
   }
 

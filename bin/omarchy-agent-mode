@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# omarchy:summary=Show or set where coding agents run
+# omarchy:summary=Show or set the execution default for future coding agents
 # omarchy:args=[host|container]
 # omarchy:examples=omarchy agent mode | omarchy agent mode container
 
@@ -12,7 +12,8 @@ usage() {
   cat <<'USAGE'
 Usage: omarchy agent mode [host|container]
 
-With no argument, prints the current execution mode. The default is host.
+With no argument, prints the launch default. With no saved setting, it is host.
+Changes affect future launches only, not running agents or per-launch overrides.
 USAGE
 }
 
@@ -31,17 +32,32 @@ case "${1:-}" in
     exit 0
     ;;
   "")
-    if [[ -f $mode_file ]]; then
-      IFS= read -r mode <"$mode_file" || true
-      if ! valid_mode "${mode:-}"; then
-        echo "Invalid agent execution mode in $mode_file: ${mode:-<empty>}" >&2
-        exit 1
-      fi
-    else
-      mode="host"
-    fi
+    # Isolated Python avoids project/user startup hooks. A bounded binary read
+    # distinguishes an absent setting from unreadable, malformed, or special files.
+    python3 -I - "$mode_file" <<'PY'
+import os, stat, sys
 
-    echo "$mode"
+path = sys.argv[1]
+def invalid():
+  sys.exit(f"Invalid agent execution mode in {path}; choose host or container.")
+
+try:
+  fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+except FileNotFoundError:
+  if os.path.lexists(path):
+    invalid()
+  print('host')
+except OSError:
+  invalid()
+else:
+  with os.fdopen(fd, 'rb') as source:
+    if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+      invalid()
+    raw = source.read(11)
+  if raw not in (b'host', b'host\n', b'container', b'container\n'):
+    invalid()
+  print(raw.removesuffix(b'\n').decode('ascii'))
+PY
     ;;
   host | container)
     mode=$1
@@ -53,6 +69,9 @@ case "${1:-}" in
     mv -f -- "$staged" "$mode_file"
     trap - EXIT
     echo "$mode"
+    # One shared reader refreshes all enabled labels. A missing shell or
+    # unloaded optional indicator must not turn a successful save into failure.
+    omarchy-shell -q omarchy.agent-execution-default refresh >/dev/null 2>&1 || true
     ;;
   *)
     echo "Unknown agent execution mode: $1" >&2

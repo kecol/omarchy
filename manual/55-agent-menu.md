@@ -37,6 +37,30 @@ A workspace's editor container and the agent harness have independent lifecycles
 
 A confirmed clone is complete and retained if image selection is later cancelled or the agent fails. It remains available through **Workspace Files** on the next agent launch, or through **Agents → Workspaces** for an editor. The menu does not delete approved project copies automatically. Review and transfer changes back to the original checkout explicitly; no automatic copy-back occurs.
 
+## Change the execution default
+
+Open **Agents → Default Execution**. The checked row is the saved launch default. Select Host or Container, review its permissions, then confirm **Save default**. Cancel leaves the setting unchanged. The choice affects future launches only; running agents and workspaces keep their current execution environments. A per-launch Host/Container choice still takes precedence and does not save a new default. Without a saved setting, the default remains Host.
+
+The same setting is available from the terminal:
+
+```bash
+omarchy agent mode
+omarchy agent mode container
+omarchy agent mode host
+```
+
+The label is optional and does not enable the Agents widget automatically. If Agents is absent from your bar, enabling the existing widget with `omarchy plugin enable omarchy.agents` also starts its normal usage collectors, which may contact providers. The Default Execution menu works without enabling that widget.
+
+To show a clickable launch-default label beside an enabled Agents robot icon:
+
+```bash
+omarchy bar set omarchy.agents showExecutionDefault true --json
+```
+
+Use `false` to hide it. The label says **Default: Host** or **Default: Container**, not where every running agent executes. Click the label to open Default Execution. The robot icon's existing usage-panel and launch actions remain unchanged.
+
+An invalid or unreadable setting shows **Default: Unknown**, with neither execution row checked. Choose Host or Container and confirm to repair it. Use `omarchy agent mode` to display an error diagnostic. The label updates after changes made through the menu or CLI. After a manual file edit, use `omarchy-shell -q omarchy.agent-execution-default refresh` or reload the shell to refresh it.
+
 ## Per-launch command-line options
 
 The ordinary CLI remains noninteractive unless its existing flow needs interaction. Project and agent selection are explicit options:
