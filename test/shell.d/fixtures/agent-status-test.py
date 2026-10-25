@@ -41,6 +41,8 @@ class StatusTests(unittest.TestCase):
     self.sock = socket.socket(socket.AF_UNIX)
     self.sock.bind(str(self.root/'herdr.sock'))
     self.addCleanup(self.sock.close)
+    self.sessions=[{'name':'default','running':True,'socket_path':str(self.root/'herdr.sock')}]
+    self.session_agents={}
 
   def add_process(self, pid, comm, exe, namespace=('pid:[1]', 'mnt:[1]'), start=100, command=b'', cwd='/project', ppid=1):
     directory = self.proc_root/str(pid)
@@ -68,9 +70,11 @@ class StatusTests(unittest.TestCase):
       self.assertNotIn('Auth',args[4])
       return self.details
     if args == ['herdr','session','list','--json']:
-      return {'sessions':[{'name':'default','running':True,'socket_path':str(self.root/'herdr.sock')}]}
-    if args == ['herdr','--session','default','agent','list']:
-      return {'result':{'agents':self.agent_rows}}
+      return {'sessions':self.sessions}
+    if args[:2] == ['herdr','--session'] and args[3:] == ['agent','list']:
+      rows=self.agent_rows if args[2]=='default' else self.session_agents.get(args[2],[])
+      if isinstance(rows,Exception):raise rows
+      return {'result':{'agents':rows}}
     if args[:5] == ['herdr','--session','default','pane','process-info']:
       return {'result':{'process_info':self.info[args[-1]]}}
     if args == ['omarchy-agent-mode']:
@@ -194,6 +198,9 @@ class StatusTests(unittest.TestCase):
     self.assertEqual(report['processes'],[])
     self.assertEqual(len(report['unverified_observations']),1)
     self.assertIn('reused',report['unverified_observations'][0]['reason'])
+    pane=report['herdr_sessions'][0]['panes'][0]
+    self.assertEqual(pane['match_state'],'unverified')
+    self.assertEqual(pane['process_matches'],[])
 
   def test_unknown_sources_are_not_reported_as_empty_success(self):
     self.add_process(10,'pi','/pi')
@@ -263,6 +270,91 @@ class StatusTests(unittest.TestCase):
     with patch.object(sys,'argv',['agent-status']), patch.object(os,'getuid',return_value=0), patch.object(m,'build_report',side_effect=AssertionError('must not probe')), contextlib.redirect_stderr(io.StringIO()):
       with self.assertRaises(SystemExit) as error:m.main()
     self.assertEqual(error.exception.code,2)
+
+  def test_grouped_panes_reference_existing_identities_without_extra_queries(self):
+    self.add_process(10,'pi','/pi')
+    self.add_process(20,'codex','/codex')
+    self.row()
+    report=self.report()
+    self.assertEqual(len(report['processes']),2)
+    self.assertEqual(len(report['herdr_sessions']),1)
+    session=report['herdr_sessions'][0]
+    self.assertEqual(session['state'],'ok')
+    self.assertEqual(session['reported_agent_count'],1)
+    pane=session['panes'][0]
+    self.assertEqual(pane['match_state'],'matched')
+    self.assertEqual(pane['reported_activity'],'working')
+    pi=next(p for p in report['processes'] if p['agent']=='pi')
+    self.assertEqual(pane['process_matches'],[{'identity':pi['identity'],'boundary':'host'}])
+    self.assertEqual(len([c for c in self.calls if c[0]=='herdr']),3)
+    self.assertNotIn(SECRET,json.dumps(report))
+
+  def test_empty_stopped_and_unavailable_sessions_are_distinct(self):
+    socket_path=str(self.root/'herdr.sock')
+    self.sessions += [{'name':'empty','running':True,'socket_path':socket_path},{'name':'stopped','running':False},{'name':'offline','running':True,'socket_path':socket_path}]
+    self.session_agents['offline']=m.Unavailable('unavailable')
+    report=self.report()
+    sessions={s['name']:s for s in report['herdr_sessions']}
+    self.assertEqual(sessions['empty']['state'],'ok')
+    self.assertEqual(sessions['empty']['reported_agent_count'],0)
+    self.assertEqual(sessions['stopped']['state'],'not-running')
+    self.assertIsNone(sessions['stopped']['reported_agent_count'])
+    self.assertEqual(sessions['offline']['state'],'unavailable')
+    self.assertIsNone(sessions['offline']['reported_agent_count'])
+    self.assertFalse(any('stopped' in c for c in self.calls))
+    self.assertEqual(report['coverage']['herdr']['state'],'partial')
+
+  def test_failed_pid_query_keeps_session_pane_and_partial_coverage(self):
+    self.row();self.info['w1:p1']=None
+    session=self.report()['herdr_sessions'][0]
+    self.assertEqual(session['state'],'partial')
+    self.assertEqual(session['reported_agent_count'],1)
+    self.assertEqual(session['panes'][0]['match_state'],'unverified')
+    self.assertEqual(session['errors'],1)
+
+  def test_group_remote_pid_collision_has_no_local_reference(self):
+    self.add_process(10,'pi','/pi')
+    self.row(machine_id='remote')
+    pane=self.report()['herdr_sessions'][0]['panes'][0]
+    self.assertEqual(pane['match_state'],'remote-unverified')
+    self.assertEqual(pane['process_matches'],[])
+    self.assertFalse(any('process-info' in c for c in self.calls))
+
+  def test_duplicate_pane_reports_merge_and_expose_activity_conflict(self):
+    self.add_process(10,'pi','/pi')
+    self.row();self.row(agent_status='idle')
+    report=self.report()
+    self.assertEqual(len(report['processes']),1)
+    session=report['herdr_sessions'][0]
+    self.assertEqual(session['reported_agent_count'],2)
+    self.assertEqual(len(session['panes']),1)
+    self.assertEqual(len(session['panes'][0]['process_matches']),1)
+    self.assertEqual(session['panes'][0]['reported_activity'],'conflicting-reports')
+
+  def test_grouped_session_names_remain_case_sensitive(self):
+    socket_path=str(self.root/'herdr.sock')
+    self.sessions=[{'name':name,'running':True,'socket_path':socket_path} for name in ('R5L4','r5l4')]
+    self.assertEqual([s['name'] for s in self.report()['herdr_sessions']],['R5L4','r5l4'])
+
+  def test_empty_inventory_is_not_disabled_or_unavailable(self):
+    self.sessions=[]
+    report=self.report()
+    output=io.StringIO()
+    with contextlib.redirect_stdout(output):m.print_report(report)
+    self.assertIn('No local sessions listed.',output.getvalue())
+    report=self.report(use_herdr=False)
+    self.assertEqual(report['herdr_sessions'],[])
+    output=io.StringIO()
+    with contextlib.redirect_stdout(output):m.print_report(report)
+    self.assertIn('Local session inventory disabled.',output.getvalue())
+    self.assertNotIn('No local sessions listed.',output.getvalue())
+
+  def test_duplicate_session_name_is_partial_and_queried_once(self):
+    self.sessions.append(dict(self.sessions[0]))
+    report=self.report()
+    self.assertEqual(len(report['herdr_sessions']),1)
+    self.assertEqual(report['coverage']['herdr']['state'],'partial')
+    self.assertEqual(len([c for c in self.calls if c[-2:]==['agent','list']]),1)
 
   def test_query_drops_remote_context_and_agent_socket(self):
     names=('CONTAINER_HOST','CONTAINER_CONNECTION','DOCKER_HOST','SSH_AUTH_SOCK','HERDR_MACHINE','HERDR_MACHINE_ID','HERDR_REMOTE','HERDR_SESSION')
