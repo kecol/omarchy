@@ -1,0 +1,4 @@
+singleton State 1.0 State.qml
+Popup 1.0 Popup.qml
+AgentCard 1.0 AgentCard.qml
+Label 1.0 Label.qml

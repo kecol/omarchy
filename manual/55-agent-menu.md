@@ -55,7 +55,17 @@ Use the independent **Agent execution default** widget to show a mode icon and s
 omarchy plugin enable omarchy.agent-execution
 ```
 
-It shows a desktop icon for **Default: Host**, a package icon for **Default: Container**, or a warning icon for **Default: Unknown**. This is the launch default, not where every running agent executes. Left-click either the icon or text to open Default Execution. Right and middle clicks do nothing. It reads only the local mode setting, uses no polling, and does not start usage collectors, contact providers, inspect authentication, or launch an agent. Vertical bars stack the icon above a rotated label.
+It shows a desktop icon for **Default: Host**, a package icon for **Default: Container**, or a warning icon for **Default: Unknown**. This is the launch default, not where every running agent executes. Left-click either the icon or text to open Default Execution. Right-click either part to open or close the local agent overview. Middle-click does nothing. The bar label reads only the local mode setting. The overview reads local inventory metadata only when requested. Neither uses background polling, starts usage collectors, contacts providers, inspects authentication, or launches an agent. Vertical bars stack the icon above a rotated label.
+
+### Local agent overview
+
+Right-click the independent execution-default widget for an on-demand local snapshot. The panel groups identified processes by monitor and desktop workspace. Possible window matches, unknown locations, and possible process-name candidates have separate sections. Each process appears once. Herdr reports say **Herdr**; **Observed · activity unknown** does not mean that an agent is working.
+
+Expand **Details** to see process, container workspace, Herdr session/tab/pane, and desktop-window identities. A VS Code profile location does not verify a remote connection or visible agent panel. An attached Herdr terminal does not verify pane visibility. Multiple window matches are not resolved by guessing.
+
+The panel scans when opened or when you select **Refresh**. The timestamp belongs to that snapshot, not a live feed. Failed refreshes retain the previous snapshot and its original timestamp with a warning. **Show coverage** explains which sources were available. Partial or unavailable coverage is not a claim of zero agents. Large snapshots show a limit notice; use `omarchy agent status` for all process rows.
+
+Use **Tab** to select controls, **Enter** to activate them, **R** to refresh, **Page Up/Down** or arrow keys to scroll, and **Esc** to close. **Change default** opens the existing confirmation-based menu; it does not change running processes. The panel does not focus agent windows, switch desktops, start agents, or contact providers. It has no background polling or usage collectors. Opening it on several monitors shares one reader. See [Local agent status](56-agent-status.md) for the observation limits.
 
 Hide it with `omarchy plugin disable omarchy.agent-execution`. The existing Agents usage widget can remain disabled. No widget or bar placement is enabled automatically.
 
