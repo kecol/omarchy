@@ -118,7 +118,7 @@ class Proc:
       raise PermissionError()
     # comm can contain spaces and parentheses. Fields after its final ')' start at state.
     fields = read(directory/'stat').rsplit(')', 1)[1].split()
-    return {'pid': pid, 'ppid': int(fields[1]), 'start_ticks': int(fields[19])}
+    return {'pid': pid, 'ppid': int(fields[1]), 'tty_nr': int(fields[4]), 'start_ticks': int(fields[19])}
 
   def process(self, pid):
     before = self.identity(pid)
@@ -255,6 +255,7 @@ def herdr_snapshot(query):
     try:
       if not isinstance(path, str):
         raise Unavailable('local session socket unavailable')
+      summary['_socket_path'] = path
       # Do not ask Herdr to create, attach, or connect to a remote session.
       if not stat.S_ISSOCK(Path(path).stat().st_mode):
         raise Unavailable('local session socket unavailable')
@@ -308,7 +309,7 @@ def herdr_session_view(sessions, observations, processes):
       match = {'identity': process['identity'], 'boundary': process['boundary']}
       if match not in references.setdefault(key, []):
         references[key].append(match)
-  groups = {session['name']: {**session, 'panes': []} for session in sessions}
+  groups = {session['name']: {**{key: value for key, value in session.items() if not key.startswith('_')}, 'panes': []} for session in sessions}
   panes = {}
   for observation in observations:
     key = (observation['session'], observation['pane'], observation['agent'])
@@ -339,7 +340,15 @@ def workspace_names():
   return {row['id']: row['name'] for row in rows}
 
 
-def build_report(proc, query, use_herdr=True, use_podman=True, workspace_reader=None):
+def desktop_locations(proc, query, processes, records, sessions):
+  path = Path(os.environ['OMARCHY_PATH'])/'default/agents/desktop.py'
+  spec = importlib.util.spec_from_file_location('omarchy_status_desktop', path)
+  backend = importlib.util.module_from_spec(spec)
+  spec.loader.exec_module(backend)
+  return backend.discover(query, proc, processes, records, sessions, Unavailable)
+
+
+def build_report(proc, query, use_herdr=True, use_podman=True, workspace_reader=None, use_desktop=True):
   processes, proc_coverage = proc.scan()
   coverage = {'processes': proc_coverage, 'remote': {'state': 'not-queried'}}
   containers, observations = [], []
@@ -442,6 +451,17 @@ def build_report(proc, query, use_herdr=True, use_podman=True, workspace_reader=
   order = {'host': 0, 'unknown': 1, 'observer': 1, 'container': 2}
   for rows in (identified, candidates):
     rows.sort(key=lambda r: (order[r['boundary']], r['agent'], r['identity']['pid']))
+  if use_desktop:
+    try:
+      coverage['desktop'] = desktop_locations(proc, query, processes, identified+candidates, sessions)
+    except (Unavailable, OSError, ValueError, KeyError, TypeError):
+      coverage['desktop'] = {'state': 'unavailable', 'detail': 'desktop adapter unavailable'}
+      for value in identified+candidates+sessions:
+        value['desktop'] = {'state': 'unavailable', 'windows': [], 'detail': 'desktop adapter unavailable'}
+  else:
+    coverage['desktop'] = {'state': 'disabled'}
+    for value in identified+candidates+sessions:
+      value['desktop'] = {'state': 'disabled', 'windows': [], 'detail': 'desktop queries disabled'}
   return {'schema_version': 1, 'observed_at': datetime.now(timezone.utc).isoformat(), 'hostname': socket.gethostname(), 'scope': 'current UID; observer-visible procfs; local rootless Podman and running local Herdr sessions', 'observer': {'uid': proc.uid, 'namespaces': proc.namespaces, 'container_marker': proc.container_observer}, 'launch_default': mode, 'processes': identified, 'candidates': candidates, 'unverified_observations': unverified, 'herdr_sessions': herdr_session_view(sessions, observations, identified+candidates), 'runtimes': [{key: c[key] for key in ('id', 'name', 'kind', 'declared_agent', 'workspace_id')} for c in containers], 'coverage': coverage, 'vanished_identifications': vanished, 'notes': ['Process presence is not proof of active work. Herdr activity is reported, not independently verified.', 'Host means the observer PID and mount namespaces, not a proof of unrestricted authority. Run this command on the host.', 'Container boundaries do not prove isolation or absence of writable host mounts.', 'This is not a complete inventory. Remote hosts, other users, hidden agents, and unsupported entrypoints are not inspected.']}
 
 
@@ -449,6 +469,23 @@ def display(value, limit=140):
   value = str(value) if value is not None else '-'
   escaped = ''.join(f'\\u{ord(c):04x}' if unicodedata.category(c).startswith('C') else c for c in value)
   return escaped if len(escaped) <= limit else escaped[:limit-3]+'...'
+
+
+def desktop_label(desktop):
+  parts = []
+  for window in desktop['windows']:
+    ws = window['workspace']
+    text = f"{window['monitor']['name']} / desktop {ws['label']} (Hyprland {ws['id']})"
+    if window['association'] == 'herdr-session-client':
+      text += ' [attached Herdr terminal; pane visibility unknown]'
+    if window['hidden']:
+      text += ' [hidden window]'
+    text = display(text, 240)
+    if text not in parts:
+      parts.append(text)
+  if not parts:
+    return desktop['state']+' — '+desktop['detail']
+  return ('multiple candidates: ' if desktop['state'] == 'multiple' else '')+'; '.join(parts)
 
 
 def print_report(report):
@@ -466,6 +503,7 @@ def print_report(report):
       if row['role'] == 'extension-associated process':
         extra += ' · extension process; work unverified'
       print(f"{row['boundary'].upper():<11} {display(row['agent']):<12} {display(activity):<23} {row['identity']['pid']:<9} {display(location)}{display(extra, 180)}")
+      print('  Desktop: '+desktop_label(row['desktop']))
   if not report['processes']:
     print('No identified agent processes within the inspected scope.')
   if report['unverified_observations']:
@@ -480,6 +518,7 @@ def print_report(report):
     count = session['reported_agent_count']
     entries = 'reported entries: '+str(count) if count is not None else 'agent listing not queried/unknown'
     print(f"  {display(session['name'])} [{session['state']}; {entries}]")
+    print('    Terminal location: '+desktop_label(session['desktop']))
     if session.get('detail'):
       print('    '+display(session['detail']))
     if count == 0:
@@ -507,10 +546,11 @@ def main():
   parser.add_argument('--json', action='store_true', help='print versioned structured metadata')
   parser.add_argument('--no-herdr', action='store_true', help='skip local Herdr queries')
   parser.add_argument('--no-podman', action='store_true', help='skip rootless Podman queries')
+  parser.add_argument('--no-desktop', action='store_true', help='skip local window and Unix-peer metadata')
   args = parser.parse_args()
   if os.getuid() == 0:
     parser.error('Run as the desktop user, not under sudo; rootful engines and other users are outside this report.')
-  report = build_report(Proc(), Query(), not args.no_herdr, not args.no_podman)
+  report = build_report(Proc(), Query(), not args.no_herdr, not args.no_podman, use_desktop=not args.no_desktop)
   if args.json:
     print(json.dumps(report, ensure_ascii=True, indent=2))
   else:

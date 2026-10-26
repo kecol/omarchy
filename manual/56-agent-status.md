@@ -39,15 +39,34 @@ Duplicate reports for the same agent pane produce one grouped row. Different rep
 
 **Container does not mean safe.** A container can have writable host mounts. This report identifies execution boundaries; it does not audit filesystem permissions, credential exposure, or network isolation. Use `omarchy agent inspect`, `omarchy agent audit` without `--fix`, or `omarchy workspace doctor <name>` for their respective runtime details and checks.
 
+## Automatic desktop location
+
+When a local window association can be established, the report shows its monitor and Omarchy desktop workspace automatically. No manual mappings are required:
+
+```text
+Desktop: HDMI-A-1 / desktop 1 (Hyprland 11) [attached Herdr terminal; pane visibility unknown]
+```
+
+**Desktop workspace** is different from a Herdr workspace or container workspace. Omarchy numbers workspaces per monitor in blocks of ten. The report follows the bar's label, retains the global Hyprland ID, and preserves named or special workspace names in JSON. The tenth slot uses the bar's `0` label. Monitor IDs are not used to guess workspace numbering.
+
+Ordinary host agents can be associated through their live process ancestry and compositor window ownership. Herdr's server is detached from its terminal, so the report also correlates its local API listener, reciprocal frontend socket connections, kernel socket-descriptor ownership, and client ancestry. It then reports the attached Herdr terminal's location. This does not prove that the agent's pane or tab is currently displayed; navigating within Herdr may still be necessary.
+
+If a terminal server or application owns several windows, all matching locations remain **multiple candidates**. The report does not select a window based on focus or title. A background/container process without a verified GUI association stays **unknown**. An unavailable compositor or unreadable peer metadata is not treated as proof that an agent has no window. Window/workspace locations are snapshots and can change after the command runs.
+
+Desktop fields are additive to JSON schema version 1 under process/candidate records and local Herdr sessions. They include window address/PID/class, monitor, raw workspace ID/name, bar slot/label, association source, hidden-window metadata, and whether that workspace was active. An active workspace does not prove that its window or Herdr pane was visible. Local Herdr client-socket conventions can vary with version; unsupported mappings remain unknown rather than being inferred from titles.
+
+The command does not focus windows, switch workspaces, or create manual rules. It does not inspect window titles, screenshots, or pane contents. Compositor responses may contain titles; those fields are discarded and are not used or emitted. Socket descriptor links are read as metadata only, not opened for their contents. No remote desktop query is made.
+
 ## Structured output and optional sources
 
 ```bash
 omarchy agent status --json
 omarchy agent status --no-herdr
 omarchy agent status --no-podman
+omarchy agent status --no-desktop
 ```
 
-`--json` returns a versioned object with separate process, candidate, unverified-observation, runtime, and coverage collections. Runtime entries are container observations, not extra agent counts. The other options skip the named adapter. The command still reports host processes when an optional dependency is missing.
+`--json` returns a versioned object with separate process, candidate, unverified-observation, runtime, and coverage collections. Runtime entries are container observations, not extra agent counts. The other options skip the named adapter; `--no-desktop` skips compositor and Unix-peer queries. The command still reports host processes when an optional dependency is missing.
 
 ## Scope and privacy
 
