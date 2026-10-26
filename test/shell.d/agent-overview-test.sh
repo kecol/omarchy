@@ -84,6 +84,36 @@ assertNode.equal(projectCard.project.host,'')
 assertNode.equal(parse({processes:[codex]}).groups[0].rows[0].project,null)
 pass('project cards retain host path, internal path, and key without confusing ambiguity or mount access with safety')
 
+const files={state:'matched',host_path:'/clones/editor/repo',container_path:'/workspace',access:'read-write',registry_state:'matched',mode:'clone',source_directory:'/original/source',privateMarker}
+function editorFiles(overrides={}) {
+ return parse({processes:[processRow(80,{boundary:'container',container:{name:'editor',kind:'workspace',workspace_name:'project',workspace_id:'workspace-id',workspace_files:{...files,...overrides}}})]}).groups[0].rows[0]
+}
+let editor=editorFiles()
+assertNode.equal(editor.workspaceFiles.host,'/clones/editor/repo')
+assertNode.equal(editor.workspaceFiles.source,'/original/source')
+assertNode.equal(editor.workspaceFiles.target,'/workspace')
+assertNode.equal(editor.workspaceFiles.mode,'clone')
+assertNode.equal(editor.workspaceId,'workspace-id')
+assertNode.equal(editor.project,null)
+assertNode.ok(!JSON.stringify(editor).includes(privateMarker))
+editor=editorFiles({registry_state:'mismatch',mode:null,source_directory:null})
+assertNode.equal(editor.workspaceFiles.registry,'mismatch')
+assertNode.equal(editor.workspaceFiles.host,'/clones/editor/repo')
+assertNode.equal(editor.workspaceFiles.source,'')
+assertNode.equal(editor.workspaceFiles.mode,'')
+editor=editorFiles({registry_state:'unavailable',mode:null,source_directory:null})
+assertNode.equal(editor.workspaceFiles.host,'/clones/editor/repo')
+assertNode.equal(editor.workspaceFiles.registry,'unavailable')
+assertNode.equal(editor.workspaceFiles.source,'')
+editor=editorFiles({state:'ambiguous',registry_state:'unavailable'})
+assertNode.equal(editor.workspaceFiles.state,'ambiguous')
+assertNode.equal(editor.workspaceFiles.host,'')
+assertNode.equal(editor.workspaceFiles.source,'')
+editor=editorFiles({mode:'mount',source_directory:'/clones/editor/repo',access:'read-only'})
+assertNode.equal(editor.workspaceFiles.mode,'mount')
+assertNode.equal(editor.workspaceFiles.access,'read-only')
+pass('editor workspace cards separate actual files, registry source/mode, internal path and ID without inventing mismatched mappings')
+
 const stateSource=fs.readFileSync(base+'overview/State.qml','utf8')
 function extract(name) {
   const begin=stateSource.indexOf('function '+name+'(')

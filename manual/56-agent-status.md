@@ -62,6 +62,22 @@ Missing, malformed, stale, or conflicting metadata shows an unavailable or ambig
 
 Project mapping reads only selected project bind metadata under `/workspace`, not arbitrary home/credential mounts or project file contents. It adds no background polling and requires no restart of the running agent or container. The overview remains an on-demand snapshot; use Refresh to update it.
 
+## Editor workspace directories
+
+Agent processes associated with an Omarchy editor workspace also show:
+
+- **Workspace files (host bind)**: the actual host directory mounted at `/workspace`.
+- **Container workspace path** and the existing workspace name/ID.
+- **Observed mount access**: read-write or read-only, not a claim about every permission.
+- **Workspace mode (registry)**: independent clone or live bind mount, when registry metadata agrees with the observed host directory.
+- **Original clone source** or **live source directory**, explicitly labeled as registry metadata.
+
+For a clone, the working files can be under `~/.local/share/omarchy/workspaces/<name>/repo`, while the original repository is elsewhere. The source is not presented as the working directory or as another mounted directory. The agent process cwd remains a separate detail; an editor extension can run under `/home/workspace` even when project files are mounted at `/workspace`.
+
+The report checks the actual `/workspace` bind mount and correlates process/container identities and namespaces. It uses existing read-only workspace registry metadata, not workspace SSH keys, editor logs, connection files, or project contents. If registry metadata disagrees with the observed bind, the actual bind directory remains visible with a warning, but mode/source are not inferred. Missing registry metadata does not erase an observed mount. Missing, ambiguous, or stale mounts do not borrow a host directory from the registry.
+
+These associations do not establish an active editor connection, agent work, complete isolation, or a GUI location. No workspace or agent restart is needed to collect them. The overview remains on-demand.
+
 ## Automatic desktop location
 
 When a local window association can be established, the report shows its monitor and Omarchy desktop workspace automatically. No manual mappings are required:

@@ -117,7 +117,7 @@ class StatusTests(unittest.TestCase):
       return original(path,*args,**kwargs)
     with patch.dict(os.environ,{'XDG_DATA_HOME':str(data)}):
       with patch.object(Path,'open',safe):
-        self.assertEqual(m.workspace_snapshot(),{identity:{'name':'project','editor_profile':directory/'vscode-data'}})
+        self.assertEqual(m.workspace_snapshot(),{identity:{'name':'project','editor_profile':directory/'vscode-data','mode':'clone','source':'/source','directory':str(directory/'repo')}})
       registered('another')
       with self.assertRaises(m.Unavailable):m.workspace_snapshot()
 
@@ -208,6 +208,68 @@ class StatusTests(unittest.TestCase):
       row=self.project_report()['processes'][0]['container']['project']
     self.assertEqual(row['state'],'unavailable');self.assertIsNone(row['host_path'])
     self.assertEqual(row['access'],'unknown')
+
+  def workspace_report(self, mounts=None, registry=None):
+    ns=('pid:[2]','mnt:[2]')
+    self.add_process(20,'codex','/home/workspace/.vscode-server/extensions/openai.chatgpt-version/bin/codex',namespace=ns,cwd='/home/workspace')
+    self.add_process(30,'sshd','/usr/bin/sshd',namespace=ns)
+    cid='d'*64;self.ids=[cid]
+    if mounts is None:mounts=[{'type':'bind','source':'/clones/editor/repo','destination':'/workspace','rw':True}]
+    if registry is None:registry={'name':'editor','editor_profile':None,'mode':'clone','source':'/original/source','directory':'/clones/editor/repo'}
+    self.workspace_metadata={'workspace-id':registry} if registry else {}
+    self.details='\t'.join(json.dumps(x) for x in [cid,'editor-container',30,'',None,'workspace-id',None,None,mounts])
+    return self.report()
+
+  def test_editor_clone_files_source_and_internal_path_are_distinct(self):
+    report=self.workspace_report();row=report['processes'][0];files=row['container']['workspace_files']
+    self.assertEqual(files,{'state':'matched','host_path':'/clones/editor/repo','container_path':'/workspace',
+      'access':'read-write','registry_state':'matched','mode':'clone','source_directory':'/original/source'})
+    self.assertEqual(row['cwd'],'/home/workspace')
+    self.assertEqual(row['container']['workspace_id'],'workspace-id')
+    self.assertEqual(row['container']['workspace_name'],'editor')
+    self.assertEqual(len([c for c in self.calls if c[:3]==['podman','--remote=false','inspect']]),1)
+    out=io.StringIO()
+    with contextlib.redirect_stdout(out):m.print_report(report)
+    for value in ('/clones/editor/repo','/original/source','/workspace','workspace-id','not working files'):
+      self.assertIn(value,out.getvalue())
+
+  def test_editor_live_mode_and_read_only_mount_are_observed_separately(self):
+    files=self.workspace_report([{'type':'bind','source':'/live','destination':'/workspace','rw':False}],
+      {'mode':'mount','source':'/live','directory':'/live'})['processes'][0]['container']['workspace_files']
+    self.assertEqual(files['mode'],'mount');self.assertEqual(files['access'],'read-only')
+    self.assertEqual(files['source_directory'],'/live')
+
+  def test_editor_registry_mismatch_does_not_override_actual_bind(self):
+    files=self.workspace_report(registry={'mode':'clone','source':'/original','directory':'/different'})['processes'][0]['container']['workspace_files']
+    self.assertEqual(files['state'],'matched');self.assertEqual(files['host_path'],'/clones/editor/repo')
+    self.assertEqual(files['registry_state'],'mismatch')
+    self.assertIsNone(files['mode']);self.assertIsNone(files['source_directory'])
+
+  def test_editor_invalid_or_missing_registry_never_invents_source_mode(self):
+    for registry in ({},{'mode':'clone','source':'relative','directory':'/clones/editor/repo'},
+      {'mode':'mount','source':'/elsewhere','directory':'/clones/editor/repo'},
+      {'mode':'unknown','source':'/original','directory':'/clones/editor/repo'}):
+      files=self.workspace_report(registry=registry)['processes'][0]['container']['workspace_files']
+      self.assertEqual(files['state'],'matched');self.assertEqual(files['registry_state'],'unavailable')
+      self.assertIsNone(files['mode']);self.assertIsNone(files['source_directory'])
+
+  def test_editor_missing_ambiguous_or_volume_mount_stays_unverified(self):
+    good={'type':'bind','source':'/clones/editor/repo','destination':'/workspace','rw':True}
+    for mounts,state in (([],'unavailable'),([good,good],'ambiguous'),([{**good,'type':'volume'}],'unavailable')):
+      files=self.workspace_report(mounts)['processes'][0]['container']['workspace_files']
+      self.assertEqual(files['state'],state);self.assertIsNone(files['host_path'])
+      self.assertEqual(files['container_path'],'/workspace');self.assertEqual(files['access'],'unknown')
+      self.assertIsNone(files['mode']);self.assertIsNone(files['source_directory'])
+
+  def test_editor_reused_init_identity_discards_files_and_registry_semantics(self):
+    original=m.container_snapshot
+    def stale(query,proc):
+      rows=original(query,proc)
+      self.add_process(30,'sshd','/usr/bin/sshd',namespace=('pid:[2]','mnt:[2]'),start=200)
+      return rows
+    with patch.object(m,'container_snapshot',stale):files=self.workspace_report()['processes'][0]['container']['workspace_files']
+    self.assertEqual(files['state'],'unavailable');self.assertIsNone(files['host_path'])
+    self.assertIsNone(files['mode']);self.assertIsNone(files['source_directory'])
 
   def test_namespace_gap_sorts_before_container_and_never_assumes_safe(self):
     self.add_process(10,'pi','/pi',namespace=('pid:[9]','mnt:[9]'))
