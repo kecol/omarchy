@@ -26,7 +26,7 @@ A grouped section lists each local session returned by Herdr and its reported ag
 
 ```text
 Local Herdr sessions (pane references, not additional agents)
-  default [ok; reported entries: 1]
+  default [ok; reported entries: 1; labels: ok]
     PANE         AGENT          REPORTED ACTIVITY      PROCESS MATCH
     w7:p1        pi             working                host PID 1234
 ```
@@ -35,7 +35,11 @@ A matched pane references a process already listed above. It is not a second age
 
 Session coverage is explicit: **ok** means its agent listing was checked; **partial** means some metadata or PID checks failed; **unavailable** means its socket or agent listing could not be checked; **not-running** means it was listed as stopped and was not queried. A checked session with zero entries says **No agents reported**, not that no agents exist. An unavailable listing has an unknown count, never zero. Only reported agent panes are shown; ordinary terminal panes and terminal contents are not queried for this section.
 
-Duplicate reports for the same agent pane produce one grouped row. Different reported activity values show **conflicting-reports**. Session names remain case-sensitive. The JSON `herdr_sessions` collection contains session coverage and pane references to the existing process identities; this is an additive field in schema version 1. No new queries or persistent state are needed for the grouped view.
+When label metadata is available, both the process evidence and grouped pane show the readable Herdr path, for example `Local / host - Work / pi host / w7:p1`. This means local machine scope, Herdr workspace label, tab label, and pane ID. The session, workspace ID, and tab ID remain visible, and JSON retains them separately as `workspace_id`, `workspace_label`, `tab_id`, and `tab_label`. Names are display labels, not identifiers used for process matching or command arguments. They are distinct from desktop workspace numbers and container workspace names.
+
+Labels come from one bounded local session metadata snapshot after the existing agent/PID queries. Pane, agent kind, workspace ID, tab ID, and tab parent must agree across the observations before labels are accepted. A moved pane, duplicate metadata identifier, missing label, or unsupported response falls back to IDs rather than borrowing another tab's name. `labels_state` reports label availability per session. A label-query failure does not remove an agent or invalidate its existing PID match. Labels are length-limited and console control characters are escaped. No window or terminal title is used as a fallback, and local names are not applied to remote observations.
+
+Duplicate reports for the same agent pane produce one grouped row. Different reported activity values show **conflicting-reports**. Session names remain case-sensitive. The JSON `herdr_sessions` collection contains session coverage and pane references to the existing process identities; this is an additive field in schema version 1. Grouping reuses collected observations; display-label enrichment adds at most one local metadata snapshot per applicable session. No persistent state is created.
 
 **Container does not mean safe.** A container can have writable host mounts. This report identifies execution boundaries; it does not audit filesystem permissions, credential exposure, or network isolation. Use `omarchy agent inspect`, `omarchy agent audit` without `--fix`, or `omarchy workspace doctor <name>` for their respective runtime details and checks.
 
