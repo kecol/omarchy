@@ -49,11 +49,42 @@ Rectangle {
     if (project.id) lines.push(Commons.I18n.t("agents.overview.projectKey").arg(project.id))
     return lines.join("\n")
   }
+  function workspaceLines() {
+    var files = record.workspaceFiles
+    if (!files) return ""
+    var lines = []
+    if (files.state === "matched") {
+      lines.push(Commons.I18n.t("agents.overview.workspaceHost").arg(files.host))
+      var access = files.access === "read-write" ? Commons.I18n.t("agents.overview.readWrite") : Commons.I18n.t("agents.overview.readOnly")
+      lines.push(Commons.I18n.t("agents.overview.projectAccess").arg(access))
+      lines.push(Commons.I18n.t("agents.overview.workspaceContainer").arg(files.target))
+    } else {
+      var unavailable = Commons.I18n.t("agents.overview.workspaceUnavailable")
+      if (files.state === "ambiguous") unavailable = Commons.I18n.t("agents.overview.workspaceAmbiguous")
+      lines.push(unavailable)
+      if (files.target) lines.push(Commons.I18n.t("agents.overview.workspaceExpected").arg(files.target))
+    }
+    if (files.registry === "matched") {
+      if (files.mode === "clone") {
+        lines.push(Commons.I18n.t("agents.overview.workspaceClone"))
+        lines.push(Commons.I18n.t("agents.overview.workspaceCloneSource").arg(files.source))
+      } else {
+        lines.push(Commons.I18n.t("agents.overview.workspaceLive"))
+        lines.push(Commons.I18n.t("agents.overview.workspaceLiveSource").arg(files.source))
+      }
+    } else if (files.registry === "mismatch") {
+      lines.push(Commons.I18n.t("agents.overview.workspaceMismatch"))
+    } else {
+      lines.push(Commons.I18n.t("agents.overview.workspaceRegistryUnavailable"))
+    }
+    return lines.join("\n")
+  }
   function details() {
     var lines = [Commons.I18n.t("agents.overview.pid").arg(record.identity.pid),
       Commons.I18n.t("agents.overview.identity").arg(record.identity.boot || "-").arg(record.identity.start)]
     if (record.cwd) lines.push(Commons.I18n.t("agents.overview.directory").arg(record.cwd))
     if (record.project) lines.push(projectLines())
+    if (record.workspaceFiles) lines.push(workspaceLines())
     if (record.container) lines.push(Commons.I18n.t("agents.overview.containerName").arg(record.container))
     if (record.workspaceId) lines.push(Commons.I18n.t("agents.overview.workspaceId").arg(record.workspaceId))
     record.herdr.slice(0, 8).forEach(function(e) {
@@ -109,6 +140,11 @@ Rectangle {
       width: parent.width
       visible: root.record.workspaceId !== ""
       text: Commons.I18n.t("agents.overview.workspaceId").arg(root.record.workspaceId)
+    }
+    Label {
+      width: parent.width
+      visible: !!root.record.workspaceFiles
+      text: root.workspaceLines()
     }
     Label {
       width: parent.width

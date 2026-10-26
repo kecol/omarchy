@@ -200,12 +200,14 @@ class Proc:
       return None
 
 
+def metadata_path(value):
+  return (isinstance(value, str) and 0 < len(value) <= 4096 and value.startswith('/')
+    and not value.startswith('//') and '\0' not in value and posixpath.normpath(value) == value)
+
+
 def project_location(target, key, mounts, managed):
   """Selected project bind only, not arbitrary mounts, credentials, or file content."""
-  def path(value):
-    return (isinstance(value, str) and 0 < len(value) <= 4096 and value.startswith('/')
-      and not value.startswith('//') and '\0' not in value and posixpath.normpath(value) == value)
-  valid_target = path(target) and (target == '/workspace' or target.startswith('/workspace/'))
+  valid_target = metadata_path(target) and (target == '/workspace' or target.startswith('/workspace/'))
   result = {'state': 'unavailable', 'host_path': None,
     'container_path': target if valid_target and managed == 'agent' else None,
     'project_id': key if managed == 'agent' and isinstance(key, str) and IDENTIFIER.fullmatch(key) else None,
@@ -217,11 +219,28 @@ def project_location(target, key, mounts, managed):
     return result
   mount = mounts[0]
   if (not isinstance(mount, dict) or mount.get('type') != 'bind'
-      or mount.get('destination') != target or not path(mount.get('source'))
+      or mount.get('destination') != target or not metadata_path(mount.get('source'))
       or type(mount.get('rw')) is not bool):
     return result
   return {**result, 'state': 'matched', 'host_path': mount['source'],
     'access': 'read-write' if mount['rw'] else 'read-only'}
+
+
+def workspace_files(mapping, registry, fresh):
+  """Observed /workspace bind and corroborated registry semantics, never a guessed path."""
+  result = {key: mapping[key] for key in ('state', 'host_path', 'container_path', 'access')}
+  result.update(registry_state='unavailable', mode=None, source_directory=None)
+  if not fresh:
+    return {**result, 'state': 'unavailable', 'host_path': None, 'access': 'unknown'}
+  if result['state'] != 'matched' or not isinstance(registry, dict):
+    return result
+  directory, source, mode = registry.get('directory'), registry.get('source'), registry.get('mode')
+  if (not metadata_path(directory) or not metadata_path(source) or mode not in ('clone', 'mount')
+      or (mode == 'mount' and directory != source)):
+    return result
+  if directory != result['host_path']:
+    return {**result, 'registry_state': 'mismatch'}
+  return {**result, 'registry_state': 'matched', 'mode': mode, 'source_directory': source}
 
 
 def container_snapshot(query, proc):
@@ -240,8 +259,10 @@ def container_snapshot(query, proc):
   keys = ('org.omarchy.managed', 'org.omarchy.agent', 'org.omarchy.workspace.id', 'org.omarchy.workspace.target', 'org.omarchy.project')
   # Emit only project bind metadata. Never serialize all mounts, env, or argv.
   project_mounts = ('{{$target := index .Config.Labels "org.omarchy.workspace.target"}}'
-    '{{$managed := index .Config.Labels "org.omarchy.managed"}}{{$sep := ""}}['
-    '{{if and (eq $managed "agent") (or (eq $target "/workspace") (and (ge (len $target) 11) (eq (slice $target 0 11) "/workspace/")))}}'
+    '{{$managed := index .Config.Labels "org.omarchy.managed"}}'
+    '{{$workspace := index .Config.Labels "org.omarchy.workspace.id"}}'
+    '{{if and (ne $managed "agent") (ne $workspace "")}}{{$target = "/workspace"}}{{end}}{{$sep := ""}}['
+    '{{if and (or (eq $managed "agent") (ne $workspace "")) (or (eq $target "/workspace") (and (ge (len $target) 11) (eq (slice $target 0 11) "/workspace/")))}}'
     '{{range .Mounts}}{{if and (eq .Type "bind") (eq .Destination $target)}}{{$sep}}'
     '{"type":{{json .Type}},"source":{{json .Source}},"destination":{{json .Destination}},"rw":{{json .RW}}}'
     '{{$sep = ","}}{{end}}{{end}}{{end}}]')
@@ -264,7 +285,8 @@ def container_snapshot(query, proc):
       'namespaces': proc.namespace(pid), 'kind': 'agent' if managed == 'agent' else 'workspace' if workspace else 'other',
       'declared_agent': canonical(agent) if canonical(agent) in AGENTS else None,
       'workspace_id': workspace if isinstance(workspace, str) else None,
-      'project': project_location(target, project_id, mounts, managed)})
+      'project': project_location(target, project_id, mounts, managed),
+      'workspace_mount': project_location('/workspace', None, mounts, 'agent') if managed != 'agent' and workspace else None})
   if {r['id'] for r in result} != set(ids):
     raise Unavailable('incomplete container snapshot')
   return result
@@ -444,7 +466,8 @@ def workspace_snapshot():
   rows = backend.list_workspaces(root, runtime=False)
   if len(rows) > 512 or len({row['id'] for row in rows}) != len(rows):
     raise Unavailable('too many or ambiguous registered workspaces')
-  return {row['id']: {'name': row['name'], 'editor_profile': root/row['name']/'vscode-data'} for row in rows}
+  return {row['id']: {'name': row['name'], 'editor_profile': root/row['name']/'vscode-data',
+    'mode': row['mode'], 'source': row['source'], 'directory': row['directory']} for row in rows}
 
 
 def desktop_locations(proc, query, processes, records, sessions, profiles):
@@ -561,6 +584,8 @@ def build_report(proc, query, use_herdr=True, use_podman=True, workspace_reader=
       except (OSError, ValueError, IndexError):
         fresh = False
       record['container']['project'] = project if fresh else {**project, 'state': 'unavailable', 'host_path': None, 'access': 'unknown'}
+      if container['kind'] == 'workspace':
+        record['container']['workspace_files'] = workspace_files(container['workspace_mount'], workspaces.get(container['workspace_id']), fresh)
     target = candidates if process['identification'] == 'process-name-only' and not process['herdr'] else identified
     target.append(record)
   order = {'host': 0, 'unknown': 1, 'observer': 1, 'container': 2}
@@ -641,6 +666,22 @@ def print_report(report):
           print('  '+prefix+display(project['container_path'], 500))
         if project['project_id']:
           print('  Project key: '+display(project['project_id']))
+        print('  Process directory: '+display(row['cwd'], 500))
+      files = container.get('workspace_files') if container else None
+      if files:
+        print('  Container workspace ID: '+display(container['workspace_id']))
+        if files['state'] == 'matched':
+          print('  Workspace files (host bind): '+display(files['host_path'], 500)+' · '+files['access'])
+          print('  Container workspace path: '+display(files['container_path']))
+        else:
+          print('  Host workspace-files mapping: '+files['state'])
+          print('  Expected workspace mount: '+display(files['container_path']))
+        if files['registry_state'] == 'matched':
+          print('  Workspace mode (registry): '+files['mode'])
+          label = 'Original clone source (registry, not working files): ' if files['mode'] == 'clone' else 'Live source directory (registry): '
+          print('  '+label+display(files['source_directory'], 500))
+        else:
+          print('  Workspace mode/source registry: '+files['registry_state'])
         print('  Process directory: '+display(row['cwd'], 500))
       for evidence in row['herdr']:
         if evidence.get('workspace_id') or evidence.get('tab_id'):
