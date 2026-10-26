@@ -58,8 +58,11 @@ if [[ $yes != "true" ]]; then
     echo "Image preparation needs explicit approval. Run: omarchy harness build $harness" >&2
     exit 1
   fi
-  printf '%s\n' "$name needs container setup. This downloads/builds a reviewed image and runs offline disposable checks." >&2
-  printf '%s\n' 'No host agent install, account-home copy, authentication test, or existing-session change is required.' >&2
+  printf '%s\n' "$name needs container setup." \
+    'This downloads and builds a reviewed image.' \
+    'Offline checks use only disposable test files.' \
+    'No host agent install, account-home copy, or sign-in test.' \
+    'Existing sessions will not change.' >&2
   gum confirm --default=false "Prepare $name container image?" || exit 130
 fi
 # Public release metadata and downloads occur only after that approval or --yes.
