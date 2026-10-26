@@ -20,6 +20,9 @@ SECRET = 'PRIVATE-PROMPT-DO-NOT-REPORT'
 
 class StatusTests(unittest.TestCase):
   def setUp(self):
+    environment=patch.dict(os.environ,{'OMARCHY_PATH':str(ROOT)})
+    environment.start()
+    self.addCleanup(environment.stop)
     self.temp = tempfile.TemporaryDirectory(prefix='agent status test ')
     self.addCleanup(self.temp.cleanup)
     self.root = Path(self.temp.name)
@@ -61,6 +64,8 @@ class StatusTests(unittest.TestCase):
 
   def query(self, args, json_output=True):
     self.calls.append(args)
+    if args[0] in ('hyprctl','ss'):
+      raise m.Unavailable('desktop fixture unavailable')
     if args == ['podman','--remote=false','ps','--format=json']:
       return [{'Id':cid} for cid in self.ids]
     if args[:3] == ['podman','--remote=false','inspect']:
@@ -86,6 +91,7 @@ class StatusTests(unittest.TestCase):
     self.info[pane]={'foreground_process_group_id':pid,'foreground_processes':[{'pid':pid,'argv':[SECRET],'cmdline':SECRET}],'shell_pid':900}
 
   def report(self, **options):
+    options.setdefault('use_desktop',False)
     return m.build_report(self.proc,self.query,workspace_reader=lambda:{'workspace-id':'test-project'},**options)
 
   def test_host_first_and_deduplicate_herdr_without_prompt_fields(self):

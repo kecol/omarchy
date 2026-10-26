@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # omarchy:summary=Report identified local agent processes, prioritizing host execution
-# omarchy:args=[--json] [--no-herdr] [--no-podman]
+# omarchy:args=[--json] [--no-herdr] [--no-podman] [--no-desktop]
 # omarchy:examples=omarchy agent status | omarchy agent status --json
 
 set -euo pipefail
