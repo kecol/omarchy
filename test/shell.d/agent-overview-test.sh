@@ -124,7 +124,7 @@ assertNode.ok(card.includes('focusable: true') && popup.includes('focusable: tru
 const labelSource=fs.readFileSync(base+'overview/Label.qml','utf8')
 assertNode.ok(labelSource.includes('textFormat: Text.PlainText') && labelSource.includes('color: Commons.Color.foreground'))
 assertNode.ok(!/Commons.Color.muted/.test(popup+card), 'critical metadata and caveats must not use the low-contrast muted token')
-assertNode.ok(popup.includes('policy: Controls.ScrollBar.AlwaysOn'), 'overflow retains a visible scrolling affordance')
+assertNode.ok(popup.includes('scroll.contentHeight > scroll.height ? Controls.ScrollBar.AlwaysOn : Controls.ScrollBar.AlwaysOff'), 'overflow retains a visible scrolling affordance without an empty/error scrollbar')
 assertNode.ok(!/Text\s*\{/.test(card+popup))
 const manifest=JSON.parse(fs.readFileSync(base+'ExecutionDefault.manifest.json','utf8'))
 assertNode.deepEqual(manifest.kinds,['bar-widget'])

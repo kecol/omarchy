@@ -115,7 +115,9 @@ Item {
           contentHeight: list.implicitHeight
           clip: true
           boundsBehavior: Flickable.StopAtBounds
-          Controls.ScrollBar.vertical: Controls.ScrollBar { policy: Controls.ScrollBar.AlwaysOn }
+          Controls.ScrollBar.vertical: Controls.ScrollBar {
+            policy: scroll.contentHeight > scroll.height ? Controls.ScrollBar.AlwaysOn : Controls.ScrollBar.AlwaysOff
+          }
 
           Column {
             id: list
