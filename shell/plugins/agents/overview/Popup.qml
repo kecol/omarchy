@@ -93,7 +93,6 @@ Item {
           text: root.inventory.snapshot
             ? Commons.I18n.t("agents.overview.snapshot").arg(Qt.formatDateTime(new Date(root.inventory.snapshot.timestamp), "yyyy-MM-dd hh:mm:ss"))
             : Commons.I18n.t("agents.overview.noSnapshot")
-          color: Commons.Color.muted
         }
         Label {
           Layout.fillWidth: true
@@ -104,7 +103,6 @@ Item {
           Layout.fillWidth: true
           visible: !!root.inventory.snapshot
           text: root.inventory.snapshot && root.inventory.snapshot.partial ? Commons.I18n.t("agents.overview.partial") : Commons.I18n.t("agents.overview.scope")
-          color: Commons.Color.muted
         }
 
         Flickable {
@@ -117,7 +115,7 @@ Item {
           contentHeight: list.implicitHeight
           clip: true
           boundsBehavior: Flickable.StopAtBounds
-          Controls.ScrollBar.vertical: Controls.ScrollBar { }
+          Controls.ScrollBar.vertical: Controls.ScrollBar { policy: Controls.ScrollBar.AlwaysOn }
 
           Column {
             id: list
@@ -159,7 +157,6 @@ Item {
           Layout.fillWidth: true
           visible: !!root.inventory.snapshot && root.inventory.snapshot.unverified > 0
           text: root.inventory.snapshot ? Commons.I18n.t("agents.overview.unverified").arg(root.inventory.snapshot.unverified) : ""
-          color: Commons.Color.muted
         }
         Ui.Button {
           id: coverageButton
@@ -169,8 +166,8 @@ Item {
           focusable: true
           onClicked: expanded = !expanded
         }
-        Label { Layout.fillWidth: true; visible: coverageButton.expanded; text: root.coverageText(); color: Commons.Color.muted }
-        Label { Layout.fillWidth: true; text: Commons.I18n.t("agents.overview.caution"); color: Commons.Color.muted }
+        Label { Layout.fillWidth: true; visible: coverageButton.expanded; text: root.coverageText() }
+        Label { Layout.fillWidth: true; text: Commons.I18n.t("agents.overview.caution") }
       }
     }
   }

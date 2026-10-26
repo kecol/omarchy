@@ -64,7 +64,7 @@ Rectangle {
         font.pixelSize: Style.font.body
         font.bold: true
       }
-      Label { text: root.boundary(); color: Commons.Color.muted }
+      Label { text: root.boundary() }
       Label { text: root.activity(); Layout.maximumWidth: body.width * 0.45 }
     }
     Label {
@@ -82,19 +82,16 @@ Rectangle {
       width: parent.width
       visible: root.record.windows.some(function(w) { return w.source === "workspace-editor-profile" })
       text: Commons.I18n.t("agents.overview.editorCaution")
-      color: Commons.Color.muted
     }
     Label {
       width: parent.width
       visible: root.record.windows.some(function(w) { return w.source === "herdr-session-client" })
       text: Commons.I18n.t("agents.overview.paneCaution")
-      color: Commons.Color.muted
     }
     Label {
       width: parent.width
       visible: root.record.candidate
       text: Commons.I18n.t("agents.overview.candidateCaution")
-      color: Commons.Color.muted
     }
     Ui.Button {
       width: Math.min(implicitWidth, parent.width)
@@ -103,6 +100,6 @@ Rectangle {
       fontSize: Style.font.bodySmall
       onClicked: root.expanded = !root.expanded
     }
-    Label { width: parent.width; visible: root.expanded; text: visible ? root.details() : ""; color: Commons.Color.muted }
+    Label { width: parent.width; visible: root.expanded; text: visible ? root.details() : "" }
   }
 }
