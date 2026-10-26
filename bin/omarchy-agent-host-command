@@ -23,6 +23,11 @@ if ! omarchy-cmd-present "$agent"; then
   exit 1
 fi
 path=$(type -P -- "$agent")
+guard_dir="${XDG_DATA_HOME:-$HOME/.local/share}/omarchy/agents/command-guards/bin"
+if [[ -d $guard_dir && $(readlink -f -- "$path") == "$(readlink -f -- "$guard_dir")/"* ]]; then
+  echo "Host command resolves to a guard alias; fix PATH or use the real executable path." >&2
+  exit 1
+fi
 
 # Preserve the launcher's precedence for user-installed Cursor and Muse.
 if [[ $agent == "cursor-agent" || $agent == "muse" ]] &&

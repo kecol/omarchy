@@ -3,7 +3,7 @@
 omarchy_agent_guard_path() {
   local directory="${XDG_DATA_HOME:-$HOME/.local/share}/omarchy/agents/command-guards/bin"
   [[ -d $directory ]] || return 0
-  omarchy_agent_guard_unpath
+  omarchy_agent_guard_unpath fast
   export PATH="$directory:$PATH"
 }
 
@@ -25,7 +25,9 @@ omarchy_agent_guard_unpath() {
   local entry remaining=${PATH:-} result= separator=
   while :; do
     entry=${remaining%%:*}
-    if [[ $entry != "$directory" ]]; then
+    # Host resolution also removes symlink/relative aliases. Prompt-time PATH
+    # normalization uses string-only fast mode, not per-entry filesystem probes.
+    if [[ $entry != "$directory" && ( ${1:-} == "fast" || ! ${entry:-.} -ef $directory ) ]]; then
       result+="$separator$entry"
       separator=:
     fi

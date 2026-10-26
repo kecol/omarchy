@@ -63,6 +63,18 @@ class GuardsTests(unittest.TestCase):
     self.env['PATH']=str(alias)+':'+self.env['PATH']
     self.command([str(alias/'pi'),'safe argument'])
     self.assertEqual(self.calls.read_bytes(),b'safe argument\0')
+    resolved=self.command([str(ROOT/'bin/omarchy-agent-host-command'),'pi'])
+    self.assertEqual(resolved.stdout.decode().strip(),str(self.bin/'pi'))
+    (self.bin/'pi').unlink()
+    self.command([str(ROOT/'bin/omarchy-agent-host-command'),'pi'],1)
+
+  def test_file_alias_back_to_guard_fails_without_recursion_or_false_installation(self):
+    self.enable();self.mode.write_text('host\n')
+    (self.bin/'pi').unlink();(self.bin/'pi').symlink_to(self.state/'bin/pi')
+    result=self.command([str(self.state/'bin/pi')],126)
+    self.assertIn(b'guard alias',result.stderr)
+    self.command([str(ROOT/'bin/omarchy-agent-host-command'),'pi'],1)
+    self.assertFalse(self.calls.exists())
 
   def test_disable_immediately_unblocks_existing_path_and_uninstall_removes_only_guards(self):
     self.enable();self.ctl('disable')

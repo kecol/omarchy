@@ -144,7 +144,11 @@ console.log(JSON.stringify(rows.filter(e=>/^setup\\.default\\.agent\\.[a-z0-9-]+
   path = clean_path(root)
   # Never run tools to discover them, install missing ones, or claim a guard
   # executable itself proves that an underlying tool is installed.
-  return {command:agent for command,agent in sorted(entries.items()) if shutil.which(command,path=path)}
+  result={}
+  for command,agent in sorted(entries.items()):
+    binary=shutil.which(command,path=path)
+    if binary and Path(binary).resolve().parent != (root/'bin').resolve():result[command]=agent
+  return result
 
 
 def sync(root, data):
@@ -178,6 +182,7 @@ def execute(root, argv):
   env=dict(os.environ, PATH=clean_path(root))
   binary=shutil.which(argv[0],path=env['PATH'])
   if not binary: raise ValueError('Underlying host command is not installed')
+  if Path(binary).resolve().parent == (root/'bin').resolve():raise ValueError('Host command resolves to a guard alias; fix PATH or use the real executable path')
   os.execvpe(binary,argv,env)
 
 

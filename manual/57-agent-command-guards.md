@@ -80,7 +80,7 @@ For a deliberate direct Host command, including version checks, login, or update
 omarchy agent guards host -- pi --version
 ```
 
-The Host escape removes the guard directory from that child process's PATH. It does not change the saved mode. This is an explicit bypass, not a confinement mechanism; a new shell can load its own PATH integration again.
+The Host escape removes the guard directory from that child process's PATH, including directory aliases. An executable symlink that points back to a generated guard is rejected rather than reported as an installed tool or executed recursively; repair that alias or use the real executable path. It does not change the saved mode. This is an explicit bypass, not a confinement mechanism; a new shell can load its own PATH integration again.
 
 Omarchy's explicit agent Host launch paths and account-add/sign-in flow bypass the command guards for their existing host work. Sign-in does not become a container operation. Other scripts that call guarded names directly can still be blocked, including version probes and installers. Use an explicit Host maintenance command when intended. Existing agents are never stopped or moved by enabling guards or changing mode.
 
