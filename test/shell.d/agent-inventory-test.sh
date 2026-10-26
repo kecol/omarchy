@@ -142,10 +142,12 @@ export OMARCHY_TEST_STATE_LOG="$state_log"
 export PATH="$mock_bin:$ROOT/bin:/usr/bin"
 
 list_json=$("$ROOT/bin/omarchy-agent-list" --json)
-[[ $(jq -r '.[0].agent' <<<"$list_json") == "pi" ]] || fail "agent list includes the built-in Pi agent"
-[[ $(jq -r '.[0].runtime' <<<"$list_json") == "podman" ]] || fail "agent list reports the effective container runtime"
-[[ $(jq -r '.[0].running_instances' <<<"$list_json") == "1" ]] || fail "agent list counts active instances"
-[[ $(jq -r '.[0].source' <<<"$list_json") == "builtin" ]] || fail "agent list identifies the built-in definition source"
+pi_json=$(jq -c '.[] | select(.agent == "pi")' <<<"$list_json")
+[[ $(jq -r '.agent' <<<"$pi_json") == "pi" ]] || fail "agent list includes the built-in Pi agent"
+[[ $(jq -r '.runtime' <<<"$pi_json") == "podman" ]] || fail "agent list reports the effective container runtime"
+[[ $(jq -r '.running_instances' <<<"$pi_json") == "1" ]] || fail "agent list counts active instances"
+[[ $(jq -r '.source' <<<"$pi_json") == "builtin" ]] || fail "agent list identifies the built-in definition source"
+[[ $(jq -r '.[] | select(.agent == "codex") | .running_instances' <<<"$list_json") == "0" ]] || fail "agent list includes the configured Codex harness without borrowing Pi instances"
 pass "agent list reports configured agents and active instance counts"
 
 host_list=$(OMARCHY_TEST_AGENT_MODE=host "$ROOT/bin/omarchy-agent-list" --json)

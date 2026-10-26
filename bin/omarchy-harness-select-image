@@ -18,6 +18,7 @@ fi
 agent=$1
 harness=$2
 reference="localhost/omarchy-harness-$harness:latest"
+podman() { command podman --remote=false "$@"; }
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # Menus are an explicit launcher feature, not a side effect of allocating a PTY.
 if [[ ! -t 0 || ! -t 2 || ${OMARCHY_AGENT_MANAGED:-false} == "true" || ${OMARCHY_AGENT_ONESHOT:-false} == "true" || ${OMARCHY_AGENT_ONESHOT:-0} == "1" ]]; then
@@ -63,11 +64,16 @@ while true; do
     printf '\nAgent: %s · Mode: container\nHarness: %s · Version: %s\nImage: %s\nID: %s\nBuilt: %s\n\n' \
       "$agent" "$harness" "$version" "$reference" "$image_id" "$created" >&2
     [[ -z $saved_model ]] || printf 'Saved Pi default: %s\n\n' "$saved_model" >&2
-    choice=$(gum choose "Run" "Update to latest release" "Exit") || exit 130
+    if "$OMARCHY_PATH/bin/omarchy-harness-info" "$harness" >/dev/null 2>&1; then
+      choice=$(gum choose "Run" "Update to latest release" "Exit") || exit 130
+    else
+      choice=$(gum choose "Run" "Exit") || exit 130
+    fi
   else
     printf '\nAgent: %s · Mode: container\nImage missing: %s\n\n' "$agent" "$reference" >&2
     [[ -z $saved_model ]] || printf 'Saved Pi default: %s\n\n' "$saved_model" >&2
-    choice=$(gum choose "Build latest" "Exit") || exit 130
+    "$OMARCHY_PATH/bin/omarchy-harness-info" "$harness" >/dev/null || exit 1
+    choice=$(gum choose "Prepare and run" "Exit") || exit 130
   fi
   case "$choice" in
     Run)
@@ -75,25 +81,23 @@ while true; do
       printf '%s\n' "$image_id"
       exit 0
       ;;
-    "Update to latest release"|"Build latest")
-      if omarchy-cmd-missing mise; then
-        echo "Mise is required to resolve the latest Pi version." >&2
+    "Prepare and run")
+      if prepared=$("$OMARCHY_PATH/bin/omarchy-harness-ensure" "$harness"); then
+        printf '%s\n' "$prepared"
+        exit 0
+      else
+        code=$?
+        [[ $code != 130 ]] || exit 130
+        echo "Preparation failed. No agent was started." >&2
+      fi
+      ;;
+    "Update to latest release")
+      if ! target=$("$OMARCHY_PATH/bin/omarchy-harness-info" "$harness" --latest); then
+        echo "Could not resolve the public release. The current image is unchanged." >&2
         continue
       fi
-      if [[ $harness != "pi" ]]; then
-        echo "Automatic builds are not supported for harness: $harness" >&2
-        continue
-      fi
-      if ! target=$(MISE_MINIMUM_RELEASE_AGE=0 mise latest pi); then
-        echo "Could not resolve the latest Pi release. The current image is unchanged." >&2
-        continue
-      fi
-      if [[ ! $target =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?([+-][A-Za-z0-9.-]+)?$ ]]; then
-        echo "Invalid Pi release returned by mise." >&2
-        continue
-      fi
-      if gum confirm "Build Pi ${version:-not installed} → $target? Existing sessions will not change."; then
-        if ! "$script_dir/omarchy-harness-build" "$harness" "$target" >&2; then
+      if gum confirm --default=false "Build $harness $version → $target? Existing sessions will not change."; then
+        if ! "$OMARCHY_PATH/bin/omarchy-harness-build" "$harness" "$target" >&2; then
           echo "Update failed. The previous image remains available." >&2
         fi
       fi

@@ -1,0 +1,6 @@
+*
+!Containerfile
+!extensions/
+extensions/*
+!extensions/openshell-codex.ts
+!extensions/openshell-codex-models.json

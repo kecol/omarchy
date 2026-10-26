@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "name": "codex",
+  "display_name": "Codex",
+  "mise_tool": "codex",
+  "executable": "codex",
+  "version_build_arg": "CODEX_VERSION",
+  "version_output": "codex-cli {version}"
+}

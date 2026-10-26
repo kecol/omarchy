@@ -40,6 +40,8 @@ if ! "$script_dir/omarchy-agent-container-doctor" --quick >/dev/null; then
   exit 1
 fi
 
+# Prepare, inspect, and launch against the same local rootless engine.
+podman() { command podman --remote=false "$@"; }
 image_options=()
 if [[ $select_image == "true" && ${OMARCHY_AGENT_MANAGED:-false} != "true" && ${OMARCHY_AGENT_ONESHOT:-false} != "true" && ${OMARCHY_AGENT_ONESHOT:-0} != "1" ]] && [[ -t 0 && -t 1 ]]; then
   image_options=(--interactive)

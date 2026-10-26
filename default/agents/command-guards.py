@@ -18,7 +18,7 @@ RESERVED = frozenset(('sh bash zsh fish dash rbash env sudo su ssh scp sftp code
   'uv uvx pip pip3 npm npx pnpm yarn bun docker podman timeout jq git perl ruby php java go rustc cargo '
   'ls cat head tail grep sed awk find xargs printf echo true false test which dirname basename readlink realpath '
   'mkdir rmdir mktemp rm mv cp ln chmod chown touch sort uniq cut tr tee wc date sleep kill pkill systemctl '
-  'loginctl curl wget tar gzip unzip make cc gcc clang').split())
+  'loginctl systemd-run nice flock curl wget tar gzip unzip make cc gcc clang').split())
 ROOT = Path(os.environ['OMARCHY_PATH'])
 LIMIT = 1024 * 1024
 

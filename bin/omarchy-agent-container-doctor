@@ -74,6 +74,7 @@ fi
 if omarchy-cmd-missing podman; then
   check_fail "Podman is not installed"
 else
+  podman() { command podman --remote=false "$@"; }
   if rootless=$(podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null); then
     [[ $rootless == "true" ]] && check_ok "Podman is rootless" || check_fail "Podman is not rootless"
   else

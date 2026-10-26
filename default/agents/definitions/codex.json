@@ -1,0 +1,6 @@
+{
+  "name": "codex",
+  "harness": "codex",
+  "runtime": "podman",
+  "command": ["codex"]
+}

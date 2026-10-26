@@ -40,6 +40,7 @@ MOCK
 chmod +x "$mock_bin"/*
 
 export HOME="$test_home"
+export XDG_DATA_HOME="$test_home/.local/share" XDG_STATE_HOME="$test_home/.local/state" XDG_CONFIG_HOME="$test_home/.config" XDG_CACHE_HOME="$test_home/.cache"
 export OMARCHY_PATH="$ROOT"
 export OMARCHY_TEST_LAUNCH_LOG="$launch_log"
 export PATH="$mock_bin:$ROOT/bin:/usr/bin"

@@ -1,0 +1,49 @@
+#!/bin/bash
+
+# omarchy:summary=Prepare a reviewed container image without installing the host agent or signing in
+# omarchy:args=[--agent=NAME] [--check] [--yes] [--version=VERSION]
+# omarchy:examples=omarchy agent prepare --agent pi | omarchy agent prepare --agent codex --check
+
+set -euo pipefail
+agent=
+checking=false
+options=()
+while (( $# )); do
+  case "$1" in
+    --agent=*) agent=${1#--agent=}; [[ -n $agent ]] || exit 1 ;;
+    --agent) agent=${2:?--agent needs a value}; shift ;;
+    --check) checking=true ;;
+    --yes) options+=(--yes) ;;
+    --version=*) options+=("$1") ;;
+    *) echo "Usage: omarchy agent prepare [--agent=NAME] [--check] [--yes] [--version=VERSION]" >&2; exit 1 ;;
+  esac
+  shift
+done
+if [[ $checking == "true" && ${#options[@]} != 0 ]]; then
+  echo "--check only inspects the recipe; do not combine it with preparation options." >&2
+  exit 1
+fi
+agent=${agent:-$(omarchy-default-agent)}
+[[ $agent =~ ^[a-z0-9][a-z0-9._-]*$ ]] || { echo "Choose an agent before preparing a container." >&2; exit 1; }
+"$OMARCHY_PATH/bin/omarchy-agent" --agent "$agent" --container --check >/dev/null
+user_definition="$HOME/.config/omarchy/agents/$agent.json"
+if [[ -e $user_definition || -L $user_definition ]]; then
+  definition=$user_definition
+else
+  definition="$OMARCHY_PATH/default/agents/definitions/$agent.json"
+fi
+[[ -f $definition && ! -L $definition ]] || { echo "Unsafe or unavailable agent definition" >&2; exit 1; }
+harness=$(jq -er --arg agent "$agent" 'select(.name == $agent and .runtime == "podman") | .harness | select(type == "string")' "$definition")
+metadata=$("$OMARCHY_PATH/bin/omarchy-harness-info" "$harness")
+executable=$(jq -r '.executable' <<<"$metadata")
+if ! jq -e --arg executable "$executable" '.command[0] == $executable' "$definition" >/dev/null; then
+  echo "The selected agent command does not match the reviewed recipe's executable." >&2
+  exit 1
+fi
+if [[ $checking == "true" ]]; then
+  echo "Reviewed preparation recipe available for $agent. Engine, image, and authentication were not checked."
+else
+  image=$("$OMARCHY_PATH/bin/omarchy-harness-ensure" "$harness" "${options[@]}")
+  printf 'Prepared %s: %s\n' "$agent" "$image"
+  echo "No agent was started and no provider account was accessed."
+fi

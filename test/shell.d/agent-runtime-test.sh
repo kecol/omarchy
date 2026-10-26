@@ -9,6 +9,7 @@ trap 'rm -rf "$test_tmp"' EXIT
 
 mock_bin="$test_tmp/bin"
 test_home="$test_tmp/home"
+export XDG_DATA_HOME="$test_home/.local/share" XDG_STATE_HOME="$test_home/.local/state" XDG_CONFIG_HOME="$test_home/.config" XDG_CACHE_HOME="$test_home/.cache"
 workspace="$test_tmp/project with spaces"
 exec_log="$test_tmp/exec-log"
 podman_run_log="$test_tmp/podman-run-log"
@@ -39,6 +40,7 @@ SH
 
 cat >"$mock_bin/podman" <<'SH'
 #!/bin/bash
+[[ ${1:-} != "--remote=false" ]] || shift
 case "$1 ${2:-}" in
   "info --format")
     printf '%s\n' "${OMARCHY_TEST_PODMAN_ROOTLESS:-true}"

@@ -16,8 +16,9 @@ import json,os,sys
 from pathlib import Path
 name=Path(sys.argv[0]).name
 args=sys.argv[1:]
-base=Path(os.environ['FIXTURE'])
-with (base/'calls').open('a') as f:f.write(json.dumps([name]+args)+'\n')
+base=Path(sys.argv[0]).resolve().parent.parent
+logged=args[1:] if name=='podman' and args[:1]==['--remote=false'] else args
+with (base/'calls').open('a') as f:f.write(json.dumps([name]+logged)+'\n')
 def read(name,default=None):
  p=base/name
  return json.loads(p.read_text()) if p.exists() else default
@@ -25,7 +26,7 @@ def write(name,value):(base/name).write_text(json.dumps(value))
 old='sha256:'+'a'*64;new='sha256:'+'b'*64
 if name=='omarchy-cmd-missing':sys.exit(1)
 if name=='mise':
- if os.environ.get('RESOLVE_FAIL'):sys.exit(1)
+ if read('controls',{}).get('RESOLVE_FAIL'):sys.exit(1)
  print('1.4.0');sys.exit()
 if name=='gum':
  if args[0]=='confirm':sys.exit(1 if os.environ.get('DECLINE') else 0)
@@ -34,6 +35,9 @@ if name=='gum':
  pick=choices.pop(0);write('choices',choices)
  if pick=='CANCEL':sys.exit(130)
  print(pick);sys.exit()
+if name=='systemd-run':
+ index=args.index('nice');os.execvp('nice',args[index:])
+if name=='podman' and args[:1]==['--remote=false']:args=args[1:]
 if args[0]=='info':print('true')
 elif args[:2]==['image','exists']:sys.exit(0 if read('current') else 1)
 elif args[:2]==['image','inspect']:
@@ -48,7 +52,12 @@ elif args[:2]==['volume','inspect']:
 elif args[0]=='build':
  if os.environ.get('BUILD_FAIL'):sys.exit(1)
  Path(args[args.index('--iidfile')+1]).write_text(new+'\n')
-elif args[0]=='run':print('0.0.0' if os.environ.get('VERIFY_FAIL') else '1.4.0')
+elif args[:2] in (['volume','create'],['volume','rm']):pass
+elif args[0]=='run':
+ if '--entrypoint=/bin/bash' in args:
+  volume=next((a for a in args if a.startswith('--volume=') and ':/workspace:' in a),None)
+  if volume:Path(volume[len('--volume='):].split(':/workspace:')[0],'fixture').write_text('fixture')
+ else:print('0.0.0' if os.environ.get('VERIFY_FAIL') else '1.4.0')
 elif args[0]=='tag':
  if args[-1].endswith(':latest'):write('current',args[1])
 elif args[0]!='untag':raise RuntimeError(args)
@@ -60,17 +69,19 @@ def run(choices=(), current=OLD, terminal=True, interactive=True, extra=None, ad
     base = Path(temp)
     binaries = base / 'bin'
     binaries.mkdir()
-    for name in ('podman', 'mise', 'gum', 'omarchy-cmd-missing'):
+    for name in ('podman', 'mise', 'gum', 'omarchy-cmd-missing', 'systemd-run'):
       path = binaries / name
       path.write_text(MOCK)
       path.chmod(0o755)
     (base / 'choices').write_text(json.dumps(choices))
     (base / 'current').write_text(json.dumps(current))
     env = dict(os.environ, HOME=temp, FIXTURE=temp, OMARCHY_PATH=str(ROOT),
+               XDG_DATA_HOME=str(base/'data'),XDG_STATE_HOME=str(base/'state'),XDG_CONFIG_HOME=str(base/'config'),XDG_CACHE_HOME=str(base/'cache'),
                PATH=f'{binaries}:/usr/bin')
     for key in ('OMARCHY_AGENT_MANAGED', 'OMARCHY_AGENT_ONESHOT'):
       env.pop(key, None)
     env.update(extra or {})
+    (base/'controls').write_text(json.dumps(extra or {}))
     command = [str(ROOT / 'bin/omarchy-harness-select-image')]
     if interactive:
       command.append('--interactive')
@@ -147,7 +158,7 @@ for failure in ('BUILD_FAIL', 'VERIFY_FAIL', 'RESOLVE_FAIL'):
 code, image, _, calls = run(['Update to latest release', 'Run'], extra={'DECLINE': '1'})
 check(code == 0 and image == OLD and not called(calls, 'podman', 'build'),
       'declining an update does not build')
-code, image, _, calls = run(['Build latest', 'Run'], current=None)
+code, image, _, calls = run(['Prepare and run'], current=None)
 check(code == 0 and image == NEW, 'a missing image can be built and selected')
 for choice in ('Exit', 'CANCEL'):
   code, image, _, calls = run([choice])

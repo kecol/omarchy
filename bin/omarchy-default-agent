@@ -47,6 +47,24 @@ esac
 
 agent_package=${agent_package:-$agent}
 
+# Container selection needs a reviewed recipe, not an installed host CLI.
+# Refuse unsupported choices before saving; preparation belongs to first launch.
+if ! execution_mode=$("$OMARCHY_PATH/bin/omarchy-agent-mode"); then exit 1; fi
+[[ $execution_mode == "host" || $execution_mode == "container" ]] || { echo "Invalid execution default; agent selection is unchanged." >&2; exit 1; }
+if [[ $execution_mode == "container" ]]; then
+  if ! "$OMARCHY_PATH/bin/omarchy-agent-prepare" --agent "$agent" --check >/dev/null; then
+    echo "Container preparation is not supported for $name; the default agent is unchanged." >&2
+    exit 1
+  fi
+  mkdir -p "$(dirname "$agent_file")"
+  printf '%s\n' "$agent" >"$agent_file"
+  if [[ $installing == "true" ]]; then
+    exec omarchy-agent --inline --container --agent "$agent"
+  else
+    exec omarchy-agent --container --agent "$agent"
+  fi
+fi
+
 # Hermes and OpenClaw are not mise tools: each is a self-updating runtime in
 # the user's home, Hermes the desktop app's and OpenClaw the one its Control
 # UI updates. Each has its own installer with the same --check/--now contract

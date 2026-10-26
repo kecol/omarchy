@@ -34,9 +34,9 @@ def stub():
     print(json.dumps({'resources': {'memory': '4g', 'pids': 1024}}))
   elif name == 'omarchy-agent-state':
     pass
-  elif name == 'podman' and args == ['volume', 'exists', 'omarchy-agent-pi-home']:
+  elif name == 'podman' and args == ['--remote=false', 'volume', 'exists', 'omarchy-agent-pi-home']:
     pass
-  elif name == 'podman' and args[:2] == ['run', '--rm']:
+  elif name == 'podman' and args[:3] == ['--remote=false', 'run', '--rm']:
     return int(os.environ.get('OFFLINE_EXIT', '0'))
   else:
     print('Unexpected offline operation: '+name, file=sys.stderr)
@@ -104,7 +104,8 @@ class InlineTests(unittest.TestCase):
   def test_inline_public_route_preserves_terminal_cwd_and_isolation_arguments(self):
     code, rows, terminal = self.launch(['--inline', '--container', '--agent', 'pi', '--directory', str(self.project)])
     self.assertEqual(code, 0)
-    run = next(r for r in rows if r['name'] == 'podman' and r['args'][0] == 'run')
+    run = next(r for r in rows if r['name'] == 'podman' and r['args'][1] == 'run')
+    self.assertEqual(run['args'][0], '--remote=false')
     self.assertEqual(run['terminal'], terminal)
     self.assertTrue(run['stdin_tty'] and run['stdout_tty'])
     self.assertEqual(run['cwd'], str(self.project))
@@ -123,12 +124,12 @@ class InlineTests(unittest.TestCase):
     code, rows, _ = self.launch(['--inline', '--agent=pi', '--directory='+str(self.project)], OFFLINE_MODE='container')
     self.assertEqual(code, 0)
     self.assertTrue(any(r['name'] == 'omarchy-agent-mode' for r in rows))
-    self.assertTrue(any(r['name'] == 'podman' and r['args'][0] == 'run' for r in rows))
+    self.assertTrue(any(r['name'] == 'podman' and r['args'][:2] == ['--remote=false', 'run'] for r in rows))
 
   def test_non_tty_inline_does_not_allocate_tty_or_show_interactive_selector(self):
     code, rows, _ = self.launch(['--inline', '--container', '--agent=pi', '--directory='+str(self.project)], terminal=False)
     self.assertEqual(code, 0)
-    run = next(r for r in rows if r['name'] == 'podman' and r['args'][0] == 'run')
+    run = next(r for r in rows if r['name'] == 'podman' and r['args'][1] == 'run')
     self.assertIn('--interactive', run['args'])
     self.assertNotIn('--tty', run['args'])
     selector = next(r for r in rows if r['name'] == 'omarchy-harness-select-image')

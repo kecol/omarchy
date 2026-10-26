@@ -14,6 +14,14 @@ checkout until a human explicitly reviews and applies them.
 
 `default/agents/command-guards.py` owns private metadata and unchanged managed scripts. Generation preflights conflicts; foreign or modified files are not overwritten. Runtime mode errors block rather than assume Host. Bash environment setup prefixes the opt-in directory, and a process-free Bash prompt hook restores it after mise. Status reports actual PATH precedence, not aliases/functions or universal coverage. Deliberate Host launches remove guard PATH entries in their child, including after a terminal service reconstructs PATH. Installed-only resolution looks past guards; explicit account sign-in retains its existing host flow. Absolute paths, IDE processes, other shells, and intentionally changed PATH remain bypasses. Enabling guards never means that every process is containerized.
 
+## Reviewed first-run container preparation
+
+`omarchy agent prepare --agent NAME` and the interactive image selector share `omarchy-harness-ensure`. Missing images require confirmation (or explicit `--yes`); existing images are reused without public release lookup. `omarchy-harness-build` consumes reviewed bundled `harness.json` metadata, builds a private candidate, and promotes only after network-free disposable version/filesystem checks. Pi and Codex have bundled recipes. Preparation does not install host agents, import account homes, authenticate providers, or start an agent; an interactive **Prepare and run** explicitly continues to launch after preparation succeeds.
+
+`default/agents/harness.py` validates bounded, regular bundled metadata in `containers/harnesses/<harness>/harness.json`. Its fields name the public mise tool, executable, version build argument, and exact version output template. The Containerfile and context allowlist must exist without leaf symlinks. Metadata drives builds and validation without an agent-product switch. Anonymous registry credentials, isolated public release lookup, private candidate tags, and disposable network-free runtime fixtures keep preparation separate from authentication. `--candidate-only` supports qualification without promoting production tags.
+
+`omarchy-agent-prepare --check` is only a recipe/definition check, suitable for rejecting unsupported Container defaults before saving or invoking the old Host installer. It is not an engine/image/authentication readiness claim. Dependency installation and authenticated testing remain separate explicit actions. See [`manual/58-agent-container-preparation.md`](../manual/58-agent-container-preparation.md) for the interface, bounds, and limitations.
+
 ## Safety model
 
 A managed task has three important locations:
