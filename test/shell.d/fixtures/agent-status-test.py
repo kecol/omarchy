@@ -142,7 +142,7 @@ class StatusTests(unittest.TestCase):
     self.add_process(30,'sshd','/usr/bin/sshd',namespace=ns)
     cid='a'*64
     self.ids=[cid]
-    self.details='\t'.join(json.dumps(x) for x in [cid,'workspace-container',30,'',None,'workspace-id'])+'\n'
+    self.details='\t'.join(json.dumps(x) for x in [cid,'workspace-container',30,'',None,'workspace-id',None,None,[]])+'\n'
     report=self.report()
     self.assertEqual([r['boundary'] for r in report['processes']],['host','container'])
     row=report['processes'][1]
@@ -150,6 +150,64 @@ class StatusTests(unittest.TestCase):
     self.assertEqual(row['activity']['state'],'process-observed')
     self.assertEqual(row['container']['workspace_name'],'test-project')
     self.assertFalse(any(c[0]=='omarchy-workspace-list' for c in self.calls))
+
+  def project_report(self, mounts=None, target='/workspace/abc123', managed='agent', key='abc123'):
+    ns=('pid:[2]','mnt:[2]')
+    self.add_process(20,'codex','/opt/codex/bin/codex',namespace=ns,cwd='/workspace/abc123/subdir')
+    self.add_process(30,'bash','/usr/bin/bash',namespace=ns)
+    cid='c'*64;self.ids=[cid]
+    if mounts is None:mounts=[{'type':'bind','source':'/projects/numerai','destination':target,'rw':True}]
+    self.details='\t'.join(json.dumps(x) for x in [cid,'agent-container',30,managed,'codex',None,target,key,mounts])
+    return self.report()
+
+  def test_project_paths_keep_host_container_key_and_cwd_distinct(self):
+    row=self.project_report()['processes'][0]
+    self.assertEqual(row['container']['project'],{'state':'matched','host_path':'/projects/numerai',
+      'container_path':'/workspace/abc123','project_id':'abc123','access':'read-write'})
+    self.assertEqual(row['cwd'],'/workspace/abc123/subdir')
+    self.assertNotIn(SECRET,json.dumps(row))
+    text=io.StringIO()
+    with contextlib.redirect_stdout(text):m.print_report(self.project_report())
+    for value in ('/projects/numerai','/workspace/abc123','Project key: abc123','read-write'):
+      self.assertIn(value,text.getvalue())
+
+  def test_project_read_only_mount_is_not_reported_read_write(self):
+    row=self.project_report([{'type':'bind','source':'/projects/readonly','destination':'/workspace/abc123','rw':False}])['processes'][0]
+    self.assertEqual(row['container']['project']['access'],'read-only')
+
+  def test_ambiguous_project_mounts_do_not_choose_a_host_directory(self):
+    mounts=[{'type':'bind','source':path,'destination':'/workspace/abc123','rw':True} for path in ('/first','/second')]
+    project=self.project_report(mounts)['processes'][0]['container']['project']
+    self.assertEqual(project['state'],'ambiguous');self.assertIsNone(project['host_path'])
+    self.assertEqual(project['access'],'unknown')
+    self.assertEqual(project['container_path'],'/workspace/abc123')
+
+  def test_invalid_project_metadata_fails_closed_without_path_reads(self):
+    bad=[[],[{'type':'volume','source':'/private','destination':'/workspace/abc123','rw':True}],
+      [{'type':'bind','source':'relative','destination':'/workspace/abc123','rw':True}],
+      [{'type':'bind','source':'/a/../b','destination':'/workspace/abc123','rw':True}],
+      [{'type':'bind','source':'/private','destination':'/other','rw':True}],
+      [{'type':'bind','source':'/private','destination':'/workspace/abc123','rw':'true'}]]
+    for mounts in bad:
+      with self.subTest(mounts=mounts):
+        row=self.project_report(mounts)['processes'][0]['container']['project']
+        self.assertEqual(row['state'],'unavailable');self.assertIsNone(row['host_path'])
+    for target in ('/home/agent','/workspace/../private','relative','/workspace/abc\u0000def'):
+      row=self.project_report(target=target)['processes'][0]['container']['project']
+      self.assertEqual(row['state'],'unavailable');self.assertIsNone(row['host_path'])
+    row=self.project_report(managed='other')['processes'][0]['container']['project']
+    self.assertIsNone(row['host_path']);self.assertIsNone(row['container_path'])
+
+  def test_reused_container_init_pid_discards_project_mapping(self):
+    original=m.container_snapshot
+    def stale(query,proc):
+      rows=original(query,proc)
+      self.add_process(30,'bash','/usr/bin/bash',namespace=('pid:[2]','mnt:[2]'),start=200)
+      return rows
+    with patch.object(m,'container_snapshot',stale):
+      row=self.project_report()['processes'][0]['container']['project']
+    self.assertEqual(row['state'],'unavailable');self.assertIsNone(row['host_path'])
+    self.assertEqual(row['access'],'unknown')
 
   def test_namespace_gap_sorts_before_container_and_never_assumes_safe(self):
     self.add_process(10,'pi','/pi',namespace=('pid:[9]','mnt:[9]'))
@@ -163,7 +221,7 @@ class StatusTests(unittest.TestCase):
     self.add_process(20,'codex','/codex',namespace=ns)
     self.add_process(30,'sshd','/sshd',namespace=ns)
     cid='b'*64;self.ids=[cid]
-    self.details='\t'.join(json.dumps(x) for x in [cid,'host-pid-container',30,'agent','codex',None])
+    self.details='\t'.join(json.dumps(x) for x in [cid,'host-pid-container',30,'agent','codex',None,None,None,[]])
     self.assertEqual([r['boundary'] for r in self.report()['processes']],['host','container'])
 
   def test_observer_container_does_not_call_itself_host(self):

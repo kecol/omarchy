@@ -237,7 +237,7 @@ class EditorTests(DesktopFixture):
     self.add_process(30,'sshd','/usr/bin/sshd',namespace=('pid:[2]','mnt:[2]'))
     self.add_process(61,'code','/usr/share/code/code',command=f.SECRET.encode())
     self.ids=['a'*64]
-    self.details='\t'.join(json.dumps(v) for v in [self.ids[0],'container',30,'',None,'workspace-id'])
+    self.details='\t'.join(json.dumps(v) for v in [self.ids[0],'container',30,'',None,'workspace-id',None,None,[]])
     (self.profile/'code.lock').write_text('61')
     digest=hashlib.sha256(os.fsencode(self.profile)).hexdigest()[:8]
     self.ipc=self.runtime/f'vscode-{digest}-1.14-main.sock'

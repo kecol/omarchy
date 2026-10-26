@@ -28,10 +28,32 @@ Rectangle {
     else if (record.activity === "conflicting-reports") value = Commons.I18n.t("agents.overview.conflicting")
     return Commons.I18n.t("agents.overview.herdrActivity").arg(value)
   }
+  function projectLines() {
+    var project = record.project
+    if (!project) return ""
+    var lines = []
+    if (project.state === "matched") {
+      lines.push(Commons.I18n.t("agents.overview.hostProject").arg(project.host))
+      var access = project.access === "read-write" ? Commons.I18n.t("agents.overview.readWrite") : Commons.I18n.t("agents.overview.readOnly")
+      lines.push(Commons.I18n.t("agents.overview.projectAccess").arg(access))
+    } else {
+      var unavailable = Commons.I18n.t("agents.overview.projectUnavailable")
+      if (project.state === "ambiguous") unavailable = Commons.I18n.t("agents.overview.projectAmbiguous")
+      lines.push(unavailable)
+    }
+    if (project.target) {
+      var targetLabel = Commons.I18n.t("agents.overview.declaredProject")
+      if (project.state === "matched") targetLabel = Commons.I18n.t("agents.overview.containerProject")
+      lines.push(targetLabel.arg(project.target))
+    }
+    if (project.id) lines.push(Commons.I18n.t("agents.overview.projectKey").arg(project.id))
+    return lines.join("\n")
+  }
   function details() {
     var lines = [Commons.I18n.t("agents.overview.pid").arg(record.identity.pid),
       Commons.I18n.t("agents.overview.identity").arg(record.identity.boot || "-").arg(record.identity.start)]
     if (record.cwd) lines.push(Commons.I18n.t("agents.overview.directory").arg(record.cwd))
+    if (record.project) lines.push(projectLines())
     if (record.container) lines.push(Commons.I18n.t("agents.overview.containerName").arg(record.container))
     if (record.workspaceId) lines.push(Commons.I18n.t("agents.overview.workspaceId").arg(record.workspaceId))
     record.herdr.slice(0, 8).forEach(function(e) {
@@ -77,6 +99,21 @@ Rectangle {
       visible: root.record.workspace !== "" || root.record.container !== ""
       text: root.record.workspace ? Commons.I18n.t("agents.overview.workspaceName").arg(root.record.workspace)
         : Commons.I18n.t("agents.overview.containerName").arg(root.record.container)
+    }
+    Label {
+      width: parent.width
+      visible: !!root.record.project
+      text: root.projectLines()
+    }
+    Label {
+      width: parent.width
+      visible: root.record.workspaceId !== ""
+      text: Commons.I18n.t("agents.overview.workspaceId").arg(root.record.workspaceId)
+    }
+    Label {
+      width: parent.width
+      visible: root.record.boundary === "host" && root.record.cwd !== ""
+      text: Commons.I18n.t("agents.overview.directory").arg(root.record.cwd)
     }
     Label {
       width: parent.width

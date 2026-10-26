@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import json
 import importlib.util
 import os
+import posixpath
 from pathlib import Path
 import re
 import selectors
@@ -199,6 +200,30 @@ class Proc:
       return None
 
 
+def project_location(target, key, mounts, managed):
+  """Selected project bind only, not arbitrary mounts, credentials, or file content."""
+  def path(value):
+    return (isinstance(value, str) and 0 < len(value) <= 4096 and value.startswith('/')
+      and not value.startswith('//') and '\0' not in value and posixpath.normpath(value) == value)
+  valid_target = path(target) and (target == '/workspace' or target.startswith('/workspace/'))
+  result = {'state': 'unavailable', 'host_path': None,
+    'container_path': target if valid_target and managed == 'agent' else None,
+    'project_id': key if managed == 'agent' and isinstance(key, str) and IDENTIFIER.fullmatch(key) else None,
+    'access': 'unknown'}
+  if managed != 'agent' or not valid_target or not isinstance(mounts, list):
+    return result
+  if len(mounts) != 1:
+    result['state'] = 'ambiguous' if len(mounts) > 1 else 'unavailable'
+    return result
+  mount = mounts[0]
+  if (not isinstance(mount, dict) or mount.get('type') != 'bind'
+      or mount.get('destination') != target or not path(mount.get('source'))
+      or type(mount.get('rw')) is not bool):
+    return result
+  return {**result, 'state': 'matched', 'host_path': mount['source'],
+    'access': 'read-write' if mount['rw'] else 'read-only'}
+
+
 def container_snapshot(query, proc):
   rows = query(['podman', '--remote=false', 'ps', '--format=json'])
   if not isinstance(rows, list):
@@ -212,18 +237,34 @@ def container_snapshot(query, proc):
     raise Unavailable('ambiguous container snapshot')
   if not ids:
     return []
-  keys = ('org.omarchy.managed', 'org.omarchy.agent', 'org.omarchy.workspace.id')
-  template = '\t'.join(['{{json .ID}}', '{{json .Name}}', '{{json .State.Pid}}'] + ['{{json (index .Config.Labels "'+key+'")}}' for key in keys])
+  keys = ('org.omarchy.managed', 'org.omarchy.agent', 'org.omarchy.workspace.id', 'org.omarchy.workspace.target', 'org.omarchy.project')
+  # Emit only project bind metadata. Never serialize all mounts, env, or argv.
+  project_mounts = ('{{$target := index .Config.Labels "org.omarchy.workspace.target"}}'
+    '{{$managed := index .Config.Labels "org.omarchy.managed"}}{{$sep := ""}}['
+    '{{if and (eq $managed "agent") (or (eq $target "/workspace") (and (ge (len $target) 11) (eq (slice $target 0 11) "/workspace/")))}}'
+    '{{range .Mounts}}{{if and (eq .Type "bind") (eq .Destination $target)}}{{$sep}}'
+    '{"type":{{json .Type}},"source":{{json .Source}},"destination":{{json .Destination}},"rw":{{json .RW}}}'
+    '{{$sep = ","}}{{end}}{{end}}{{end}}]')
+  template = '\t'.join(['{{json .ID}}', '{{json .Name}}', '{{json .State.Pid}}']
+    + ['{{json (index .Config.Labels "'+key+'")}}' for key in keys] + [project_mounts])
   output = query(['podman', '--remote=false', 'inspect', '--format', template, *ids], json_output=False)
   result = []
   for line in output.splitlines():
     try:
-      cid, name, pid, managed, agent, workspace = [json.loads(part) for part in line.split('\t')]
+      cid, name, pid, managed, agent, workspace, target, project_id, mounts = [json.loads(part) for part in line.split('\t')]
     except (ValueError, TypeError):
       raise Unavailable('unsupported container details') from None
     if cid not in ids or not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0 or not isinstance(name, str):
       raise Unavailable('container changed during query')
-    result.append({'id': cid, 'name': name[:256], 'init_pid': pid, 'namespaces': proc.namespace(pid), 'kind': 'agent' if managed == 'agent' else 'workspace' if workspace else 'other', 'declared_agent': canonical(agent) if canonical(agent) in AGENTS else None, 'workspace_id': workspace if isinstance(workspace, str) else None})
+    try:
+      init_start = proc.identity(pid)['start_ticks']
+    except (OSError, ValueError, IndexError):
+      init_start = None
+    result.append({'id': cid, 'name': name[:256], 'init_pid': pid, 'init_start': init_start,
+      'namespaces': proc.namespace(pid), 'kind': 'agent' if managed == 'agent' else 'workspace' if workspace else 'other',
+      'declared_agent': canonical(agent) if canonical(agent) in AGENTS else None,
+      'workspace_id': workspace if isinstance(workspace, str) else None,
+      'project': project_location(target, project_id, mounts, managed)})
   if {r['id'] for r in result} != set(ids):
     raise Unavailable('incomplete container snapshot')
   return result
@@ -512,6 +553,14 @@ def build_report(proc, query, use_herdr=True, use_podman=True, workspace_reader=
     if container:
       record['container'] = {key: container[key] for key in ('id', 'name', 'kind', 'workspace_id')}
       record['container']['workspace_name'] = workspaces.get(container['workspace_id'], {}).get('name')
+      project = container['project']
+      try:
+        fresh = (container['init_start'] is not None
+          and proc.identity(container['init_pid'])['start_ticks'] == container['init_start']
+          and proc.namespace(container['init_pid']) == ns)
+      except (OSError, ValueError, IndexError):
+        fresh = False
+      record['container']['project'] = project if fresh else {**project, 'state': 'unavailable', 'host_path': None, 'access': 'unknown'}
     target = candidates if process['identification'] == 'process-name-only' and not process['herdr'] else identified
     target.append(record)
   order = {'host': 0, 'unknown': 1, 'observer': 1, 'container': 2}
@@ -581,6 +630,18 @@ def print_report(report):
         extra += ' · extension process; work unverified'
       print(f"{row['boundary'].upper():<11} {display(row['agent']):<12} {display(activity):<23} {row['identity']['pid']:<9} {display(location)}{display(extra, 180)}")
       print('  Desktop: '+desktop_label(row['desktop']))
+      project = container.get('project') if container and container['kind'] == 'agent' else None
+      if project:
+        if project['state'] == 'matched':
+          print('  Project (host bind): '+display(project['host_path'], 500)+' · '+project['access'])
+        else:
+          print('  Host project mapping: '+project['state'])
+        if project['container_path']:
+          prefix = 'Container project: ' if project['state'] == 'matched' else 'Declared container project: '
+          print('  '+prefix+display(project['container_path'], 500))
+        if project['project_id']:
+          print('  Project key: '+display(project['project_id']))
+        print('  Process directory: '+display(row['cwd'], 500))
       for evidence in row['herdr']:
         if evidence.get('workspace_id') or evidence.get('tab_id'):
           print('  Herdr: '+herdr_display_path(evidence))

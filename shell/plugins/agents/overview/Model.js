@@ -25,6 +25,16 @@ function windowRow(row) {
   return {address: row.address, pid: row.pid, monitor: clean(row.monitor.name), workspace: row.workspace.id,
     label: clean(row.workspace.label), source: source, hidden: row.hidden === true}
 }
+function projectRow(row) {
+  if (!object(row)) return null
+  var state = ['matched', 'unavailable', 'ambiguous'].indexOf(row.state) >= 0 ? row.state : 'unavailable'
+  var host = clean(row.host_path, 4096), target = clean(row.container_path, 4096)
+  var access = ['read-write', 'read-only'].indexOf(row.access) >= 0 ? row.access : 'unknown'
+  if (target !== '/workspace' && target.indexOf('/workspace/') !== 0) target = ''
+  if (state === 'matched' && (!host || host.charAt(0) !== '/' || !target || access === 'unknown')) state = 'unavailable'
+  return {state: state, host: state === 'matched' ? host : '', target: target,
+    id: clean(row.project_id, 96), access: state === 'matched' ? access : 'unknown'}
+}
 function card(row, candidate) {
   if (!object(row) || typeof row.agent !== 'string' || ['host','container','observer','unknown'].indexOf(row.boundary) < 0 || !object(row.desktop)) throw new Error('invalid process')
   var id = identity(row)
@@ -44,7 +54,8 @@ function card(row, candidate) {
     single: row.desktop.state === 'matched' && windows.length === 1,
     multiple: row.desktop.state === 'multiple' || windows.length > 1,
     container: clean(container.name), workspace: clean(container.workspace_name), workspaceId: clean(container.workspace_id, 96),
-    extension: row.role === 'extension-associated process', cwd: clean(row.cwd, 4096)}
+    extension: row.role === 'extension-associated process', cwd: clean(row.cwd, 4096),
+    project: container.kind === 'agent' ? projectRow(container.project) : null}
 }
 function parse(raw) {
   if (typeof raw !== 'string' || raw.length > MAX_OUTPUT) throw new Error('oversized snapshot')
