@@ -47,6 +47,7 @@ class StatusTests(unittest.TestCase):
     self.sessions=[{'name':'default','running':True,'socket_path':str(self.root/'herdr.sock')}]
     self.session_agents={}
     self.session_snapshots={}
+    self.workspace_metadata={'workspace-id':{'name':'test-project','editor_profile':None}}
 
   def add_process(self, pid, comm, exe, namespace=('pid:[1]', 'mnt:[1]'), start=100, command=b'', cwd='/project', ppid=1):
     directory = self.proc_root/str(pid)
@@ -97,7 +98,28 @@ class StatusTests(unittest.TestCase):
 
   def report(self, **options):
     options.setdefault('use_desktop',False)
-    return m.build_report(self.proc,self.query,workspace_reader=lambda:{'workspace-id':'test-project'},**options)
+    return m.build_report(self.proc,self.query,workspace_reader=lambda:self.workspace_metadata,**options)
+
+  def test_read_only_registry_profiles_need_no_credentials_and_reject_duplicate_ids(self):
+    data=self.root/'data'
+    root=data/'omarchy/workspaces';root.mkdir(parents=True,mode=0o700)
+    identity='a'*32
+    def registered(name):
+      directory=root/name;directory.mkdir(mode=0o700)
+      metadata={'version':1,'name':name,'id':identity,'mode':'clone','source':'/source','directory':str(directory/'repo')}
+      path=directory/'workspace.json';path.write_text(json.dumps(metadata));path.chmod(0o600)
+      (directory/'identity').write_text(SECRET)
+      return directory
+    directory=registered('project')
+    original=Path.open
+    def safe(path,*args,**kwargs):
+      if path.name in ('identity','identity.pub','ssh_config','known_hosts'):raise AssertionError('credential/connection content read')
+      return original(path,*args,**kwargs)
+    with patch.dict(os.environ,{'XDG_DATA_HOME':str(data)}):
+      with patch.object(Path,'open',safe):
+        self.assertEqual(m.workspace_snapshot(),{identity:{'name':'project','editor_profile':directory/'vscode-data'}})
+      registered('another')
+      with self.assertRaises(m.Unavailable):m.workspace_snapshot()
 
   def test_host_first_and_deduplicate_herdr_without_prompt_fields(self):
     self.add_process(10,'pi','/tools/pi',cwd='/home/user/work')
@@ -263,7 +285,7 @@ class StatusTests(unittest.TestCase):
   def test_registry_api_never_creates_state_or_queries_engine(self):
     data=self.root/'empty-data'
     with patch.dict(os.environ,{'OMARCHY_PATH':str(ROOT),'XDG_DATA_HOME':str(data)}), patch.object(subprocess,'run',side_effect=AssertionError('registry must not query engine')):
-      self.assertEqual(m.workspace_names(),{})
+      self.assertEqual(m.workspace_snapshot(),{})
     self.assertFalse(data.exists())
 
   def test_query_bounds_timeout_output_and_invalid_json(self):

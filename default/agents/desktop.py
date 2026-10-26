@@ -1,7 +1,9 @@
 """Read-only desktop associations. Never focus a window or infer pane visibility."""
 from pathlib import Path
+import hashlib
 import os
 import re
+import stat
 
 ADDRESS = re.compile(r'0x[0-9a-fA-F]{1,32}\Z')
 # Only reciprocal Unix stream peers are used. Unsupported formats remain unknown.
@@ -47,6 +49,99 @@ def socket_rows(text):
   return rows
 
 
+def socket_inodes(proc, pid):
+  result = set()
+  try:
+    for index, fd in enumerate((proc.root/str(pid)/'fd').iterdir()):
+      if index >= 1024:
+        break
+      try:
+        target = os.readlink(fd)
+        if re.fullmatch(r'socket:\[\d+\]', target):
+          result.add(int(target[8:-1]))
+      except OSError:
+        continue
+  except OSError:
+    pass
+  return result
+
+
+def profile_pid(profile, uid):
+  """VS Code's PID-only lockfile, never settings, logs, argv, or credentials."""
+  directory = os.open(profile, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_NONBLOCK)
+  try:
+    if os.fstat(directory).st_uid != uid:
+      raise ValueError('editor profile not owned by observer')
+    fd = os.open('code.lock', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+    try:
+      info = os.fstat(fd)
+      if not stat.S_ISREG(info.st_mode) or info.st_uid != uid:
+        raise ValueError('unsupported editor PID metadata')
+      data = os.read(fd, 65)
+      if not re.fullmatch(rb'[1-9][0-9]{0,9}', data):
+        raise ValueError('invalid editor PID metadata')
+      return int(data)
+    finally:
+      os.close(fd)
+  finally:
+    os.close(directory)
+
+
+def editor_fresh(proc, process):
+  return fresh(proc, process) and proc.namespace(process['pid']) == proc.namespaces and os.readlink(proc.root/str(process['pid'])/'exe').removesuffix(' (deleted)') == process['exe']
+
+
+def editor_windows(rows, profiles, targets, processes, windows, proc):
+  """Profile PID + profile-derived IPC listener + kernel fd + compositor owner.
+
+  The short IPC hash alone is not identity. Require the full profile's PID file
+  and the same live native Code process owning that listener. Never connect to it.
+  """
+  hashes = {}
+  for wid, profile in profiles.items():
+    digest = hashlib.sha256(os.fsencode(profile)).hexdigest()[:8]
+    hashes.setdefault(digest, []).append(wid)
+  result, failed = {}, 0
+  runtime = os.environ.get('XDG_RUNTIME_DIR')
+  runtime = Path(runtime) if runtime and Path(runtime).is_absolute() else None
+  if runtime:
+    try:
+      info = runtime.lstat()
+      if not stat.S_ISDIR(info.st_mode) or info.st_uid != proc.uid or info.st_mode & 0o077:
+        runtime = None
+    except OSError:
+      runtime = None
+  for wid in targets:
+    profile = profiles[wid]
+    try:
+      pid = profile_pid(profile, proc.uid)
+      process = processes.get(pid)
+      if not process or Path(process['exe']).name not in ('code', 'code-insiders', 'codium') or process['namespaces'] != proc.namespaces or not editor_fresh(proc, process):
+        raise ValueError('editor identity unavailable')
+      digest = hashlib.sha256(os.fsencode(profile)).hexdigest()[:8]
+      if len(hashes[digest]) != 1:
+        raise ValueError('ambiguous editor profile hash')
+      owned = socket_inodes(proc, pid)
+      verified = False
+      for row in rows:
+        path = Path(row['path'])
+        runtime_socket = runtime and path.parent == runtime and re.fullmatch(r'vscode-'+digest+r'-[0-9][0-9.]{0,3}-main\.sock', path.name)
+        portable_socket = path.parent == profile and re.fullmatch(r'[0-9][0-9.]{0,3}-main\.sock', path.name)
+        if row['state'] != 'LISTEN' or pid not in row['pids'] or row['local'] not in owned or not (runtime_socket or portable_socket):
+          continue
+        info = path.lstat()
+        if stat.S_ISSOCK(info.st_mode) and info.st_uid == proc.uid:
+          verified = True
+      if not verified or profile_pid(profile, proc.uid) != pid or not editor_fresh(proc, process):
+        raise ValueError('editor IPC ownership unavailable or changed')
+      # Match the kernel-verified editor itself, not arbitrary descendant apps.
+      # Electron may own multiple windows: never select one using focus/title.
+      result[wid] = [{**window, 'association': 'workspace-editor-profile', 'editor_pid': pid, 'workspace_id': wid} for window in windows.get(pid, [])]
+    except (OSError, ValueError, TypeError):
+      failed += 1
+  return result, {'state': 'partial' if failed else 'ok' if targets else 'not-needed', 'profiles_checked': len(targets), 'unavailable_profiles': failed}
+
+
 def herdr_clients(rows, sessions, processes, windows, proc):
   """Identify session servers by API listeners, then their local frontend peers."""
   peers = {}
@@ -56,19 +151,7 @@ def herdr_clients(rows, sessions, processes, windows, proc):
   result, owned = {}, {}
   def owns_socket(pid, inode):
     if pid not in owned:
-      owned[pid] = set()
-      try:
-        for index, fd in enumerate((proc.root/str(pid)/'fd').iterdir()):
-          if index >= 1024:
-            break
-          try:
-            target = os.readlink(fd)
-            if re.fullmatch(r'socket:\[\d+\]', target):
-              owned[pid].add(int(target[8:-1]))
-          except OSError:
-            continue
-      except OSError:
-        pass
+      owned[pid] = socket_inodes(proc, pid)
     return inode in owned[pid]
   def herdr_process(pid):
     process = processes.get(pid)
@@ -108,6 +191,8 @@ def location(matches, reason='no verified window association'):
     detail = reason
   elif any(row['association'] == 'herdr-session-client' for row in windows):
     detail = 'attached terminal location; agent pane visibility is not verified'
+  elif any(row['association'] == 'workspace-editor-profile' for row in windows):
+    detail = 'workspace editor profile location; remote connection and agent visibility are not verified'
   else:
     detail = 'process ancestry/window ownership; visibility is not verified'
   if count > 1:
@@ -156,7 +241,7 @@ def compositor_windows(clients, monitors, workspaces, processes, proc):
   return result, skipped
 
 
-def discover(query, proc, processes, records, sessions, unavailable):
+def discover(query, proc, processes, records, sessions, unavailable, profiles=None):
   if proc.container_observer or not proc.namespaces:
     for record in records:
       record['desktop'] = {'state': 'unavailable', 'windows': [], 'detail': 'desktop association requires a host observer'}
@@ -172,14 +257,22 @@ def discover(query, proc, processes, records, sessions, unavailable):
     for value in records + sessions:
       value['desktop'] = {'state': 'unavailable', 'windows': [], 'detail': 'Hyprland metadata unavailable'}
     return {'state': 'unavailable', 'detail': 'Hyprland metadata unavailable'}
-  session_windows, peer_state = {}, 'not-needed'
-  if any(session.get('_socket_path') for session in sessions):
+  profiles = profiles or {}
+  targets = {r['container']['workspace_id'] for r in records if r['boundary'] == 'container' and r.get('container') and r['container']['workspace_id'] in profiles}
+  herdr_needed = any(session.get('_socket_path') for session in sessions)
+  session_windows, peer_state, socket_state, rows = {}, 'not-needed', 'not-needed', []
+  if targets or herdr_needed:
     try:
       rows = socket_rows(query(['ss', '-xHapn'], json_output=False))
-      session_windows = herdr_clients(rows, sessions, processes, windows, proc)
-      peer_state = 'ok' if rows else 'unavailable'
+      socket_state = 'ok' if rows else 'unavailable'
+      if herdr_needed:
+        session_windows = herdr_clients(rows, sessions, processes, windows, proc)
+        peer_state = socket_state
     except (unavailable, OSError, ValueError, TypeError, KeyError):
-      peer_state = 'unavailable'
+      socket_state = 'unavailable'
+      if herdr_needed:
+        peer_state = 'unavailable'
+  editors, editor_coverage = editor_windows(rows, profiles, targets, processes, windows, proc)
   for session in sessions:
     reason = 'no attached local Herdr client window identified' if peer_state != 'unavailable' else 'local Herdr peer metadata unavailable'
     session['desktop'] = location(session_windows.get(session['name'], []), reason)
@@ -196,5 +289,8 @@ def discover(query, proc, processes, records, sessions, unavailable):
     if not matches:
       for evidence in record['herdr']:
         matches.extend(session_windows.get(evidence['session'], []))
+    if not matches and record['boundary'] == 'container' and record.get('container'):
+      if proc.namespace(pid) == process['namespaces']:
+        matches.extend(editors.get(record['container']['workspace_id'], []))
     record['desktop'] = location(matches, 'no verified GUI association; background/container processes are not assigned by guesswork')
-  return {'state': 'partial' if skipped or peer_state == 'unavailable' else 'ok', 'herdr_peers': peer_state, 'skipped_windows': skipped}
+  return {'state': 'partial' if skipped or socket_state == 'unavailable' or editor_coverage['state'] == 'partial' else 'ok', 'herdr_peers': peer_state, 'unix_peers': socket_state, 'vscode_profiles': editor_coverage, 'skipped_windows': skipped}

@@ -74,6 +74,22 @@ omarchy agent --agent codex --directory ~/Projects/project --host --installed-on
 
 `--agent=NAME` and `--directory=PATH` are also accepted. These options do not save defaults. The project is entered again inside a newly launched terminal so the launch does not depend on a terminal service inheriting its caller's working directory.
 
+### Start in the current terminal
+
+**The direct container CLI mounts the selected directory read-write.** It does not create an isolated clone. Select an existing workspace clone's project directory if you do not want to expose the original checkout.
+
+Use `--inline` to run in the current terminal, including a Herdr pane, instead of opening a new terminal window:
+
+```bash
+omarchy agent --inline --container --agent pi --directory /path/to/project
+```
+
+The image selector and interactive agent use the current terminal. The command does not change the saved execution default. Omit `--container` to use that default. Without a terminal, the container does not allocate a pseudo-terminal or show the interactive image selector.
+
+Running inside a Herdr pane does not guarantee that Herdr identifies the container agent. Its foreground host process can be Podman. Pane labels and a verified link between the pane and the container process are separate observations.
+
+### Check without launching
+
 `--check` checks the selected combination without starting an agent, creating a project, inspecting credentials, or pulling an image:
 
 ```bash
