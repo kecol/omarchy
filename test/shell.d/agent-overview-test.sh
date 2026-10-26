@@ -64,6 +64,26 @@ assertNode.equal(result.omitted,5)
 assertNode.equal(result.groups[0].rows.length,200)
 pass('large snapshots cap rendered cards without silently lowering identified totals')
 
+const project={state:'matched',host_path:'/projects/<numerai>\u202e',container_path:'/workspace/abc123',project_id:'abc123',access:'read-write',privateMarker}
+let projectCard=parse({processes:[processRow(70,{boundary:'container',container:{name:'agent',kind:'agent',project}})]}).groups[0].rows[0]
+assertNode.equal(projectCard.project.host,'/projects/<numerai>\\u202e')
+assertNode.equal(projectCard.project.target,'/workspace/abc123')
+assertNode.equal(projectCard.project.id,'abc123')
+assertNode.equal(projectCard.project.access,'read-write')
+assertNode.ok(!JSON.stringify(projectCard).includes(privateMarker))
+for(const state of ['unavailable','ambiguous']) {
+ projectCard=parse({processes:[processRow(71,{boundary:'container',container:{kind:'agent',project:{...project,state}}})]}).groups[0].rows[0]
+ assertNode.equal(projectCard.project.state,state)
+ assertNode.equal(projectCard.project.host,'')
+ assertNode.equal(projectCard.project.access,'unknown')
+ assertNode.equal(projectCard.project.target,'/workspace/abc123')
+}
+projectCard=parse({processes:[processRow(72,{boundary:'container',container:{kind:'agent',project:{...project,access:'invented'}}})]}).groups[0].rows[0]
+assertNode.equal(projectCard.project.state,'unavailable')
+assertNode.equal(projectCard.project.host,'')
+assertNode.equal(parse({processes:[codex]}).groups[0].rows[0].project,null)
+pass('project cards retain host path, internal path, and key without confusing ambiguity or mount access with safety')
+
 const stateSource=fs.readFileSync(base+'overview/State.qml','utf8')
 function extract(name) {
   const begin=stateSource.indexOf('function '+name+'(')

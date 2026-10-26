@@ -43,6 +43,25 @@ Duplicate reports for the same agent pane produce one grouped row. Different rep
 
 **Container does not mean safe.** A container can have writable host mounts. This report identifies execution boundaries; it does not audit filesystem permissions, credential exposure, or network isolation. Use `omarchy agent inspect`, `omarchy agent audit` without `--fix`, or `omarchy workspace doctor <name>` for their respective runtime details and checks.
 
+## Project directories and internal paths
+
+For an Omarchy agent harness, the report and overview keep the host project directory and internal container path separate:
+
+```text
+Project directory (host bind): /home/user/projects/numerai
+Observed project mount access: Read-write
+Container project path: /workspace/3a80c80a35caa9fb
+Project key: 3a80c80a35caa9fb
+```
+
+The internal path and project key let you match the card to a terminal that shows only an opaque workspace path. The project key is not a desktop workspace number, a Herdr workspace ID, or an editor-container workspace ID. Registered editor workspaces retain their own workspace name and ID.
+
+The host directory comes from the actual matching project bind mount reported by the local engine, not from a window title or a guessed path. The process and container must match in PID and mount namespaces. The container init process identity is rechecked before its project mapping is attached. Access means the observed project mount's read-write or read-only setting; it does not describe every filesystem permission or prove isolation.
+
+Missing, malformed, stale, or conflicting metadata shows an unavailable or ambiguous host mapping instead of selecting a directory. A valid declared internal path and project key can remain visible in that case, explicitly marked as declared rather than verified. The process's current directory remains separate in details; an agent can change into a subdirectory after launch. Host agent process directories also appear directly on their cards.
+
+Project mapping reads only selected project bind metadata under `/workspace`, not arbitrary home/credential mounts or project file contents. It adds no background polling and requires no restart of the running agent or container. The overview remains an on-demand snapshot; use Refresh to update it.
+
 ## Automatic desktop location
 
 When a local window association can be established, the report shows its monitor and Omarchy desktop workspace automatically. No manual mappings are required:
