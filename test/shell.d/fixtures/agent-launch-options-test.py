@@ -58,6 +58,8 @@ class LauncherTests(unittest.TestCase):
     self.assertEqual(result.returncode, 0, result.stderr)
     self.assertFalse(self.log.exists())
     result = self.launch('--check', '--agent', 'codex', '--container')
+    self.assertEqual(result.returncode, 0, result.stderr)
+    result = self.launch('--check', '--agent', 'claude', '--container')
     self.assertNotEqual(result.returncode, 0)
     self.assertFalse(self.log.exists())
 

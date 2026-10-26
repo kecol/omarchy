@@ -1,116 +1,152 @@
 #!/bin/bash
 
-# omarchy:summary=Build a coding harness container image
+# omarchy:summary=Build and validate a reviewed coding harness image
 # omarchy:group=harness
-# omarchy:args=<pi> [version]
-# omarchy:examples=omarchy harness build pi | omarchy harness build pi 0.99.1
+# omarchy:args=<harness> [version] [--candidate-only]
+# omarchy:examples=omarchy harness build pi | omarchy harness build codex
 
 set -euo pipefail
 
-usage() {
-  cat <<'USAGE'
-Usage: omarchy harness build <pi> [version]
-
-Builds a rootless container image for the selected coding harness. When the Pi
-version is omitted, the latest version reported by mise is used.
-USAGE
-}
-
-if (( $# < 1 || $# > 2 )) || [[ ${1:-} == "-h" || ${1:-} == "--help" ]]; then
-  usage
-  exit $(( $# == 0 ? 1 : 0 ))
+if (( $# < 1 )); then
+  echo "Usage: omarchy harness build <harness> [version] [--candidate-only]" >&2
+  exit 1
 fi
-
 harness=$1
-case "$harness" in
-  pi) ;;
-  *)
-    echo "Unsupported harness: $harness" >&2
-    usage >&2
-    exit 1
-    ;;
-esac
+shift
+version=
+candidate_only=false
+for arg in "$@"; do
+  case "$arg" in
+    --candidate-only) candidate_only=true ;;
+    --*) echo "Unsupported build option" >&2; exit 1 ;;
+    *) [[ -z $version ]] || exit 1; version=$arg ;;
+  esac
+done
+metadata=$("$OMARCHY_PATH/bin/omarchy-harness-info" "$harness")
+context=$(jq -r '.context' <<<"$metadata")
+containerfile=$(jq -r '.containerfile' <<<"$metadata")
+ignorefile=$(jq -r '.ignorefile' <<<"$metadata")
+tool=$(jq -r '.executable' <<<"$metadata")
+version_arg=$(jq -r '.version_build_arg' <<<"$metadata")
+version_template=$(jq -r '.version_output' <<<"$metadata")
 
 if omarchy-cmd-missing podman; then
   echo "Podman is not installed. Install it with: omarchy pkg add podman" >&2
   exit 1
 fi
-
-if ! rootless=$(podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null); then
-  echo "Podman is installed but is not responding." >&2
-  exit 1
-fi
-if [[ $rootless != "true" ]]; then
+# Image preparation is always local, irrespective of remote engine defaults.
+podman() { command podman --remote=false "$@"; }
+if ! rootless=$(podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null) || [[ $rootless != "true" ]]; then
   echo "Harness images require rootless Podman." >&2
   exit 1
 fi
 
-version=${2:-}
+lock_dir="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/agents/build-locks"
+[[ ! -L $lock_dir ]] || { echo "Unsafe harness lock directory" >&2; exit 1; }
+mkdir -p -m 700 "$lock_dir"
+[[ -d $lock_dir && -O $lock_dir && ! -L $lock_dir/$harness.lock ]] || exit 1
+chmod 700 "$lock_dir"
+[[ ! -e $lock_dir/$harness.lock || -f $lock_dir/$harness.lock ]] || { echo "Unsafe harness lock file" >&2; exit 1; }
+exec {build_lock}>>"$lock_dir/$harness.lock"
+flock -n "$build_lock" || { echo "This harness is already being prepared." >&2; exit 1; }
+
 if [[ -z $version ]]; then
-  if omarchy-cmd-missing mise; then
-    echo "Mise is required to resolve the latest Pi version." >&2
-    exit 1
-  fi
-  version=$(MISE_MINIMUM_RELEASE_AGE=0 mise latest pi)
+  version=$("$OMARCHY_PATH/bin/omarchy-harness-info" "$harness" --latest)
 fi
-
 if [[ ! $version =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?([+-][A-Za-z0-9.-]+)?$ ]]; then
-  echo "Invalid Pi version: $version" >&2
+  echo "Invalid $harness version: $version" >&2
   exit 1
 fi
 
-context="$OMARCHY_PATH/containers/harnesses/$harness"
-containerfile="$context/Containerfile"
 image="localhost/omarchy-harness-$harness"
-
-if [[ ! -f $containerfile ]]; then
-  echo "Harness container definition not found: $containerfile" >&2
-  exit 1
-fi
-
-# Build privately first: a failed build or version check must not replace :latest.
 work=$(mktemp -d)
-candidate="$image:build-$(< /proc/sys/kernel/random/uuid)"
+uid=$(id -u)
+gid=$(id -g)
+nonce=$(< /proc/sys/kernel/random/uuid)
+candidate="$image:build-$nonce"
+verify_home="omarchy-harness-verify-$nonce"
+home_created=false
 cleanup() {
-  # With no explicit name, Podman untag would remove every tag on this image.
   podman untag "$candidate" "$candidate" >/dev/null 2>&1 || true
+  if [[ $home_created == "true" ]]; then podman volume rm "$verify_home" >/dev/null 2>&1 || true; fi
   rm -rf "$work"
 }
 trap cleanup EXIT
 
+# Public recipes do not need ambient registry login credentials.
+printf '%s\n' '{"auths":{}}' >"$work/registry-auth.json"
 echo "Building $harness harness $version"
-podman build \
-  --pull=newer \
-  --build-arg "HARNESS_UID=$(id -u)" \
-  --build-arg "HARNESS_GID=$(id -g)" \
-  --build-arg "PI_VERSION=$version" \
-  --label "org.omarchy.harness=$harness" \
-  --label "org.omarchy.harness.version=$version" \
-  --iidfile "$work/image-id" \
-  --tag "$candidate" \
-  --file "$containerfile" \
-  "$context"
+systemd-run --user --scope --quiet --collect --unit="omarchy-harness-build-$harness-$nonce" \
+  --property=MemoryMax=2G --property=CPUQuota=200% --property=TasksMax=512 \
+  nice -n 5 timeout --kill-after=10 1800 podman --remote=false build \
+  --pull=newer --authfile "$work/registry-auth.json" --http-proxy=false --memory=2g --cpu-quota=200000 --cpu-period=100000 \
+  --build-arg "HARNESS_UID=$uid" --build-arg "HARNESS_GID=$gid" \
+  --build-arg "$version_arg=$version" \
+  --label "org.omarchy.harness=$harness" --label "org.omarchy.harness.version=$version" \
+  --iidfile "$work/image-id" --tag "$candidate" --ignorefile "$ignorefile" --file "$containerfile" "$context"
 
 image_id=$(<"$work/image-id")
 image_id="sha256:${image_id#sha256:}"
-if [[ ! $image_id =~ ^sha256:[a-f0-9]{64}$ ]]; then
-  echo "Build returned an invalid image ID; current image is unchanged." >&2
+[[ $image_id =~ ^sha256:[a-f0-9]{64}$ ]] || { echo "Build returned an invalid image ID; current image is unchanged." >&2; exit 1; }
+podman volume create --label org.omarchy.harness.verify=true "$verify_home" >/dev/null
+home_created=true
+mkdir "$work/project"
+verify=(run --rm --pull=never --network=none --http-proxy=false --read-only --userns=keep-id
+  --cap-drop=all --security-opt=no-new-privileges --memory=512m --cpus=1 --pids-limit=64
+  --tmpfs=/tmp:rw,nosuid,nodev,size=64m --tmpfs=/run:rw,nosuid,nodev,size=16m
+  --env=HOME=/home/agent --volume="$verify_home:/home/agent:U,rw")
+actual=$(timeout --kill-after=5 60 podman --remote=false "${verify[@]}" --entrypoint="$tool" "$image_id" --version)
+expected=${version_template/\{version\}/$version}
+if [[ $actual != "$expected" ]]; then
+  echo "Harness version verification failed; current image is unchanged." >&2
   exit 1
 fi
-actual=$(timeout 60 podman run --rm --pull=never --network=none --read-only \
-  --cap-drop=all --security-opt=no-new-privileges --memory=256m --pids-limit=64 \
-  --tmpfs=/tmp:rw,nosuid,nodev,size=64m --entrypoint=pi "$image_id" --version)
-if [[ $actual != "$version" ]]; then
-  echo "Pi version verification failed: expected $version, got $actual. Current image is unchanged." >&2
-  exit 1
-fi
+# Disposable project and empty container home only. No provider calls, host
+# auth/home mounts, SSH-agent forwarding, or engine sockets are involved.
+timeout --kill-after=5 60 podman --remote=false "${verify[@]}" \
+  --volume="$work/project:/workspace:rw,rprivate" --workdir=/workspace \
+  --entrypoint=/bin/bash "$image_id" -c '
+set -euo pipefail
+test "$(id -u)" = "$1"
+test "$(id -u)" != 0
+test "$HOME" = /home/agent
+printf fixture > /workspace/fixture
+printf home > "$HOME/fixture"
+printf tmp > /tmp/fixture
+! touch /omarchy-root-must-be-read-only 2>/dev/null
+test ! -S /run/podman/podman.sock
+test ! -S /var/run/docker.sock
+test -z "${SSH_AUTH_SOCK:-}"
+root_read_only=false
+while read -r mount_id parent device mount_root mount_path mount_options rest; do
+  if [[ $mount_path == "/" && ",$mount_options," == *,ro,* ]]; then root_read_only=true; fi
+done </proc/self/mountinfo
+[[ $root_read_only == "true" ]]
+caps_ok=false
+privileges_ok=false
+while read -r key value rest; do
+  if [[ $key == "CapEff:" && $value == "0000000000000000" ]]; then caps_ok=true; fi
+  if [[ $key == "NoNewPrivs:" && $value == "1" ]]; then privileges_ok=true; fi
+done </proc/self/status
+[[ $caps_ok == "true" && $privileges_ok == "true" ]]
+' harness-smoke "$uid"
+[[ $(<"$work/project/fixture") == "fixture" ]] || { echo "Project fixture validation failed; current image is unchanged." >&2; exit 1; }
 
-podman tag "$image_id" "$image:$version"
-if previous=$(podman image inspect --format '{{.Id}}' "$image:latest" 2>/dev/null); then
-  previous="sha256:${previous#sha256:}"
-  if [[ $previous =~ ^sha256:[a-f0-9]{64}$ && $previous != "$image_id" ]]; then
-    podman tag "$previous" "$image:previous"
+# Reopen the disposable home in a second fresh container: it must persist,
+# while the first container's tmpfs must not.
+timeout --kill-after=5 60 podman --remote=false "${verify[@]}" \
+  --entrypoint=/bin/bash "$image_id" -c 'test "$(cat "$HOME/fixture")" = home && test ! -e /tmp/fixture'
+
+if [[ $candidate_only == "true" ]]; then
+  printf 'Verified candidate image: %s\nStable agent tags are unchanged.\n' "$image_id"
+else
+  podman tag "$image_id" "$image:$version"
+  if previous=$(podman image inspect --format '{{.Id}}' "$image:latest" 2>/dev/null); then
+    previous="sha256:${previous#sha256:}"
+    if [[ $previous =~ ^sha256:[a-f0-9]{64}$ && $previous != $image_id ]]; then
+      podman tag "$previous" "$image:previous"
+    fi
   fi
+  podman tag "$image_id" "$image:latest"
+  echo "Built $image:$version and $image:latest (version and disposable runtime checks passed)"
 fi
-podman tag "$image_id" "$image:latest"
-echo "Built $image:$version and $image:latest (verified Pi $actual)"

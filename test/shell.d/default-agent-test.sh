@@ -9,6 +9,7 @@ trap 'rm -rf "$test_tmp"' EXIT
 
 mock_bin="$test_tmp/bin"
 test_home="$test_tmp/home"
+export XDG_DATA_HOME="$test_home/.local/share" XDG_STATE_HOME="$test_home/.local/state" XDG_CONFIG_HOME="$test_home/.config" XDG_CACHE_HOME="$test_home/.cache"
 agent_file="$test_home/.config/omarchy/defaults/agent"
 notification_history="$test_tmp/notification-history"
 agent_open_log="$test_tmp/agent-open"

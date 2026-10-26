@@ -1,0 +1,72 @@
+#!/bin/bash
+
+# omarchy:summary=Ensure a reviewed local harness image exists without starting an agent
+# omarchy:args=<harness> [--yes] [--version=VERSION]
+# omarchy:hidden=true
+
+set -euo pipefail
+harness=${1:?Usage: omarchy-harness-ensure <harness> [--yes] [--version=VERSION]}
+shift
+yes=false
+version=
+for arg in "$@"; do
+  case "$arg" in
+    --yes) yes=true ;;
+    --version=*) version=${arg#--version=}; [[ -n $version ]] || exit 1 ;;
+    *) echo "Unsupported preparation option" >&2; exit 1 ;;
+  esac
+done
+metadata=$("$OMARCHY_PATH/bin/omarchy-harness-info" "$harness")
+name=$(jq -r '.display_name' <<<"$metadata")
+if [[ -n $version && ! $version =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?([+-][A-Za-z0-9.-]+)?$ ]]; then
+  echo "Invalid preparation version" >&2
+  exit 1
+fi
+if omarchy-cmd-missing podman; then
+  echo "Podman is missing. Install it explicitly with: omarchy pkg add podman" >&2
+  exit 1
+fi
+if ! rootless=$(timeout 5 podman --remote=false info --format '{{.Host.Security.Rootless}}' 2>/dev/null) || [[ $rootless != "true" ]]; then
+  echo "Local rootless Podman is unavailable. Run: omarchy agent container doctor --quick" >&2
+  exit 1
+fi
+reference="localhost/omarchy-harness-$harness:${version:-latest}"
+image_id() {
+  local data
+  data=$(timeout 5 podman --remote=false image inspect --format '{{json .}}' "$1") || return 1
+  [[ -n $data ]] || return 1
+  jq -er --arg harness "$harness" --arg version "$version" '
+    select(.Labels["org.omarchy.harness"] == $harness)
+    | select($version == "" or .Labels["org.omarchy.harness.version"] == $version)
+    | .Id | select(type == "string" and test("^(sha256:)?[a-f0-9]{64}$"))
+    | if startswith("sha256:") then . else "sha256:" + . end
+  ' <<<"$data"
+}
+if timeout 5 podman --remote=false image exists "$reference"; then
+  # Reuse, do not update or repeatedly test the user's existing image.
+  if ! image_id "$reference"; then
+    echo "Existing image metadata is invalid; no image was rebuilt or selected." >&2
+    exit 1
+  fi
+  exit 0
+else
+  code=$?
+  [[ $code == 1 ]] || { echo "Local image availability is unknown; preparation stopped." >&2; exit 1; }
+fi
+if [[ $yes != "true" ]]; then
+  if [[ ! -t 0 || ! -t 2 ]]; then
+    echo "Image preparation needs explicit approval. Run: omarchy harness build $harness" >&2
+    exit 1
+  fi
+  printf '%s\n' "$name needs container setup. This downloads/builds a reviewed image and runs offline disposable checks." >&2
+  printf '%s\n' 'No host agent install, account-home copy, authentication test, or existing-session change is required.' >&2
+  gum confirm --default=false "Prepare $name container image?" || exit 130
+fi
+# Public release metadata and downloads occur only after that approval or --yes.
+if [[ -z $version ]]; then version=$("$OMARCHY_PATH/bin/omarchy-harness-info" "$harness" --latest); fi
+"$OMARCHY_PATH/bin/omarchy-harness-build" "$harness" "$version" >&2
+reference="localhost/omarchy-harness-$harness:$version"
+if ! image_id "$reference"; then
+  echo "Prepared image identity could not be checked; no agent was started." >&2
+  exit 1
+fi

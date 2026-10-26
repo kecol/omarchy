@@ -1,0 +1,7 @@
+#!/bin/bash
+
+# omarchy:summary=Read reviewed harness metadata or resolve its public release
+# omarchy:args=<harness> [--latest]
+# omarchy:hidden=true
+
+exec python3 -I -B "$OMARCHY_PATH/default/agents/harness.py" "$@"

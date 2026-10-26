@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "name": "pi",
+  "display_name": "Pi",
+  "mise_tool": "pi",
+  "executable": "pi",
+  "version_build_arg": "PI_VERSION",
+  "version_output": "{version}"
+}

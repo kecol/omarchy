@@ -8,6 +8,9 @@ test_tmp=$(mktemp -d)
 trap 'rm -rf "$test_tmp"' EXIT
 
 mock_bin="$test_tmp/bin"
+test_home="$test_tmp/home"
+mkdir -p "$test_home"
+export XDG_DATA_HOME="$test_home/.local/share" XDG_STATE_HOME="$test_home/.local/state" XDG_CONFIG_HOME="$test_home/.config" XDG_CACHE_HOME="$test_home/.cache"
 podman_log="$test_tmp/podman-log"
 mise_log="$test_tmp/mise-log"
 mkdir -p "$mock_bin"
@@ -19,6 +22,7 @@ SH
 
 cat >"$mock_bin/podman" <<'SH'
 #!/bin/bash
+[[ ${1:-} != "--remote=false" ]] || shift
 if [[ $1 == "info" ]]; then
   printf '%s\n' "${OMARCHY_TEST_PODMAN_ROOTLESS:-true}"
 elif [[ $1 == "build" ]]; then
@@ -30,6 +34,15 @@ elif [[ $1 == "build" ]]; then
       PI_VERSION=*) printf '%s' "${1#*=}" >"$OMARCHY_TEST_PODMAN_LOG.version" ;;
     esac
     shift
+  done
+elif [[ $1 == "volume" ]]; then
+  exit 0
+elif [[ $1 == "run" && " $* " == *" --entrypoint=/bin/bash "* ]]; then
+  for arg in "$@"; do
+    if [[ $arg == --volume=*:/workspace:rw,rprivate ]]; then
+      directory=${arg#--volume=}; directory=${directory%:/workspace:rw,rprivate}
+      printf fixture >"$directory/fixture"
+    fi
   done
 elif [[ $1 == "run" ]]; then
   printf '%s\0' "$@" >"$OMARCHY_TEST_PODMAN_LOG.run"
@@ -51,17 +64,22 @@ SH
 
 cat >"$mock_bin/mise" <<'SH'
 #!/bin/bash
-printf '%s\0' "$@" >"$OMARCHY_TEST_MISE_LOG"
-[[ ${OMARCHY_TEST_MISE_FAIL:-false} != "true" ]] || exit 1
+base=$(cd -- "$(dirname -- "$0")/.." && pwd)
+printf '%s\0' "$@" >"$base/mise-log"
 [[ $1 == "latest" && $2 == "pi" ]] || exit 1
 printf '0.99.1\n'
 SH
 
-chmod +x "$mock_bin/omarchy-cmd-missing" "$mock_bin/podman" "$mock_bin/mise"
+cat >"$mock_bin/systemd-run" <<'SH'
+#!/bin/bash
+while [[ $1 != "nice" ]]; do shift; done
+exec "$@"
+SH
+chmod +x "$mock_bin/omarchy-cmd-missing" "$mock_bin/podman" "$mock_bin/mise" "$mock_bin/systemd-run"
 
 run_build() {
   PATH="$mock_bin:/usr/bin" \
-    OMARCHY_PATH="$ROOT" \
+    HOME="$test_home" OMARCHY_PATH="$ROOT" \
     OMARCHY_TEST_PODMAN_LOG="$podman_log" \
     OMARCHY_TEST_MISE_LOG="$mise_log" \
     "$ROOT/bin/omarchy-harness-build" "$@"
@@ -125,7 +143,7 @@ pass "harness build accepts an explicit Pi version without resolving latest"
 if run_build pi latest >"$test_tmp/invalid-output" 2>&1; then
   fail "harness build rejects an unpinned Pi version"
 fi
-grep -Fq 'Invalid Pi version: latest' "$test_tmp/invalid-output" || fail "invalid version failure names the value"
+grep -Fq 'Invalid pi version: latest' "$test_tmp/invalid-output" || fail "invalid version failure names the value"
 pass "harness build rejects an unpinned Pi version"
 
 if OMARCHY_TEST_PODMAN_ROOTLESS=false run_build pi >"$test_tmp/rootful-output" 2>&1; then
