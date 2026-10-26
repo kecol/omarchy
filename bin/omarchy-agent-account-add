@@ -6,6 +6,13 @@
 
 set -uo pipefail
 
+# Account sign-in is an explicit host maintenance operation, not an agent
+# launch. Preserve its existing CLI/browser flow without changing saved mode.
+if [[ -d ${XDG_DATA_HOME:-$HOME/.local/share}/omarchy/agents/command-guards/bin ]]; then
+  source "$OMARCHY_PATH/default/agents/guard-path.sh" || exit 1
+  omarchy_agent_guard_unpath
+fi
+
 # --check prints, per provider, whether adding one now would be its first
 # sign-in, an additional account, or not possible yet. --events is for the
 # agents panel: progress arrives as `@@omarchy <event> <detail>` lines mixed

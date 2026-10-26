@@ -11,6 +11,10 @@ if (( $# != 1 )) || [[ ! $1 =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
   exit 1
 fi
 agent=$1
+if [[ -d ${XDG_DATA_HOME:-$HOME/.local/share}/omarchy/agents/command-guards/bin ]]; then
+  source "$OMARCHY_PATH/default/agents/guard-path.sh"
+  omarchy_agent_guard_unpath
+fi
 legacy_shim() {
   LC_ALL=C head -c 4096 -- "$1" | grep -q '^mise use -g'
 }
@@ -19,6 +23,11 @@ if ! omarchy-cmd-present "$agent"; then
   exit 1
 fi
 path=$(type -P -- "$agent")
+guard_dir="${XDG_DATA_HOME:-$HOME/.local/share}/omarchy/agents/command-guards/bin"
+if [[ -d $guard_dir && $(readlink -f -- "$path") == "$(readlink -f -- "$guard_dir")/"* ]]; then
+  echo "Host command resolves to a guard alias; fix PATH or use the real executable path." >&2
+  exit 1
+fi
 
 # Preserve the launcher's precedence for user-installed Cursor and Muse.
 if [[ $agent == "cursor-agent" || $agent == "muse" ]] &&

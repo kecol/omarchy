@@ -119,6 +119,10 @@ if [[ $execution_mode != "host" && $execution_mode != "container" ]]; then
   echo "Invalid agent execution mode: $execution_mode" >&2
   exit 1
 fi
+if [[ $execution_mode == "host" && -d ${XDG_DATA_HOME:-$HOME/.local/share}/omarchy/agents/command-guards/bin ]]; then
+  source "$OMARCHY_PATH/default/agents/guard-path.sh" || exit 1
+  omarchy_agent_guard_unpath
+fi
 # OpenClaw's launcher sets OpenClaw up when the package became the seed before
 # this user's OpenClaw moved, so with the package a missing command is its to fix.
 # Container launches resolve their command inside the harness, not on the host.
@@ -316,6 +320,12 @@ if [[ $execution_mode == "container" ]]; then
   if [[ $oneshot == "true" ]]; then
     command=(env OMARCHY_AGENT_ONESHOT=1 "${command[@]}")
   fi
+fi
+
+# Resolve the Host escape inside a new terminal too: its service may rebuild
+# PATH and reintroduce guards after this launcher's availability checks.
+if [[ $execution_mode == "host" && -d ${XDG_DATA_HOME:-$HOME/.local/share}/omarchy/agents/command-guards/bin ]]; then
+  command=("$script_dir/omarchy-agent-guards" host -- "${command[@]}")
 fi
 
 if [[ $inline == "true" ]]; then
