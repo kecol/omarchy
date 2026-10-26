@@ -46,6 +46,7 @@ class StatusTests(unittest.TestCase):
     self.addCleanup(self.sock.close)
     self.sessions=[{'name':'default','running':True,'socket_path':str(self.root/'herdr.sock')}]
     self.session_agents={}
+    self.session_snapshots={}
 
   def add_process(self, pid, comm, exe, namespace=('pid:[1]', 'mnt:[1]'), start=100, command=b'', cwd='/project', ppid=1):
     directory = self.proc_root/str(pid)
@@ -80,6 +81,10 @@ class StatusTests(unittest.TestCase):
       rows=self.agent_rows if args[2]=='default' else self.session_agents.get(args[2],[])
       if isinstance(rows,Exception):raise rows
       return {'result':{'agents':rows}}
+    if args[:2] == ['herdr','--session'] and args[3:] == ['api','snapshot']:
+      snapshot=self.session_snapshots.get(args[2])
+      if snapshot is None:raise m.Unavailable('labels unavailable')
+      return {'result':{'snapshot':snapshot}}
     if args[:5] == ['herdr','--session','default','pane','process-info']:
       return {'result':{'process_info':self.info[args[-1]]}}
     if args == ['omarchy-agent-mode']:
@@ -361,6 +366,104 @@ class StatusTests(unittest.TestCase):
     self.assertEqual(len(report['herdr_sessions']),1)
     self.assertEqual(report['coverage']['herdr']['state'],'partial')
     self.assertEqual(len([c for c in self.calls if c[-2:]==['agent','list']]),1)
+
+  def label_fixture(self):
+    self.add_process(10,'pi','/pi')
+    self.row(workspace_id='w1',tab_id='w1:t1')
+    snapshot={'workspaces':[{'workspace_id':'w1','label':'host - Work'}], 'tabs':[{'workspace_id':'w1','tab_id':'w1:t1','label':'pi host'}], 'agents':[{'agent':'pi','pane_id':'w1:p1','workspace_id':'w1','tab_id':'w1:t1','terminal_title':SECRET}]}
+    self.session_snapshots['default']=snapshot
+    return snapshot
+
+  def test_readable_herdr_path_and_stable_ids_are_both_reported(self):
+    self.label_fixture()
+    report=self.report()
+    evidence=report['processes'][0]['herdr'][0]
+    self.assertEqual((evidence['workspace_id'],evidence['tab_id']),('w1','w1:t1'))
+    self.assertEqual((evidence['workspace_label'],evidence['tab_label']),('host - Work','pi host'))
+    self.assertEqual(report['herdr_sessions'][0]['labels_state'],'ok')
+    pane=report['herdr_sessions'][0]['panes'][0]
+    self.assertEqual(pane['tab_label'],'pi host')
+    output=io.StringIO()
+    with contextlib.redirect_stdout(output):m.print_report(report)
+    self.assertIn('Local / host - Work / pi host / w1:p1',output.getvalue())
+    self.assertIn('tab w1:t1',output.getvalue())
+    self.assertNotIn(SECRET,json.dumps(report))
+    self.assertEqual(len([c for c in self.calls if c[-2:]==['api','snapshot']]),1)
+
+  def test_missing_labels_do_not_remove_pid_matches_or_invent_names(self):
+    self.label_fixture();self.session_snapshots.clear()
+    report=self.report()
+    self.assertEqual(len(report['processes']),1)
+    self.assertTrue(report['processes'][0]['corroborated'])
+    evidence=report['processes'][0]['herdr'][0]
+    self.assertIsNone(evidence['tab_label'])
+    self.assertEqual(evidence['tab_id'],'w1:t1')
+    self.assertEqual(report['herdr_sessions'][0]['labels_state'],'unavailable')
+    self.assertEqual(report['herdr_sessions'][0]['state'],'partial')
+    self.assertIn('Local / w1 / w1:t1 / w1:p1',m.herdr_display_path(evidence))
+
+  def test_renames_change_labels_not_process_or_pane_identity(self):
+    snapshot=self.label_fixture()
+    first=self.report()
+    snapshot['tabs'][0]['label']='new tab'
+    snapshot['workspaces'][0]['label']='new workspace'
+    second=self.report()
+    self.assertEqual(first['processes'][0]['identity'],second['processes'][0]['identity'])
+    self.assertEqual(second['processes'][0]['herdr'][0]['tab_label'],'new tab')
+    self.assertEqual(second['herdr_sessions'][0]['panes'][0]['pane'],'w1:p1')
+    self.assertEqual(len(second['processes']),1)
+
+  def test_moved_pane_or_wrong_parent_cannot_borrow_another_tab_label(self):
+    snapshot=self.label_fixture()
+    snapshot['agents'][0]['tab_id']='w1:t2'
+    report=self.report()
+    self.assertIsNone(report['processes'][0]['herdr'][0]['tab_label'])
+    self.assertEqual(report['herdr_sessions'][0]['labels_state'],'partial')
+    snapshot['agents'][0]['tab_id']='w1:t1'
+    snapshot['tabs'][0]['workspace_id']='w2'
+    self.assertIsNone(self.report()['processes'][0]['herdr'][0]['tab_label'])
+
+  def test_labels_are_bounded_and_console_control_characters_are_escaped(self):
+    snapshot=self.label_fixture()
+    snapshot['tabs'][0]['label']='\x1b[31m\n\u202epi host'
+    report=self.report()
+    output=io.StringIO()
+    with contextlib.redirect_stdout(output):m.print_report(report)
+    self.assertNotIn('\x1b',output.getvalue())
+    self.assertNotIn('\u202e',output.getvalue())
+    self.assertIn('\\u001b',output.getvalue())
+    snapshot['tabs'][0]['label']='x'*257
+    self.assertIsNone(self.report()['processes'][0]['herdr'][0]['tab_label'])
+
+  def test_duplicate_snapshot_ids_and_bad_shape_do_not_supply_labels(self):
+    snapshot=self.label_fixture()
+    snapshot['tabs'].append(dict(snapshot['tabs'][0]))
+    self.assertIsNone(self.report()['processes'][0]['herdr'][0]['tab_label'])
+    snapshot['tabs']={}
+    report=self.report()
+    self.assertEqual(report['herdr_sessions'][0]['labels_state'],'unavailable')
+    self.assertEqual(len(report['processes']),1)
+
+  def test_remote_records_are_never_given_local_display_names(self):
+    self.label_fixture()
+    self.agent_rows[0]['machine_id']='remote'
+    report=self.report()
+    pane=report['herdr_sessions'][0]['panes'][0]
+    self.assertIsNone(pane['workspace_label'])
+    self.assertEqual(pane['match_state'],'remote-unverified')
+    self.assertTrue(m.herdr_display_path(pane).startswith('Remote (unverified)'))
+    self.assertFalse(any(c[-2:]==['api','snapshot'] for c in self.calls))
+
+  def test_ids_absent_skip_label_query_and_conflicting_pane_ids_drop_names(self):
+    self.row()
+    self.assertEqual(self.report()['herdr_sessions'][0]['labels_state'],'not-reported')
+    self.assertFalse(any(c[-2:]==['api','snapshot'] for c in self.calls))
+    self.agent_rows.clear()
+    self.label_fixture()
+    self.row(workspace_id='w1',tab_id='w1:t2')
+    pane=self.report()['herdr_sessions'][0]['panes'][0]
+    self.assertIsNone(pane['tab_id'])
+    self.assertIsNone(pane['tab_label'])
 
   def test_query_drops_remote_context_and_agent_socket(self):
     names=('CONTAINER_HOST','CONTAINER_CONNECTION','DOCKER_HOST','SSH_AUTH_SOCK','HERDR_MACHINE','HERDR_MACHINE_ID','HERDR_REMOTE','HERDR_SESSION')

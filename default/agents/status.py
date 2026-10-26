@@ -229,6 +229,59 @@ def container_snapshot(query, proc):
   return result
 
 
+HERDR_LABEL_FIELDS = ('workspace_id', 'workspace_label', 'tab_id', 'tab_label')
+
+
+def herdr_identifier(value):
+  return value if isinstance(value, str) and IDENTIFIER.fullmatch(value) else None
+
+
+def herdr_display_labels(query, prefix, observations):
+  targets = [row for row in observations if not row['remote'] and row['workspace_id'] and row['tab_id']]
+  if not targets:
+    return 'not-needed' if not observations or all(row['remote'] for row in observations) else 'not-reported'
+  snapshot = query([*prefix, 'api', 'snapshot'])['result']['snapshot']
+  if not isinstance(snapshot, dict):
+    raise Unavailable('unsupported label metadata')
+  for key, limit in (('workspaces', 128), ('tabs', 512), ('agents', 256)):
+    if not isinstance(snapshot.get(key), list) or len(snapshot[key]) > limit:
+      raise Unavailable('unsupported label metadata')
+  def unique(rows, id_key):
+    result = {}
+    for row in rows:
+      identity = herdr_identifier(row.get(id_key)) if isinstance(row, dict) else None
+      if identity:
+        result[identity] = None if identity in result else row
+    return result
+  workspaces = unique(snapshot['workspaces'], 'workspace_id')
+  tabs = unique(snapshot['tabs'], 'tab_id')
+  agents = {}
+  for row in snapshot['agents']:
+    if not isinstance(row, dict):
+      continue
+    key = (herdr_identifier(row.get('pane_id')), canonical(row.get('agent')))
+    if not key[0] or not isinstance(key[1], str):
+      continue
+    remote = row.get('is_remote') is True or any(row.get(k) for k in ('machine_id', 'remote_machine_id', 'remote_target', 'machine'))
+    agents.setdefault(key, set()).add((herdr_identifier(row.get('workspace_id')), herdr_identifier(row.get('tab_id')), bool(remote)))
+  def label(row):
+    text = row.get('label') if isinstance(row, dict) else None
+    return text if isinstance(text, str) and text.strip() and len(text) <= 256 else None
+  complete = True
+  for target in targets:
+    wid, tid = target['workspace_id'], target['tab_id']
+    # A pane may have moved since agent.list. Never borrow a different tab's
+    # labels, and never use a cached remote PID/label as local evidence.
+    expected = {(wid, tid, False)}
+    workspace, tab = workspaces.get(wid), tabs.get(tid)
+    if agents.get((target['pane'], target['agent'])) != expected or not isinstance(tab, dict) or tab.get('workspace_id') != wid:
+      complete = False
+      continue
+    target['workspace_label'], target['tab_label'] = label(workspace), label(tab)
+    complete = complete and bool(target['workspace_label'] and target['tab_label'])
+  return 'ok' if complete and len(targets) == len([row for row in observations if not row['remote']]) else 'partial'
+
+
 def herdr_snapshot(query):
   listing = query(['herdr', 'session', 'list', '--json'])
   sessions = listing.get('sessions') if isinstance(listing, dict) else None
@@ -241,7 +294,7 @@ def herdr_snapshot(query):
       errors += 1
       continue
     seen.add(name)
-    summary = {'name': name, 'running': session.get('running'), 'state': 'ok', 'reported_agent_count': None, 'errors': 0}
+    summary = {'name': name, 'running': session.get('running'), 'state': 'ok', 'reported_agent_count': None, 'errors': 0, 'labels_state': 'not-queried'}
     summaries.append(summary)
     if not isinstance(summary['running'], bool):
       summary.update(running=None, state='unavailable', errors=1, detail='invalid local session metadata')
@@ -265,6 +318,7 @@ def herdr_snapshot(query):
       if not isinstance(agents, list) or len(agents) > 64:
         raise Unavailable('unsupported agent response')
       summary['reported_agent_count'] = len(agents)
+      session_observations = []
       for row in agents:
         agent = canonical(row.get('agent')) if isinstance(row, dict) else None
         if not isinstance(agent, str) or not IDENTIFIER.fullmatch(agent):
@@ -277,7 +331,7 @@ def herdr_snapshot(query):
         remote = row.get('is_remote') is True or any(row.get(key) for key in ('machine_id', 'remote_machine_id', 'remote_target', 'machine'))
         activity = row.get('agent_status')
         activity = activity if activity in ('working', 'idle', 'waiting', 'unknown', 'attention', 'needs_input', 'needs-input', 'exited') else 'unknown'
-        observation = {'agent': agent, 'session': name, 'pane': pane, 'activity': activity, 'remote': bool(remote), 'pids': []}
+        observation = {'agent': agent, 'session': name, 'pane': pane, 'activity': activity, 'remote': bool(remote), 'pids': [], 'workspace_id': herdr_identifier(row.get('workspace_id')), 'tab_id': herdr_identifier(row.get('tab_id')), 'workspace_label': None, 'tab_label': None}
         if not remote:
           try:
             info = query([*prefix, 'pane', 'process-info', '--pane', pane])['result']['process_info']
@@ -291,6 +345,14 @@ def herdr_snapshot(query):
           except (Unavailable, KeyError, TypeError, AttributeError):
             errors += 1
         observations.append(observation)
+        session_observations.append(observation)
+      try:
+        summary['labels_state'] = herdr_display_labels(query, prefix, session_observations)
+        if summary['labels_state'] == 'partial':
+          errors += 1
+      except (Unavailable, KeyError, TypeError, AttributeError):
+        summary['labels_state'] = 'unavailable'
+        errors += 1
     except (Unavailable, OSError, KeyError, TypeError, AttributeError):
       errors += 1
       summary.update(state='unavailable', detail='local session socket or agent listing unavailable')
@@ -316,7 +378,10 @@ def herdr_session_view(sessions, observations, processes):
     row = panes.setdefault(key, {'pane': observation['pane'], 'agent': observation['agent'], 'activities': set(), 'remote': False})
     row['activities'].add(observation['activity'])
     row['remote'] = row['remote'] or observation['remote']
+    row.setdefault('_label_versions', set()).add(tuple(observation.get(field) for field in HERDR_LABEL_FIELDS))
   for key, row in sorted(panes.items()):
+    versions = row.pop('_label_versions')
+    row.update(zip(HERDR_LABEL_FIELDS, next(iter(versions)) if len(versions) == 1 else (None,)*4))
     activities = row.pop('activities')
     row['reported_activity'] = next(iter(activities)) if len(activities) == 1 else 'conflicting-reports'
     remote = row.pop('remote')
@@ -403,7 +468,7 @@ def build_report(proc, query, use_herdr=True, use_podman=True, workspace_reader=
               matches.append(process)
           except (OSError, ValueError, IndexError):
             pass
-    evidence = {key: observation[key] for key in ('session', 'pane', 'activity')}
+    evidence = {key: observation[key] for key in ('session', 'pane', 'activity', 'remote', *HERDR_LABEL_FIELDS)}
     if matches:
       for process in matches:
         process['herdr'].append(evidence)
@@ -488,6 +553,14 @@ def desktop_label(desktop):
   return ('multiple candidates: ' if desktop['state'] == 'multiple' else '')+'; '.join(parts)
 
 
+def herdr_display_path(evidence):
+  scope = 'Remote (unverified)' if evidence.get('remote') or evidence.get('match_state') == 'remote-unverified' else 'Local'
+  workspace = evidence.get('workspace_label') or evidence.get('workspace_id') or 'workspace unknown'
+  tab = evidence.get('tab_label') or evidence.get('tab_id') or 'tab unknown'
+  ids = f"session {evidence.get('session', '-')}; workspace {evidence.get('workspace_id') or '-'}; tab {evidence.get('tab_id') or '-'}"
+  return display(f"{scope} / {workspace} / {tab} / {evidence['pane']} [{ids}]", 500)
+
+
 def print_report(report):
   print('Identified local agent processes (host first)')
   print(f"{'BOUNDARY':<11} {'AGENT':<12} {'ACTIVITY':<23} {'PID':<9} LOCATION / EVIDENCE")
@@ -504,6 +577,9 @@ def print_report(report):
         extra += ' · extension process; work unverified'
       print(f"{row['boundary'].upper():<11} {display(row['agent']):<12} {display(activity):<23} {row['identity']['pid']:<9} {display(location)}{display(extra, 180)}")
       print('  Desktop: '+desktop_label(row['desktop']))
+      for evidence in row['herdr']:
+        if evidence.get('workspace_id') or evidence.get('tab_id'):
+          print('  Herdr: '+herdr_display_path(evidence))
   if not report['processes']:
     print('No identified agent processes within the inspected scope.')
   if report['unverified_observations']:
@@ -517,7 +593,7 @@ def print_report(report):
   for session in report['herdr_sessions']:
     count = session['reported_agent_count']
     entries = 'reported entries: '+str(count) if count is not None else 'agent listing not queried/unknown'
-    print(f"  {display(session['name'])} [{session['state']}; {entries}]")
+    print(f"  {display(session['name'])} [{session['state']}; {entries}; labels: {session['labels_state']}]")
     print('    Terminal location: '+desktop_label(session['desktop']))
     if session.get('detail'):
       print('    '+display(session['detail']))
@@ -528,6 +604,8 @@ def print_report(report):
     for pane in session['panes']:
       matches = ', '.join(f"{p['boundary']} PID {p['identity']['pid']}" for p in pane['process_matches']) or pane['match_state']
       print(f"    {display(pane['pane']):<12} {display(pane['agent']):<14} {pane['reported_activity']:<22} {display(matches)}")
+      if pane.get('workspace_id') or pane.get('tab_id'):
+        print('      Herdr: '+herdr_display_path({**pane, 'session': session['name']}))
   if report['coverage']['podman']['state'] in ('ok', 'partial'):
     runtimes = report['runtimes']
     kinds = {kind: sum(r['kind'] == kind for r in runtimes) for kind in ('agent', 'workspace', 'other')}
