@@ -1,6 +1,8 @@
+import hashlib
 import importlib.util
 import json
 import os
+import socket
 from pathlib import Path
 import unittest
 
@@ -14,7 +16,7 @@ d=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(d)
 
 
-class DesktopTests(unittest.TestCase):
+class DesktopFixture(unittest.TestCase):
   setUpBase=f.StatusTests.setUp
   add_process=f.StatusTests.add_process
   row=f.StatusTests.row
@@ -67,6 +69,8 @@ class DesktopTests(unittest.TestCase):
     self.socket_fd(40,100)
     self.sockets=f'u_str LISTEN 0 128 {self.root}/herdr.sock 100 * 0 users:(("herdr",pid=40,fd=6))\n'+self.peer()
 
+
+class DesktopTests(DesktopFixture):
   def test_direct_ancestor_maps_monitor_and_bar_workspace_without_titles(self):
     self.add_process(10,'pi','/pi',ppid=61)
     self.add_process(61,'foot','/usr/bin/foot')
@@ -218,6 +222,188 @@ class DesktopTests(unittest.TestCase):
     self.window(workspace=20)
     ws=self.report(use_desktop=True)['processes'][0]['desktop']['windows'][0]['workspace']
     self.assertEqual((ws['id'],ws['slot'],ws['label']),(20,10,'0'))
+
+
+class EditorTests(DesktopFixture):
+  def editor(self):
+    self.profile=self.root/'editor profile'
+    self.profile.mkdir(mode=0o700)
+    self.runtime=self.root/'runtime'
+    self.runtime.mkdir(mode=0o700)
+    env=f.patch.dict(os.environ,{'XDG_RUNTIME_DIR':str(self.runtime)})
+    env.start();self.addCleanup(env.stop)
+    self.workspace_metadata={'workspace-id':{'name':'test-project','editor_profile':self.profile}}
+    self.add_process(20,'codex','/home/workspace/.vscode-server/extensions/openai.chatgpt/bin/codex',namespace=('pid:[2]','mnt:[2]'))
+    self.add_process(30,'sshd','/usr/bin/sshd',namespace=('pid:[2]','mnt:[2]'))
+    self.add_process(61,'code','/usr/share/code/code',command=f.SECRET.encode())
+    self.ids=['a'*64]
+    self.details='\t'.join(json.dumps(v) for v in [self.ids[0],'container',30,'',None,'workspace-id'])
+    (self.profile/'code.lock').write_text('61')
+    digest=hashlib.sha256(os.fsencode(self.profile)).hexdigest()[:8]
+    self.ipc=self.runtime/f'vscode-{digest}-1.14-main.sock'
+    sock=socket.socket(socket.AF_UNIX);sock.bind(str(self.ipc));self.addCleanup(sock.close)
+    self.socket_fd(61,601)
+    self.sockets=f'u_str LISTEN 0 511 {self.ipc} 601 * 0 users:(("code",pid=61,fd=6))\n'
+    self.window(pid=61,**{'class':'Code'})
+
+  def found(self):
+    return self.report(use_desktop=True)['processes'][0]['desktop']
+
+  def test_editor_profile_pid_socket_fd_and_window_agree(self):
+    self.editor()
+    original=Path.open
+    def safe(path,*args,**kwargs):
+      if path.name == 'environ' or path == self.proc_root/'61/cmdline':raise AssertionError('unexpected Code arguments/environment read')
+      return original(path,*args,**kwargs)
+    with f.patch.object(Path,'open',safe):report=self.report(use_desktop=True)
+    found=report['processes'][0]['desktop']
+    self.assertEqual(found['state'],'matched')
+    window=found['windows'][0]
+    self.assertEqual((window['association'],window['editor_pid'],window['workspace_id']),('workspace-editor-profile',61,'workspace-id'))
+    self.assertEqual(window['workspace']['label'],'1')
+    self.assertIn('connection',found['detail'])
+    self.assertIn('workspace VS Code profile',m.desktop_label(found))
+    self.assertNotIn(f.SECRET,json.dumps(report))
+    self.assertNotIn(str(self.profile),json.dumps(report))
+    self.assertEqual(len([c for c in self.calls if c[0]=='ss']),1)
+    self.assertEqual(len(report['processes']),1)
+    self.assertEqual(report['processes'][0]['activity']['state'],'process-observed')
+
+  def test_editor_multiple_windows_remain_candidates(self):
+    self.editor();self.window(pid=61,address='0xdef',workspace=12,focusHistoryID=0)
+    found=self.found()
+    self.assertEqual(found['state'],'multiple')
+    self.assertEqual(len(found['windows']),2)
+
+  def test_editor_descendant_window_is_not_assigned_by_ancestry(self):
+    self.editor()
+    self.add_process(62,'code','/usr/share/code/code',ppid=61)
+    self.clients[0]['pid']=62
+    self.assertEqual(self.found()['state'],'unknown')
+
+  def test_wrong_profile_hash_or_pid_does_not_borrow_other_editor(self):
+    self.editor()
+    original=self.sockets
+    self.sockets=self.sockets.replace(self.ipc.name,'vscode-00000000-1.14-main.sock')
+    self.assertEqual(self.found()['state'],'unknown')
+    self.sockets=original
+    (self.profile/'code.lock').write_text('62')
+    self.assertEqual(self.found()['state'],'unknown')
+
+  def test_socket_owner_claim_without_kernel_fd_is_not_enough(self):
+    self.editor();(self.proc_root/'61/fd/601').unlink()
+    self.assertEqual(self.found()['state'],'unknown')
+
+  def test_bad_or_missing_pid_file_falls_back_without_blocking(self):
+    self.editor();path=self.profile/'code.lock'
+    for value in ('','0','61\n','61 extra','9'*1000):
+      with self.subTest(value=value[:16]):
+        path.write_text(value)
+        self.assertEqual(self.found()['state'],'unknown')
+    path.unlink();os.mkfifo(path)
+    self.assertEqual(self.found()['state'],'unknown')
+    path.unlink();path.symlink_to(self.proc_root/'61/stat')
+    self.assertEqual(self.found()['state'],'unknown')
+    path.unlink()
+    report=self.report(use_desktop=True)
+    self.assertEqual(report['processes'][0]['desktop']['state'],'unknown')
+    self.assertEqual(report['coverage']['desktop']['vscode_profiles']['state'],'partial')
+
+  def test_symlinked_profile_and_socket_are_rejected(self):
+    self.editor()
+    real=self.profile.with_name('real profile');self.profile.rename(real);self.profile.symlink_to(real)
+    self.assertEqual(self.found()['state'],'unknown')
+    self.profile.unlink();real.rename(self.profile)
+    self.ipc.unlink();self.ipc.symlink_to(self.root/'missing')
+    self.assertEqual(self.found()['state'],'unknown')
+
+  def test_reused_editor_pid_and_changed_pid_file_are_rejected(self):
+    self.editor();processes,_=self.proc.scan()
+    self.add_process(61,'code','/usr/share/code/code',start=200)
+    rows=d.socket_rows(self.sockets)
+    result,coverage=d.editor_windows(rows,{'workspace-id':self.profile},{'workspace-id'},processes,{61:[]},self.proc)
+    self.assertFalse(result)
+    self.assertEqual(coverage['state'],'partial')
+    self.add_process(61,'code','/usr/share/code/code')
+    with f.patch.object(d,'profile_pid',side_effect=[61,62]):
+      result,_=d.editor_windows(rows,{'workspace-id':self.profile},{'workspace-id'},processes,{61:[]},self.proc)
+    self.assertFalse(result)
+
+  def test_same_pid_exec_change_does_not_reuse_cached_editor_identity(self):
+    self.editor();processes,_=self.proc.scan()
+    self.add_process(61,'chromium','/usr/bin/chromium')
+    result,_=d.editor_windows(d.socket_rows(self.sockets),{'workspace-id':self.profile},{'workspace-id'},processes,{61:[]},self.proc)
+    self.assertFalse(result)
+
+  def test_editor_namespace_executable_and_socket_state_are_required(self):
+    self.editor()
+    for exe,namespace in (('/usr/bin/chromium',('pid:[1]','mnt:[1]')),('/usr/share/code/code',('pid:[9]','mnt:[9]'))):
+      self.add_process(61,'code',exe,namespace=namespace)
+      self.assertEqual(self.found()['state'],'unknown')
+    self.add_process(61,'code','/usr/share/code/code')
+    self.sockets=self.sockets.replace('LISTEN','ESTAB')
+    self.assertEqual(self.found()['state'],'unknown')
+
+  def test_no_podman_or_desktop_means_no_profile_matching(self):
+    self.editor()
+    report=self.report(use_desktop=True,use_podman=False,use_herdr=False)
+    self.assertEqual(report['processes'][0]['desktop']['state'],'unknown')
+    self.assertFalse(any(c[0]=='ss' for c in self.calls))
+    self.calls.clear()
+    report=self.report(use_desktop=False)
+    self.assertEqual(report['processes'][0]['desktop']['state'],'disabled')
+    self.assertFalse(any(c[0] in ('ss','hyprctl') for c in self.calls))
+
+  def test_ambiguous_profile_hashes_are_not_identity(self):
+    self.editor();processes,_=self.proc.scan()
+    class Digest:
+      def hexdigest(inner):return self.ipc.name.split('-')[1]
+    with f.patch.object(d.hashlib,'sha256',return_value=Digest()):
+      result,coverage=d.editor_windows(d.socket_rows(self.sockets),{'workspace-id':self.profile,'other':self.root/'another profile'},{'workspace-id'},processes,{61:[]},self.proc)
+    self.assertFalse(result)
+    self.assertEqual(coverage['state'],'partial')
+
+  def test_missing_ipc_metadata_does_not_use_pid_file_alone(self):
+    self.editor();self.sockets=''
+    self.assertEqual(self.found()['state'],'unknown')
+
+  def test_shared_runtime_and_other_socket_names_are_not_profile_proof(self):
+    self.editor()
+    original=self.sockets
+    for name in (self.ipc.name.replace('-main.sock','-shared.sock'),self.ipc.name.replace('1.14','future')):
+      self.sockets=original.replace(self.ipc.name,name)
+      self.assertEqual(self.found()['state'],'unknown')
+    self.sockets=original
+    self.runtime.chmod(0o755)
+    self.assertEqual(self.found()['state'],'unknown')
+
+  def test_portable_profile_socket_is_supported_without_runtime_dir(self):
+    self.editor()
+    portable=self.profile/'1.14-main.sock'
+    sock=socket.socket(socket.AF_UNIX);sock.bind(str(portable));self.addCleanup(sock.close)
+    self.sockets=self.sockets.replace(str(self.ipc),str(portable))
+    with f.patch.dict(os.environ,{'XDG_RUNTIME_DIR':''}):
+      self.assertEqual(self.found()['state'],'matched')
+
+  def test_host_and_unknown_boundaries_do_not_borrow_workspace_editor(self):
+    self.editor()
+    self.add_process(20,'codex','/codex')
+    self.assertEqual(self.found()['state'],'unknown')
+    self.add_process(20,'codex','/codex',namespace=('pid:[9]','mnt:[9]'))
+    self.assertEqual(self.found()['state'],'unknown')
+
+  def test_shared_unix_query_with_herdr_and_editor(self):
+    self.editor()
+    self.add_process(71,'code','/usr/share/code/code')
+    (self.profile/'code.lock').write_text('71')
+    self.socket_fd(71,601)
+    editor_rows=self.sockets.replace('pid=61','pid=71')
+    self.clients[0].update(pid=71,address='0xdef')
+    self.attached_session();self.sockets+=editor_rows
+    report=self.report(use_desktop=True)
+    self.assertEqual(len([c for c in self.calls if c[0]=='ss']),1)
+    self.assertEqual(len(report['processes']),2)
+    self.assertTrue(all(r['desktop']['state']=='matched' for r in report['processes']))
 
 
 if __name__=='__main__':

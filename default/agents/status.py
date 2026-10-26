@@ -392,25 +392,26 @@ def herdr_session_view(sessions, observations, processes):
   return sorted(groups.values(), key=lambda row: row['name'])
 
 
-def workspace_names():
+def workspace_snapshot():
   # Reuse the backend's read-only registry API; do not invoke its engine snapshot
   # (which could honor a user's remote Podman configuration).
   path = Path(os.environ['OMARCHY_PATH'])/'default/workspaces/manager.py'
   spec = importlib.util.spec_from_file_location('omarchy_status_workspaces', path)
   backend = importlib.util.module_from_spec(spec)
   spec.loader.exec_module(backend)
-  rows = backend.list_workspaces(backend.state_root(create=False), runtime=False)
-  if len(rows) > 512:
-    raise Unavailable('too many registered workspaces')
-  return {row['id']: row['name'] for row in rows}
+  root = backend.state_root(create=False)
+  rows = backend.list_workspaces(root, runtime=False)
+  if len(rows) > 512 or len({row['id'] for row in rows}) != len(rows):
+    raise Unavailable('too many or ambiguous registered workspaces')
+  return {row['id']: {'name': row['name'], 'editor_profile': root/row['name']/'vscode-data'} for row in rows}
 
 
-def desktop_locations(proc, query, processes, records, sessions):
+def desktop_locations(proc, query, processes, records, sessions, profiles):
   path = Path(os.environ['OMARCHY_PATH'])/'default/agents/desktop.py'
   spec = importlib.util.spec_from_file_location('omarchy_status_desktop', path)
   backend = importlib.util.module_from_spec(spec)
   spec.loader.exec_module(backend)
-  return backend.discover(query, proc, processes, records, sessions, Unavailable)
+  return backend.discover(query, proc, processes, records, sessions, Unavailable, profiles)
 
 
 def build_report(proc, query, use_herdr=True, use_podman=True, workspace_reader=None, use_desktop=True):
@@ -428,7 +429,7 @@ def build_report(proc, query, use_herdr=True, use_podman=True, workspace_reader=
   workspaces = {}
   if any(c['workspace_id'] for c in containers):
     try:
-      workspaces = (workspace_reader or workspace_names)()
+      workspaces = (workspace_reader or workspace_snapshot)()
       coverage['workspaces'] = {'state': 'ok'}
     except (Unavailable, OSError, RuntimeError, ValueError, KeyError, TypeError):
       coverage['workspaces'] = {'state': 'unavailable'}
@@ -510,7 +511,7 @@ def build_report(proc, query, use_herdr=True, use_podman=True, workspace_reader=
     record = {'identity': {'boot_id': proc.boot_id, 'pid': pid, 'start_ticks': process['start_ticks']}, 'agent': process['agent'], 'boundary': boundary, 'role': 'extension-associated process' if associated else 'agent process', 'identification': process['identification'], 'corroborated': bool(process['herdr']), 'activity': activity, 'cwd': proc.cwd(pid), 'executable': process['exe'] or None, 'sources': sources, 'herdr': process['herdr'], 'container': None}
     if container:
       record['container'] = {key: container[key] for key in ('id', 'name', 'kind', 'workspace_id')}
-      record['container']['workspace_name'] = workspaces.get(container['workspace_id'])
+      record['container']['workspace_name'] = workspaces.get(container['workspace_id'], {}).get('name')
     target = candidates if process['identification'] == 'process-name-only' and not process['herdr'] else identified
     target.append(record)
   order = {'host': 0, 'unknown': 1, 'observer': 1, 'container': 2}
@@ -518,7 +519,8 @@ def build_report(proc, query, use_herdr=True, use_podman=True, workspace_reader=
     rows.sort(key=lambda r: (order[r['boundary']], r['agent'], r['identity']['pid']))
   if use_desktop:
     try:
-      coverage['desktop'] = desktop_locations(proc, query, processes, identified+candidates, sessions)
+      profiles = {wid: row['editor_profile'] for wid, row in workspaces.items() if row.get('editor_profile')}
+      coverage['desktop'] = desktop_locations(proc, query, processes, identified+candidates, sessions, profiles)
     except (Unavailable, OSError, ValueError, KeyError, TypeError):
       coverage['desktop'] = {'state': 'unavailable', 'detail': 'desktop adapter unavailable'}
       for value in identified+candidates+sessions:
@@ -543,6 +545,8 @@ def desktop_label(desktop):
     text = f"{window['monitor']['name']} / desktop {ws['label']} (Hyprland {ws['id']})"
     if window['association'] == 'herdr-session-client':
       text += ' [attached Herdr terminal; pane visibility unknown]'
+    if window['association'] == 'workspace-editor-profile':
+      text += ' [workspace VS Code profile; connection/agent visibility unverified]'
     if window['hidden']:
       text += ' [hidden window]'
     text = display(text, 240)
