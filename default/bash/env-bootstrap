@@ -59,4 +59,23 @@ case ":$PATH:" in
   *":$HOME/.local/bin:"*) ;;
   *) PATH="${PATH:+$PATH:}$HOME/.local/bin" ;;
 esac
+# Optional direct-agent guards are separate from tool installations and mise's
+# account wrappers. Shell startup performs no discovery, mode query, or install.
+omarchy_guard_dir="${XDG_DATA_HOME:-$HOME/.local/share}/omarchy/agents/command-guards/bin"
+if [ -d "$omarchy_guard_dir" ]; then
+  omarchy_guard_path=$omarchy_guard_dir
+  omarchy_guard_remaining=${PATH:-}
+  while :; do
+    omarchy_guard_entry=${omarchy_guard_remaining%%:*}
+    if [ "$omarchy_guard_entry" != "$omarchy_guard_dir" ]; then
+      omarchy_guard_path="$omarchy_guard_path:$omarchy_guard_entry"
+    fi
+    case "$omarchy_guard_remaining" in
+      *:*) omarchy_guard_remaining=${omarchy_guard_remaining#*:} ;;
+      *) break ;;
+    esac
+  done
+  PATH=$omarchy_guard_path
+fi
+unset omarchy_guard_dir omarchy_guard_path omarchy_guard_remaining omarchy_guard_entry
 export PATH

@@ -8,6 +8,12 @@ checkout until a human explicitly reviews and applies them.
 
 `omarchy agent status` reports recognized current-user processes, including direct host agents and extension-associated processes in local rootless containers. It correlates local Herdr reports without counting the same process twice. It is distinct from `agent list` (configured definitions), `agent ps` (active managed harnesses), and `workspace list` (editor containers). Its structured output and coverage limitations are described in [`manual/56-agent-status.md`](../manual/56-agent-status.md). It is an observation tool, not an isolation audit or agent controller. Remote hosts are not queried.
 
+## Optional direct-command guards
+
+`omarchy agent guards` manages opt-in PATH-based launch friction, not containment. Separate user-owned scripts block direct host agent invocations when the saved launch mode is Container, without replacing installed tools or changing running agents. The generator reuses the default-agent menu catalog and container definitions; optional definition `guardCommands` and manual registrations support additional names. Explicit sync discovers newly installed commands and future catalog/definition additions without a product allowlist. Known infrastructure/runner commands cannot be registered. See [`manual/57-agent-command-guards.md`](../manual/57-agent-command-guards.md).
+
+`default/agents/command-guards.py` owns private metadata and unchanged managed scripts. Generation preflights conflicts; foreign or modified files are not overwritten. Runtime mode errors block rather than assume Host. Bash environment setup prefixes the opt-in directory, and a process-free Bash prompt hook restores it after mise. Status reports actual PATH precedence, not aliases/functions or universal coverage. Deliberate Host launches remove guard PATH entries in their child, including after a terminal service reconstructs PATH. Installed-only resolution looks past guards; explicit account sign-in retains its existing host flow. Absolute paths, IDE processes, other shells, and intentionally changed PATH remain bypasses. Enabling guards never means that every process is containerized.
+
 ## Safety model
 
 A managed task has three important locations:

@@ -27,3 +27,8 @@ if command -v fzf &> /dev/null; then
 fi
 
 source "$OMARCHY_PATH/default/bash/completions"
+
+if [[ -d ${XDG_DATA_HOME:-$HOME/.local/share}/omarchy/agents/command-guards/bin ]]; then
+  source "$OMARCHY_PATH/default/agents/guard-path.sh"
+  omarchy_agent_guard_init
+fi

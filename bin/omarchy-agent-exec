@@ -49,7 +49,11 @@ if [[ $mode == "host" ]]; then
   if [[ $checking == "true" ]]; then
     exit 0
   else
-    exec "${command[@]}"
+    if [[ -d ${XDG_DATA_HOME:-$HOME/.local/share}/omarchy/agents/command-guards/bin ]]; then
+      exec "$OMARCHY_PATH/bin/omarchy-agent-guards" host -- "${command[@]}"
+    else
+      exec "${command[@]}"
+    fi
   fi
 fi
 if [[ $mode != "container" ]]; then

@@ -11,6 +11,10 @@ if (( $# != 1 )) || [[ ! $1 =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
   exit 1
 fi
 agent=$1
+if [[ -d ${XDG_DATA_HOME:-$HOME/.local/share}/omarchy/agents/command-guards/bin ]]; then
+  source "$OMARCHY_PATH/default/agents/guard-path.sh"
+  omarchy_agent_guard_unpath
+fi
 legacy_shim() {
   LC_ALL=C head -c 4096 -- "$1" | grep -q '^mise use -g'
 }
