@@ -234,18 +234,27 @@ def herdr_snapshot(query):
   sessions = listing.get('sessions') if isinstance(listing, dict) else None
   if not isinstance(sessions, list) or len(sessions) > 16:
     raise Unavailable('unsupported local session response')
-  observations, errors = [], 0
+  observations, summaries, errors, seen = [], [], 0, set()
   for session in sessions:
-    if not isinstance(session, dict) or not isinstance(session.get('running'), bool):
+    name = session.get('name') if isinstance(session, dict) else None
+    if not isinstance(name, str) or not IDENTIFIER.fullmatch(name) or name in seen:
       errors += 1
       continue
-    if not session['running']:
-      continue
-    name, path = session.get('name'), session.get('socket_path')
-    if not isinstance(name, str) or not IDENTIFIER.fullmatch(name) or not isinstance(path, str):
+    seen.add(name)
+    summary = {'name': name, 'running': session.get('running'), 'state': 'ok', 'reported_agent_count': None, 'errors': 0}
+    summaries.append(summary)
+    if not isinstance(summary['running'], bool):
+      summary.update(running=None, state='unavailable', errors=1, detail='invalid local session metadata')
       errors += 1
       continue
+    if not summary['running']:
+      summary['state'] = 'not-running'
+      continue
+    path = session.get('socket_path')
+    before_errors = errors
     try:
+      if not isinstance(path, str):
+        raise Unavailable('local session socket unavailable')
       # Do not ask Herdr to create, attach, or connect to a remote session.
       if not stat.S_ISSOCK(Path(path).stat().st_mode):
         raise Unavailable('local session socket unavailable')
@@ -254,6 +263,7 @@ def herdr_snapshot(query):
       agents = response['result']['agents']
       if not isinstance(agents, list) or len(agents) > 64:
         raise Unavailable('unsupported agent response')
+      summary['reported_agent_count'] = len(agents)
       for row in agents:
         agent = canonical(row.get('agent')) if isinstance(row, dict) else None
         if not isinstance(agent, str) or not IDENTIFIER.fullmatch(agent):
@@ -282,7 +292,38 @@ def herdr_snapshot(query):
         observations.append(observation)
     except (Unavailable, OSError, KeyError, TypeError, AttributeError):
       errors += 1
-  return observations, {'state': 'partial' if errors else 'ok', 'errors': errors, 'observations': len(observations)}
+      summary.update(state='unavailable', detail='local session socket or agent listing unavailable')
+    summary['errors'] = errors - before_errors
+    if summary['errors'] and summary['state'] == 'ok':
+      summary['state'] = 'partial'
+  return observations, {'state': 'partial' if errors else 'ok', 'errors': errors, 'observations': len(observations), 'sessions': summaries}
+
+
+def herdr_session_view(sessions, observations, processes):
+  """References to final, revalidated processes, not a second agent inventory."""
+  references = {}
+  for process in processes:
+    for evidence in process['herdr']:
+      key = (evidence['session'], evidence['pane'], process['agent'])
+      match = {'identity': process['identity'], 'boundary': process['boundary']}
+      if match not in references.setdefault(key, []):
+        references[key].append(match)
+  groups = {session['name']: {**session, 'panes': []} for session in sessions}
+  panes = {}
+  for observation in observations:
+    key = (observation['session'], observation['pane'], observation['agent'])
+    row = panes.setdefault(key, {'pane': observation['pane'], 'agent': observation['agent'], 'activities': set(), 'remote': False})
+    row['activities'].add(observation['activity'])
+    row['remote'] = row['remote'] or observation['remote']
+  for key, row in sorted(panes.items()):
+    activities = row.pop('activities')
+    row['reported_activity'] = next(iter(activities)) if len(activities) == 1 else 'conflicting-reports'
+    remote = row.pop('remote')
+    row['process_matches'] = [] if remote else references.get(key, [])
+    row['match_state'] = 'remote-unverified' if remote else 'matched' if row['process_matches'] else 'unverified'
+    if key[0] in groups:
+      groups[key[0]]['panes'].append(row)
+  return sorted(groups.values(), key=lambda row: row['name'])
 
 
 def workspace_names():
@@ -326,6 +367,7 @@ def build_report(proc, query, use_herdr=True, use_podman=True, workspace_reader=
       coverage['herdr'] = {'state': 'unavailable', 'detail': str(error)}
   else:
     coverage['herdr'] = {'state': 'disabled'}
+  sessions = coverage['herdr'].pop('sessions', [])
   mode = 'unknown'
   try:
     value = query(['omarchy-agent-mode'], json_output=False)
@@ -400,7 +442,7 @@ def build_report(proc, query, use_herdr=True, use_podman=True, workspace_reader=
   order = {'host': 0, 'unknown': 1, 'observer': 1, 'container': 2}
   for rows in (identified, candidates):
     rows.sort(key=lambda r: (order[r['boundary']], r['agent'], r['identity']['pid']))
-  return {'schema_version': 1, 'observed_at': datetime.now(timezone.utc).isoformat(), 'hostname': socket.gethostname(), 'scope': 'current UID; observer-visible procfs; local rootless Podman and running local Herdr sessions', 'observer': {'uid': proc.uid, 'namespaces': proc.namespaces, 'container_marker': proc.container_observer}, 'launch_default': mode, 'processes': identified, 'candidates': candidates, 'unverified_observations': unverified, 'runtimes': [{key: c[key] for key in ('id', 'name', 'kind', 'declared_agent', 'workspace_id')} for c in containers], 'coverage': coverage, 'vanished_identifications': vanished, 'notes': ['Process presence is not proof of active work. Herdr activity is reported, not independently verified.', 'Host means the observer PID and mount namespaces, not a proof of unrestricted authority. Run this command on the host.', 'Container boundaries do not prove isolation or absence of writable host mounts.', 'This is not a complete inventory. Remote hosts, other users, hidden agents, and unsupported entrypoints are not inspected.']}
+  return {'schema_version': 1, 'observed_at': datetime.now(timezone.utc).isoformat(), 'hostname': socket.gethostname(), 'scope': 'current UID; observer-visible procfs; local rootless Podman and running local Herdr sessions', 'observer': {'uid': proc.uid, 'namespaces': proc.namespaces, 'container_marker': proc.container_observer}, 'launch_default': mode, 'processes': identified, 'candidates': candidates, 'unverified_observations': unverified, 'herdr_sessions': herdr_session_view(sessions, observations, identified+candidates), 'runtimes': [{key: c[key] for key in ('id', 'name', 'kind', 'declared_agent', 'workspace_id')} for c in containers], 'coverage': coverage, 'vanished_identifications': vanished, 'notes': ['Process presence is not proof of active work. Herdr activity is reported, not independently verified.', 'Host means the observer PID and mount namespaces, not a proof of unrestricted authority. Run this command on the host.', 'Container boundaries do not prove isolation or absence of writable host mounts.', 'This is not a complete inventory. Remote hosts, other users, hidden agents, and unsupported entrypoints are not inspected.']}
 
 
 def display(value, limit=140):
@@ -430,6 +472,23 @@ def print_report(report):
     print('\nUnverified Herdr observations (not additional process counts)')
     for row in report['unverified_observations']:
       print(f"  {row['agent']} · {display(row['session'])}/{display(row['pane'])} · {row['activity']} · {row['boundary']}")
+  print('\nLocal Herdr sessions (pane references, not additional agents)')
+  if not report['herdr_sessions']:
+    state = report['coverage']['herdr']['state']
+    print('  No local sessions listed.' if state == 'ok' else '  Local session inventory '+state+'.')
+  for session in report['herdr_sessions']:
+    count = session['reported_agent_count']
+    entries = 'reported entries: '+str(count) if count is not None else 'agent listing not queried/unknown'
+    print(f"  {display(session['name'])} [{session['state']}; {entries}]")
+    if session.get('detail'):
+      print('    '+display(session['detail']))
+    if count == 0:
+      print('    No agents reported; this is not proof that none exist.')
+    if session['panes']:
+      print(f"    {'PANE':<12} {'AGENT':<14} {'REPORTED ACTIVITY':<22} PROCESS MATCH")
+    for pane in session['panes']:
+      matches = ', '.join(f"{p['boundary']} PID {p['identity']['pid']}" for p in pane['process_matches']) or pane['match_state']
+      print(f"    {display(pane['pane']):<12} {display(pane['agent']):<14} {pane['reported_activity']:<22} {display(matches)}")
   if report['coverage']['podman']['state'] in ('ok', 'partial'):
     runtimes = report['runtimes']
     kinds = {kind: sum(r['kind'] == kind for r in runtimes) for kind in ('agent', 'workspace', 'other')}

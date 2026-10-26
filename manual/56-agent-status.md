@@ -20,6 +20,23 @@ Host processes appear first, followed by processes with unknown execution bounda
 
 Unverified Herdr observations appear separately. An idle shell, SSH launcher, stale agent hint, or remote record is not promoted into a confirmed host process. A running editor workspace alone is not counted as an agent.
 
+## Local Herdr sessions
+
+A grouped section lists each local session returned by Herdr and its reported agent panes:
+
+```text
+Local Herdr sessions (pane references, not additional agents)
+  default [ok; reported entries: 1]
+    PANE         AGENT          REPORTED ACTIVITY      PROCESS MATCH
+    w7:p1        pi             working                host PID 1234
+```
+
+A matched pane references a process already listed above. It is not a second agent count. A reported pane without a matching live process says **unverified**. Cached remote observations say **remote-unverified** and never match local PIDs. Agent processes outside Herdr remain in the main process table without a pane reference.
+
+Session coverage is explicit: **ok** means its agent listing was checked; **partial** means some metadata or PID checks failed; **unavailable** means its socket or agent listing could not be checked; **not-running** means it was listed as stopped and was not queried. A checked session with zero entries says **No agents reported**, not that no agents exist. An unavailable listing has an unknown count, never zero. Only reported agent panes are shown; ordinary terminal panes and terminal contents are not queried for this section.
+
+Duplicate reports for the same agent pane produce one grouped row. Different reported activity values show **conflicting-reports**. Session names remain case-sensitive. The JSON `herdr_sessions` collection contains session coverage and pane references to the existing process identities; this is an additive field in schema version 1. No new queries or persistent state are needed for the grouped view.
+
 **Container does not mean safe.** A container can have writable host mounts. This report identifies execution boundaries; it does not audit filesystem permissions, credential exposure, or network isolation. Use `omarchy agent inspect`, `omarchy agent audit` without `--fix`, or `omarchy workspace doctor <name>` for their respective runtime details and checks.
 
 ## Structured output and optional sources
