@@ -16,7 +16,7 @@ if [[ -d ${XDG_DATA_HOME:-$HOME/.local/share}/omarchy/agents/command-guards/bin 
   omarchy_agent_guard_unpath
 fi
 legacy_shim() {
-  LC_ALL=C head -c 4096 -- "$1" | grep -q '^mise use -g'
+  LC_ALL=C head -c 4096 -- "$1" | grep -qaE 'mise (use|x) '
 }
 if ! omarchy-cmd-present "$agent"; then
   echo "Host agent is not installed: $agent" >&2
