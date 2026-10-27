@@ -6,6 +6,10 @@ Run this command in a host terminal as your normal desktop user:
 omarchy agent sessions
 ```
 
+You can also right-click the execution-default widget and select **Inspect sessions…** in its overview. This opens the same menu in a host terminal. Opening the menu does not attach to or close any instance. The overview action remains available when a snapshot is empty or unavailable; the menu performs its own fresh checks.
+
+When `omarchy agent status` or `omarchy agent diagnose` observes a managed harness, its text report includes the command as a hint. JSON reports do not include the hint or change their schema.
+
 Choose a running harness by agent, instance prefix, host PID, and project directory. The selected-instance view shows the full UUID, container name, start time, and project paths. Long project labels are shortened only in the list; the controller retains the original target identity.
 
 The action menu offers:

@@ -639,6 +639,9 @@ def herdr_display_path(evidence):
   return display(f"{scope} / {workspace} / {tab} / {evidence['pane']} [{ids}]", 500)
 
 
+SESSION_HINT = 'Inspect existing harnesses interactively: omarchy agent sessions'
+
+
 def print_report(report):
   print('Identified local agent processes (host first)')
   print(f"{'BOUNDARY':<11} {'AGENT':<12} {'ACTIVITY':<23} {'PID':<9} LOCATION / EVIDENCE")
@@ -716,6 +719,8 @@ def print_report(report):
     runtimes = report['runtimes']
     kinds = {kind: sum(r['kind'] == kind for r in runtimes) for kind in ('agent', 'workspace', 'other')}
     print(f"\nRunning local containers: {len(runtimes)} (managed harnesses: {kinds['agent']}; editor workspaces: {kinds['workspace']}; other: {kinds['other']})")
+    if kinds['agent']:
+      print(SESSION_HINT)
   print('\nLaunch default: '+report['launch_default'].capitalize()+' (future launches only)')
   print('Coverage: '+', '.join(f"{name}={value['state']}" for name, value in report['coverage'].items()))
   proc = report['coverage']['processes']
