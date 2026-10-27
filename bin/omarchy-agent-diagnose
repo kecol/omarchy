@@ -1,0 +1,7 @@
+#!/bin/bash
+
+# omarchy:summary=Inspect local harness instances for shared projects and possible login evidence
+# omarchy:args=[--json]
+# omarchy:examples=omarchy agent diagnose | omarchy agent diagnose --json
+
+exec python3 -I -B "$OMARCHY_PATH/default/agents/sessions.py" diagnose "$@"
