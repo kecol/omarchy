@@ -1,0 +1,7 @@
+#!/bin/bash
+
+# omarchy:summary=Close one verified local harness instance without removing its shared home
+# omarchy:args=<instance-uuid-or-prefix> [--check] [--force] [--yes]
+# omarchy:examples=omarchy agent close 568a857f --check | omarchy agent close 568a857f | omarchy agent close 568a857f --force
+
+exec python3 -I -B "$OMARCHY_PATH/default/agents/sessions.py" close "$@"
