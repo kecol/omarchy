@@ -100,6 +100,18 @@ class StatusTests(unittest.TestCase):
     options.setdefault('use_desktop',False)
     return m.build_report(self.proc,self.query,workspace_reader=lambda:self.workspace_metadata,**options)
 
+  def test_interactive_session_hint_uses_observed_harnesses_without_queries(self):
+    report = self.report(use_herdr=False, use_podman=False)
+    calls = len(self.calls)
+    for state, kinds, expected in [('ok', ['agent'], True), ('partial', ['agent'], True),
+      ('ok', ['workspace'], False), ('ok', [], False), ('disabled', [], False), ('unavailable', [], False)]:
+      report['coverage']['podman']['state'] = state
+      report['runtimes'] = [{'kind': kind} for kind in kinds]
+      output = io.StringIO()
+      with contextlib.redirect_stdout(output): m.print_report(report)
+      self.assertEqual(m.SESSION_HINT in output.getvalue(), expected)
+    self.assertEqual(len(self.calls), calls)
+
   def test_read_only_registry_profiles_need_no_credentials_and_reject_duplicate_ids(self):
     data=self.root/'data'
     root=data/'omarchy/workspaces';root.mkdir(parents=True,mode=0o700)

@@ -216,6 +216,8 @@ def render(rows):
     print('No matching managed harness containers were returned by the checked local engine.')
   print('\nA running process, age, shared project, login command, or callback listener does not prove a stalled login or abandoned work.')
   print('No prompts, terminal buffers, credential files, process environments, or histories were read.')
+  if rows:
+    print('\n'+status.SESSION_HINT)
 
 
 def main():

@@ -18,6 +18,10 @@ Item {
   signal dismissed()
 
   function close() { dismissed() }
+  function inspectSessions() {
+    root.close()
+    root.bar.run("omarchy-launch-tui --app-id=org.omarchy.agent-sessions omarchy agent sessions")
+  }
   Component.onCompleted: { ready = true; if (opened) inventory.refresh() }
   onOpenedChanged: if (ready && opened) inventory.refresh()
 
@@ -160,13 +164,24 @@ Item {
           visible: !!root.inventory.snapshot && root.inventory.snapshot.unverified > 0
           text: root.inventory.snapshot ? Commons.I18n.t("agents.overview.unverified").arg(root.inventory.snapshot.unverified) : ""
         }
-        Ui.Button {
-          id: coverageButton
-          property bool expanded: false
-          text: expanded ? Commons.I18n.t("agents.overview.hideCoverage") : Commons.I18n.t("agents.overview.coverage")
-          visible: !!root.inventory.snapshot
-          focusable: true
-          onClicked: expanded = !expanded
+        RowLayout {
+          Layout.fillWidth: true
+          spacing: Style.space(8)
+          Ui.Button {
+            id: coverageButton
+            property bool expanded: false
+            text: expanded ? Commons.I18n.t("agents.overview.hideCoverage") : Commons.I18n.t("agents.overview.coverage")
+            visible: !!root.inventory.snapshot
+            focusable: true
+            onClicked: expanded = !expanded
+          }
+          Ui.Button {
+            id: inspectSessionsButton
+            text: Commons.I18n.t("agents.overview.inspectSessions")
+            focusable: true
+            onClicked: root.inspectSessions()
+          }
+          Item { Layout.fillWidth: true }
         }
         Label { Layout.fillWidth: true; visible: coverageButton.expanded; text: root.coverageText() }
         Label { Layout.fillWidth: true; text: Commons.I18n.t("agents.overview.caution") }

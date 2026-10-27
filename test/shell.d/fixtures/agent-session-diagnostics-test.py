@@ -52,6 +52,14 @@ class SessionsTests(unittest.TestCase):
       return '\t'.join(json.dumps(v) for v in [self.cid,name,self.pid,'agent',self.agent,None,'/workspace/key','key',[mount]])
     raise AssertionError(args)
   def inventory(self):return m.inventory(self.query,self.proc)
+  def test_human_diagnosis_hints_only_when_harnesses_are_observed(self):
+    rows = self.inventory()
+    for items, expected in ((rows, True), ([], False)):
+      with contextlib.redirect_stdout(io.StringIO()) as output:
+        m.render(items)
+      self.assertEqual(m.status.SESSION_HINT in output.getvalue(), expected)
+    self.assertFalse(self.actions)
+
   def test_read_only_inventory_keeps_unique_identity_and_no_auth_claim(self):
     rows=self.inventory();self.assertEqual(len(rows),1)
     self.assertEqual(rows[0]['pid'],20);self.assertEqual(rows[0]['instance'],self.instance)
