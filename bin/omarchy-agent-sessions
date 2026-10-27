@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# omarchy:summary=Choose a running harness to attach, inspect, or explicitly close
+
+exec python3 -I -B "$OMARCHY_PATH/default/agents/session-menu.py" menu "$@"

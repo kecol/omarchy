@@ -1,0 +1,7 @@
+#!/bin/bash
+
+# omarchy:summary=Attach your terminal to one verified existing harness instance
+# omarchy:args=<instance-uuid-or-prefix> [--check]
+# omarchy:examples=omarchy agent attach 568a857f --check | omarchy agent attach 568a857f
+
+exec python3 -I -B "$OMARCHY_PATH/default/agents/session-menu.py" attach "$@"
