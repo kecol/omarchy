@@ -59,7 +59,13 @@ args=sys.argv[1:]
 pathlib.Path(os.environ['TEST_CALLS']).write_text(json.dumps(args))
 entries=json.loads(pathlib.Path(os.environ['TEST_DATA']).read_text())
 for row in entries:
+  if isinstance(row,dict) and '--all' not in args:
+    row=dict(row)
+    message=row.get('MESSAGE')
+    if isinstance(message,(str,list)) and len(message)>4096:row['MESSAGE']=None
   print(json.dumps(row) if 'json' in args else row.get('MESSAGE',''), flush=True)
+if os.environ.get('TEST_OVERSIZE')=='1':
+  print(json.dumps({'MESSAGE':'x'*(8*1024*1024)}),flush=True)
 if os.environ.get('TEST_MALFORMED')=='1':print('not-json',flush=True)
 for i in range(int(os.environ.get('TEST_TAIL','0'))):
   print(json.dumps({'MESSAGE':'benign tail '+str(i)+' '+('x'*200)}),flush=True)
@@ -81,11 +87,14 @@ sys.exit(int(os.environ.get('TEST_JOURNAL_EXIT','0')))
                             capture_output=True, text=True, timeout=15)
     return result
 
-  def classifier(self):
+  def checker_module(self):
     spec = importlib.util.spec_from_file_location('journal_check', ROOT/'default/agents/journal-filesystem-check.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.message_has_warning
+    return module
+
+  def classifier(self):
+    return self.checker_module().message_has_warning
 
   def test_doctor_accepts_observed_policy_label_reconstruction(self):
     result = self.run_check([event(), event(PODMAN_EVENT='remove')], doctor=True)
@@ -159,7 +168,8 @@ sys.exit(int(os.environ.get('TEST_JOURNAL_EXIT','0')))
   def test_current_boot_window_and_system_coverage_are_preserved(self):
     self.assertEqual(self.run_check([event()]).returncode, 0)
     args = json.loads(self.calls.read_text())
-    self.assertEqual(args, ['-b', '--since', '-15 minutes', '--no-pager', '-o', 'json'])
+    self.assertEqual(args, ['-b', '--since', '-15 minutes', '--no-pager', '-o', 'json',
+                            '--all', '--output-fields=MESSAGE,_COMM,SYSLOG_IDENTIFIER,_TRANSPORT,PRIORITY,PODMAN_TYPE,PODMAN_EVENT,PODMAN_LABELS'])
     self.assertNotIn('-k', args)
 
   def test_producer_is_drained_after_first_error(self):
@@ -183,9 +193,67 @@ sys.exit(int(os.environ.get('TEST_JOURNAL_EXIT','0')))
     self.assertTrue(self.drained.exists())
 
   def test_invalid_entry_shapes_are_unverified(self):
-    for row in ({}, {'MESSAGE': [1, 2, 3]}, ['invalid entry']):
+    for row in ({}, {'MESSAGE': None}, {'MESSAGE': [-1]}, {'MESSAGE': [256]},
+                {'MESSAGE': [True]}, {'MESSAGE': [1, 'mixed']}, ['invalid entry']):
       with self.subTest(row=row):
         self.assertEqual(self.run_check([row]).returncode, 2)
+
+  def test_doctor_accepts_valid_byte_encoded_message(self):
+    message = list(b'\x1b[32mbenign fixture log\x1b[0m')
+    result = self.run_check([{'MESSAGE': message}], doctor=True)
+    self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
+    self.assertIn('Agent container doctor passed.', result.stdout)
+
+  def test_byte_decoding_is_lossless(self):
+    data = bytes(range(256))
+    decoded = self.checker_module().decode_journal_messages(list(data))
+    self.assertEqual(len(decoded), 1)
+    self.assertEqual(decoded[0].encode('utf-8', errors='surrogateescape'), data)
+
+  def test_control_and_unicode_bytes_are_scanned(self):
+    for data in (b'\x01\x02\x03', '\u001b[32mfixture caf\u00e9\u001b[0m'.encode('utf-8'), b'', b'\xffbenign\xfe'):
+      with self.subTest(data=data):
+        self.assertEqual(self.run_check([{'MESSAGE': list(data)}]).returncode, 0)
+
+  def test_encoded_filesystem_errors_block(self):
+    for data in (b'\x1b[31mI/O error\x1b[0m', b'\xffBTRFS error\xfe', b'read-only file system',
+                 b'EXT4-fs error', b'XFS metadata error', b'remount root ro', b'readonly storage'):
+      with self.subTest(data=data):
+        self.assertEqual(self.run_check([{'MESSAGE': list(data)}]).returncode, 1)
+
+  def test_repeated_message_values_are_all_scanned(self):
+    for values in (['benign', 'I/O error'], ['I/O error', 'benign'],
+                   ['benign', list(b'\xffread-only file system')],
+                   [list(b'benign'), list(b'BTRFS error')]):
+      with self.subTest(values=values):
+        self.assertEqual(self.run_check([{'MESSAGE': values}]).returncode, 1)
+
+  def test_benign_repeated_values_pass(self):
+    for values in (['one', 'two'], ['one', list(b'\x1b[32mtwo\x1b[0m')], [[], 'benign']):
+      with self.subTest(values=values):
+        self.assertEqual(self.run_check([{'MESSAGE': values}]).returncode, 0)
+
+  def test_bad_duplicate_value_cannot_hide_behind_a_warning(self):
+    for values in (['I/O error', None], ['I/O error', [256]], ['benign', [['invalid nesting']]]):
+      with self.subTest(values=values):
+        self.assertEqual(self.run_check([{'MESSAGE': values}]).returncode, 2)
+
+  def test_encoded_policy_labels_retain_narrow_exemption(self):
+    row = event()
+    row['MESSAGE'] = list(row['MESSAGE'].encode('utf-8'))
+    self.assertEqual(self.run_check([row]).returncode, 0)
+    row['MESSAGE'] += list(b' I/O error')
+    self.assertEqual(self.run_check([row]).returncode, 1)
+
+  def test_long_message_is_not_elided(self):
+    for text, expected in (('x'*5000, 0), ('x'*5000+' I/O error', 1)):
+      with self.subTest(expected=expected):
+        self.assertEqual(self.run_check([{'MESSAGE': text}]).returncode, expected)
+        self.assertEqual(self.run_check([{'MESSAGE': list(text.encode('utf-8'))}]).returncode, expected)
+
+  def test_oversized_record_fails_closed_and_drains(self):
+    self.assertEqual(self.run_check([], TEST_OVERSIZE='1', TEST_TAIL='20').returncode, 2)
+    self.assertTrue(self.drained.exists())
 
   def test_missing_journalctl_is_unverified(self):
     (self.bin/'journalctl').unlink()
