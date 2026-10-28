@@ -320,6 +320,19 @@ if [[ $execution_mode == "container" ]]; then
   if [[ $oneshot == "true" ]]; then
     command=(env OMARCHY_AGENT_ONESHOT=1 "${command[@]}")
   fi
+  # Herdr sees the host container wrapper, not its inner agent executable.
+  # Scope the hint to this foreground TUI, never a new terminal or batch job.
+  # An explicit value (including empty to opt out) belongs to the caller.
+  if [[ $inline == "true" && $oneshot == "false" && ${HERDR_ENV:-} == "1" && ! -v HERDR_AGENT && -t 0 && -t 1 ]]; then
+    case "$agent" in
+    cursor-agent) herdr_agent=cursor ;;
+    pi | omp | claude | codex | opencode | agy | copilot | grok | hermes | muse | kimi) herdr_agent=$agent ;;
+    *) herdr_agent= ;;
+    esac
+    if [[ -n $herdr_agent ]]; then
+      command=(env "HERDR_AGENT=$herdr_agent" "${command[@]}")
+    fi
+  fi
 fi
 
 # Resolve the Host escape inside a new terminal too: its service may rebuild

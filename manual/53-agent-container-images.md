@@ -16,6 +16,24 @@ Updates do not change running containers or delete agent home volumes. Start a n
 
 Managed tasks, one-shot prompts, and launches without an interactive terminal do not display this menu and do not update images automatically.
 
+## Container agents inside Herdr
+
+Run the interactive agent in the existing Herdr pane with `--inline`:
+
+```bash
+omarchy agent --inline --container --agent=pi --directory="/path/to/project"
+```
+
+When `HERDR_ENV=1` and stdin/stdout are terminals, Omarchy sets a host-side `HERDR_AGENT` hint for supported agents. Herdr can then identify the container wrapper and use that agent's screen manifest. The hint uses the selected agent, not the harness image name. The Cursor executable name maps to Herdr's `cursor` label. A hint does not make an unconfigured container harness available.
+
+An explicit `HERDR_AGENT` value is preserved, including an empty value to opt out:
+
+```bash
+HERDR_AGENT= omarchy agent --inline --container --agent=pi
+```
+
+Omarchy does not add the automatic hint for host execution, new terminal windows, non-terminal launches, one-shot prompts or `--check`. The hint is scoped to the launched host process, not exported into the calling shell or added to the container environment. It does not mount Herdr sockets or host account directories, install integrations, report lifecycle state, or change an existing agent. Pi lifecycle hooks/session restore are separate from screen-manifest detection. Use a new launch after this launcher change; do not interrupt working agents just to update a panel label.
+
 ## Build from a command
 
 Build the latest release:
