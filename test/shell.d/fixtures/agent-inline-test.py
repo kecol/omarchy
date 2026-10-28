@@ -15,7 +15,8 @@ IMAGE = 'sha256:'+'a'*64
 
 def stub():
   name, *args = sys.argv[2:]
-  row = {'name': name, 'args': args, 'cwd': os.getcwd(), 'stdin_tty': os.isatty(0), 'stdout_tty': os.isatty(1)}
+  row = {'name': name, 'args': args, 'cwd': os.getcwd(), 'stdin_tty': os.isatty(0), 'stdout_tty': os.isatty(1),
+         'herdr_agent': os.environ.get('HERDR_AGENT'), 'herdr_agent_set': 'HERDR_AGENT' in os.environ}
   if os.isatty(0):
     row['terminal'] = os.ttyname(0)
   with open(os.environ['OFFLINE_LOG'], 'a') as stream:
@@ -134,6 +135,22 @@ class InlineTests(unittest.TestCase):
     self.assertNotIn('--tty', run['args'])
     selector = next(r for r in rows if r['name'] == 'omarchy-harness-select-image')
     self.assertEqual(selector['args'], ['pi', 'pi'])
+
+  def test_automatic_herdr_hint_reaches_host_wrapper_not_container_environment(self):
+    self.env.pop('HERDR_AGENT')
+    code, rows, _ = self.launch(['--inline', '--container', '--agent=pi'], HERDR_ENV='1')
+    self.assertEqual(code, 0)
+    run = next(r for r in rows if r['name'] == 'podman' and r['args'][1] == 'run')
+    self.assertEqual(run['herdr_agent'], 'pi')
+    self.assertFalse(any('HERDR_' in arg for arg in run['args']))
+    self.assertFalse(any('herdr.sock' in arg for arg in run['args']))
+
+  def test_unhinted_launch_outside_herdr_does_not_gain_a_hint(self):
+    self.env.pop('HERDR_AGENT')
+    code, rows, _ = self.launch(['--inline', '--container', '--agent=pi'])
+    self.assertEqual(code, 0)
+    run = next(r for r in rows if r['name'] == 'podman' and r['args'][1] == 'run')
+    self.assertFalse(run['herdr_agent_set'])
 
   def test_image_cancellation_never_reaches_engine_or_lifecycle(self):
     code, rows, _ = self.launch(['--inline', '--container', '--agent=pi'], OFFLINE_CANCEL='1')
