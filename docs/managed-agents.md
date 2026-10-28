@@ -30,6 +30,14 @@ checkout until a human explicitly reviews and applies them.
 
 `omarchy-agent-prepare --check` is only a recipe/definition check, suitable for rejecting unsupported Container defaults before saving or invoking the old Host installer. It is not an engine/image/authentication readiness claim. Dependency installation and authenticated testing remain separate explicit actions. See [`manual/58-agent-container-preparation.md`](../manual/58-agent-container-preparation.md) for the interface, bounds, and limitations.
 
+## Host filesystem journal preflight
+
+`omarchy agent container doctor --quick` checks writable host directories, local rootless Podman and the current boot's last 15 minutes of system journal messages. Quick mode still creates temporary write probes and a disposable engine volume. It is not a read-only diagnostic command.
+
+`default/agents/journal-filesystem-check.py` reads structured journal entries and retains the existing filesystem-warning patterns. Only informational Podman container events with matching structured labels can exempt the exact rendered `org.omarchy.filesystem.root=read-only` and `org.omarchy.harness.model-recovery=read-only` tokens. Those labels describe intentional container hardening. The check scans the rest of the message and all other entries, including real Podman storage errors. It does not exclude Podman, system messages or whole events.
+
+The helper consumes the complete journal stream before returning: 0 means no matching warning, 1 means a matching warning, and 2 means the journal check is unverified. Journal command failures, malformed records and non-text messages block startup rather than pass as clean. The result describes only the accessible journal window, not disk health or recovery. Partial journal visibility and warnings outside the existing pattern/window are not a complete filesystem audit. No repair or guard bypass follows from this check.
+
 ## Safety model
 
 A managed task has three important locations:
