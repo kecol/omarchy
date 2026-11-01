@@ -282,8 +282,12 @@ Item {
       root.setBackground(path, true)
     }
 
-    function setSuspended(value: string): void {
+    function setSuspended(value: string): string {
+      if (root.shell && typeof root.shell.setBackgroundSuspended === "function")
+        return root.shell.setBackgroundSuspended(value)
+      if (value !== "true" && value !== "false") return "invalid"
       root.suspended = value === "true"
+      return "ok"
     }
 
     function transition(fromPath: string, path: string): void {

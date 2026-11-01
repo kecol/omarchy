@@ -131,6 +131,8 @@ or `omarchy.power`. There is no `bar` target.
 | `listShellConfig`                     | effective shell.json as JSON    |
 | `debugBarGeometry`                    | bar geometry dump for debugging |
 
+`shell setBackgroundSuspended <"true"|"false">` controls transient renderer ownership without writing `shell.json`. It returns `ok` for a loaded background service, `disabled` when the selected plugin is intentionally disabled, or `not ready` / `invalid` when the request cannot be acknowledged. Temporary ownership survives service replacement and does not enable a disabled plugin. OWE must use this method, accept only explicit `ok` / `disabled` acknowledgements, and never fall back to `setPluginEnabled` on failure. The matching OWE daemon change must be qualified and deployed with this shell API; the unchanged old daemon can still execute its destructive fallback. The paired build is defined in [`packages/owe-quattro`](../packages/owe-quattro/README.md). It also releases the owned renderer after the existing handoff grace instead of parking a stale video buffer behind a disabled background.
+
 `setPluginEnabled` takes a string; only literal `"true"` enables. Methods
 answer on stdout with exit 0 — `ok` on success, `unknown` or an error
 string on a miss.

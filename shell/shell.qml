@@ -11,6 +11,7 @@ import qs.Commons as Commons
 import "plugins/bar"
 import "services"
 import "services/AuthServiceStore.js" as AuthServiceStore
+import "services/BackgroundHandoff.js" as BackgroundHandoff
 
 ShellRoot {
   id: shell
@@ -912,6 +913,17 @@ ShellRoot {
   // looking a service up by id re-evaluates once that service exists.
   readonly property var services: _services
 
+  // OWE handoffs must never change the user's disabledPlugins preference.
+  property var _backgroundHandoff: BackgroundHandoff.create()
+
+  function setBackgroundSuspended(value) {
+    return BackgroundHandoff.request(_backgroundHandoff, pluginRegistry,
+      firstPartyServiceFor("omarchy.background"), value, userConfigUnreadable)
+  }
+
+  onServicesChanged: BackgroundHandoff.sync(_backgroundHandoff, pluginRegistry,
+    firstPartyServiceFor("omarchy.background"), userConfigUnreadable)
+
   function serviceFor(pluginId) {
     return _services[String(pluginId)] || null
   }
@@ -1810,6 +1822,10 @@ ShellRoot {
         return "ok"
       }
       return "no-bar"
+    }
+
+    function setBackgroundSuspended(value: string): string {
+      return shell.setBackgroundSuspended(value)
     }
 
     function setPluginEnabled(id: string, enabled: string): string {
