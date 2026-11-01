@@ -116,6 +116,37 @@ class LauncherTests(unittest.TestCase):
     self.assertEqual(self.calls()[1]['args'][1:], ['tui'])
     self.assertNotIn('unexpected-setup', self.log.read_text())
 
+  def test_installed_only_preserves_new_bash_and_env_wrappers(self):
+    self.program('amp', '#!/usr/bin/python3\nimport json,os,sys\nwith open(os.environ["CALLS"],"a") as f: f.write(json.dumps({"args":sys.argv,"stdin":sys.stdin.read()})+"\\n")\n')
+    self.program('dsh', (self.bin/'pi').read_text())
+    prompt = 'literal $(touch SHOULD_NOT_EXIST); --option'
+    result = self.launch('--inline', '--agent', 'amp', '--host', '--installed-only', '--directory', str(self.project), '--prompt', prompt)
+    self.assertEqual(result.returncode, 0, result.stderr)
+    self.assertEqual(self.calls()[0]['args'], [str(self.bin/'amp'), '--dangerously-allow-all'])
+    self.assertEqual(self.calls()[0]['stdin'], prompt+'\n')
+    result = self.launch('--inline', '--agent', 'dsh', '--host', '--installed-only')
+    self.assertEqual(result.returncode, 0, result.stderr)
+    self.assertEqual(self.calls()[1]['args'], [str(self.bin/'dsh'), 'web'])
+    self.assertFalse((self.project/'SHOULD_NOT_EXIST').exists())
+
+  def test_unsupported_container_prompt_does_not_touch_host_clipboard(self):
+    self.program('wl-copy', '#!/bin/bash\necho UNEXPECTED-CLIPBOARD >>"$CALLS"\n')
+    self.program('omarchy-notification-send', '#!/bin/bash\necho UNEXPECTED-NOTIFICATION >>"$CALLS"\n')
+    result = self.launch('--inline', '--agent', 'dsh', '--container', '--prompt', 'private fixture task')
+    self.assertNotEqual(result.returncode, 0)
+    self.assertFalse(self.log.exists())
+
+  def test_modern_legacy_wrapper_is_resolved_offline_not_executed(self):
+    local = self.home/'.local/bin'
+    local.mkdir(parents=True)
+    self.program('pi', '#!/bin/bash\necho LAZY-SHIM-WAS-EXECUTED >>"$CALLS"\nmise x pi -- pi "$@"\n', local)
+    self.program('mise', '#!/bin/bash\nprintf "%s %s\\n" "$MISE_OFFLINE" "$*" >>"$MISE_LOG"\nprintf "%s\\n" "$RESOLVED_BINARY"\n')
+    result = self.launch('--inline', '--agent', 'pi', '--host', '--installed-only', PATH=str(local)+':'+self.env['PATH'], RESOLVED_BINARY=str(self.bin/'pi'))
+    self.assertEqual(result.returncode, 0, result.stderr)
+    self.assertNotIn('LAZY', self.log.read_text())
+    self.assertEqual(len(self.calls()), 1)
+    self.assertIn('true -C '+str(self.home)+' which pi', (self.base/'mise-log').read_text())
+
   def test_lazy_shim_is_resolved_offline_and_never_executed_or_installed(self):
     shims = self.base/'mise/shims'
     shims.mkdir(parents=True)

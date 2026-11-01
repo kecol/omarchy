@@ -32,7 +32,10 @@ print('ok - gate precedes checkout, scopes the secret to one step, and supplies 
 assert set(jobs) == {'prepare', 'extract', 'validate-extract', 'publish-extract', 'translate', 'collect', 'land'}
 for name in ('extract', 'validate-extract'):
   assert "if: needs.prepare.outputs.extract == 'true'" in jobs[name]
-assert "if: needs.prepare.outputs.locales != '[]'" in jobs['translate']
+assert "needs.prepare.outputs.locales != '[]'" in jobs['translate']
+assert 'always() && !cancelled()' in jobs['translate']
+assert "needs.prepare.result == 'success'" in jobs['translate']
+assert "needs.publish-extract.result == 'success'" in jobs['translate']
 assert 'needs: [prepare, publish-extract]' in jobs['translate']
 assert 'fromJSON(needs.prepare.outputs.locales)' in jobs['translate']
 for name in ('publish-extract', 'collect'):
