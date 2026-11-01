@@ -257,3 +257,37 @@ if measure_layout; then
 else
   pass "a render without the logo in it is not measured"
 fi
+
+# Exercise the real config assembly, never fastfetch's hardware/command modules.
+# Adding identity must not replace upstream modules or inspect a personal layout.
+OMARCHY_FASTFETCH_DIR="$tmp_dir/system-fastfetch"
+ABOUT_CONFIG="$tmp_dir/runtime/about.jsonc"
+mkdir -p "$OMARCHY_FASTFETCH_DIR" "${ABOUT_CONFIG%/*}"
+cp "$ROOT/etc/fastfetch/config.jsonc" "$OMARCHY_FASTFETCH_DIR/config.jsonc"
+config_paths=("$HOME/.config/fastfetch/" "$OMARCHY_FASTFETCH_DIR/ (*)")
+fastfetch() { printf '%s\n' "${config_paths[@]}"; }
+write_about_config
+jq -e --slurpfile original "$OMARCHY_FASTFETCH_DIR/config.jsonc" '
+  .logo == $original[0].logo and
+  ((.modules - $original[0].modules) | length == 5) and
+  ([.modules[] | select(type == "object") | .format // ""] | any(contains("kecol fork"))) and
+  ([.modules[] | select(type == "object") | .format // ""] | any(contains("not runtime status"))) and
+  ((.modules - (.modules - $original[0].modules)) == $original[0].modules)
+' "$ABOUT_CONFIG" >/dev/null || fail "fork identity preserves upstream layout and labels capabilities honestly"
+pass "fork identity preserves upstream layout and labels capabilities honestly"
+
+mkdir -p "$HOME/.config/fastfetch"
+printf '%s\n' 'personal JSONC, deliberately not parseable by jq' >"$HOME/.config/fastfetch/config.jsonc"
+write_about_config
+[[ ! -e $ABOUT_CONFIG ]] || fail "a personal config supersedes a stale generated About copy"
+[[ $(<"$HOME/.config/fastfetch/config.jsonc") == "personal JSONC, deliberately not parseable by jq" ]] || fail "personal configuration is untouched"
+pass "a personal config is untouched and supersedes a stale generated About copy"
+rm -r "${HOME:?}/.config/fastfetch"
+
+# JSONC outside jq's subset keeps the original fastfetch path, never a blank or
+# stale generated configuration. Do not execute the fixture's command modules.
+printf '%s\n' '{/* valid JSONC, not jq JSON */ "modules": []}' >"$OMARCHY_FASTFETCH_DIR/config.jsonc"
+printf '%s\n' 'stale' >"$ABOUT_CONFIG"
+write_about_config 2>"$tmp_dir/jsonc.stderr"
+[[ ! -e $ABOUT_CONFIG && ! -e $ABOUT_CONFIG.new ]] || fail "unsupported JSONC falls back without a stale copy"
+pass "unsupported JSONC falls back without a stale copy"

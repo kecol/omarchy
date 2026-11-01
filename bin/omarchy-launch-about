@@ -83,9 +83,24 @@ about_heading() {
 # Omarchy's config with its section headings and keys in the current language.
 # Rows the copy does not recognise, as after a user edit, stay as they are.
 write_about_config() {
-  local headings keys
+  local headings keys revision fork
 
   [[ -n $ABOUT_CONFIG ]] || return 0
+  # A personal fastfetch config is an explicit layout override. Do not read,
+  # translate or augment it, and do not leave an older generated copy selected.
+  if custom_fastfetch_config; then
+    rm -f "$ABOUT_CONFIG"
+    return 0
+  fi
+
+  revision=$(git -C "$OMARCHY_PATH" rev-parse --short HEAD 2>/dev/null) || revision="unversioned checkout"
+  fork=$(jq -n --arg revision "$revision" '[
+    {type: "custom", format: ("│  Omarchy — kecol fork (" + $revision + ")")},
+    {type: "custom", format: "│  github.com/kecol/omarchy"},
+    {type: "custom", format: "│  Features available (not runtime status):"},
+    {type: "custom", format: "│    Sandboxed agents · OpenShell"},
+    {type: "custom", format: "│    Isolated workspaces"}
+  ]')
 
   headings=$(jq -n \
     --arg hardware "$(about_heading Hardware)" --arg hardware_to "$(about_heading "$(omarchy-i18n about.hardware)")" \
@@ -97,7 +112,15 @@ write_about_config() {
     '{"OS Age": $age, "Uptime": $uptime, "Update": $update}')
 
   mkdir -p "${ABOUT_CONFIG%/*}"
-  if jq --argjson headings "$headings" --argjson keys "$keys" '
+  if jq --argjson headings "$headings" --argjson keys "$keys" --argjson fork "$fork" \
+    --arg software "$(about_heading Software)" '
+    # Keep upstream modules and logo intact. Insert the capability label once,
+    # below Software; retain it even if a future system layout drops that heading.
+    .modules |= (
+      if any(.[]; type == "object" and .type == "custom" and .format == $software) then
+        map(if type == "object" and .type == "custom" and .format == $software then ., $fork[] else . end)
+      else $fork + . end
+    ) |
     .modules |= map(
       if type == "object" and .type == "custom" and $headings[.format] then .format = $headings[.format]
       elif type == "object" and (.key // "" | test("^\\S+ ")) then
