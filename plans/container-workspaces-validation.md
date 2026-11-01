@@ -77,8 +77,8 @@ The last guest postflight reported no failed user units. Both final `doctor` che
 
 ## Evidence
 
-Private local evidence lives under `/home/kecol/VMs/omarchy-sync-review/triage-evidence/container-workspaces-01/`. It includes the source archive, fixture scripts, whitelisted guest receipts, image/build records, runtime checks, editor and private-client receipts, final source hashes, resource-controller records, host storage comparisons, and session exit status.
+Private local evidence lives under `$HOME/VMs/omarchy-sync-review/triage-evidence/container-workspaces-01/`. It includes the source archive, fixture scripts, whitelisted guest receipts, image/build records, runtime checks, editor and private-client receipts, final source hashes, resource-controller records, host storage comparisons, and session exit status.
 
-Full-frame QMP captures live under `/home/kecol/VMs/omarchy-sync-review/triage/container-workspaces-01/`. Relevant post-fix views include `fixed-running-c.png`, `fixed-running-d.png`, `fixed-two-codex-loaded.png`, and `final-reopened.png`. These were inspected. The latter two show two independent remote windows with unauthenticated Codex panels.
+Full-frame QMP captures live under `$HOME/VMs/omarchy-sync-review/triage/container-workspaces-01/`. Relevant post-fix views include `fixed-running-c.png`, `fixed-running-d.png`, `fixed-two-codex-loaded.png`, and `final-reopened.png`. These were inspected. The latter two show two independent remote windows with unauthenticated Codex panels.
 
 The guest overlay retains systemd-managed fixture crash records privately. It is stopped and has no personal provider authentication. Do not publish disk images, home volumes, private SSH keys, or extracted process memory as test evidence.

@@ -11,9 +11,9 @@ The source merge is ready for review in PR #7, not for automatic merge or host d
 - Common ancestor: `902fd8aeb`.
 - Initial divergence: 46 fork-only commits and 391 upstream-only commits.
 - Integration branch: `sync/upstream-quattro-20261020`.
-- Integration worktree: `/home/kecol/Projects/omarchy-upstream-sync`.
+- Integration worktree: `$HOME/Projects/omarchy-upstream-sync`.
 - Backup ref: `backup/quattro-before-upstream-20261020`.
-- Unmodified upstream comparison worktree: `/home/kecol/Projects/omarchy-upstream-baseline`.
+- Unmodified upstream comparison worktree: `$HOME/Projects/omarchy-upstream-baseline`.
 
 The active `quattro` checkout remains at the fork input. No dev-link switch, system package update, or intentional host migration execution formed part of this review. Migration tests use temporary fixtures and mocked system commands. The host pending-migration check used `omarchy-migrate --pending` only.
 

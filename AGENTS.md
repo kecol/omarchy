@@ -103,6 +103,8 @@ The experience should be the same on every platform. When a package or feature i
 
 - Commits should be atomic: include only one coherent change or fix, and do not mix unrelated work.
 - Commit messages should be succinct and describe the change being made.
+- Use portable `$HOME` paths in checked-in examples and reports, not a developer's literal home directory. Never commit credentials, tokens, private keys, or real account/session data.
+- Use the repository owner's public GitHub handle and GitHub `noreply` email for automated commits in this fork. Set identity for this repository only; do not change global Git settings. Do not rewrite existing author metadata or force-push history without explicit approval.
 
 # Helper Commands
 
