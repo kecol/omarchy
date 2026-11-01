@@ -91,6 +91,10 @@ There are three entries in that menu:
 
 ### About screen
 
+This fork adds **Omarchy — kecol fork**, the local Git revision, and the repository URL below the Software heading. It labels sandboxed agents, OpenShell, and isolated workspaces as available features, not live runtime or security status. It does not query agent accounts, usage, credentials, conversations, or sessions.
+
+The launcher adds this information to a temporary copy of the packaged Fastfetch configuration. It preserves the upstream system-information modules and your About logo; it does not edit `/etc/fastfetch/config.jsonc`. A personal Fastfetch configuration takes precedence and runs unchanged, without the added fork section. A system configuration with JSONC syntax that the translator cannot parse also runs unchanged. Reopen About after updating; no shell restart or reboot is needed.
+
 The same three options are under _Appearance > Branding > About_ for the _About_ screen you get from the Omarchy menu, and they work identically — the file is `~/.config/omarchy/branding/about.txt`, and the About window pops up after each change. The About art is converted to a smaller size than the screensaver's, since it has to fit in a window rather than fill your display.
 
 While the window is open a glint of green leans across the art every few seconds and then leaves it still again. Your own art gets it too, as long as every character in it is one column wide — anything _Set From Image_ produces is. Art built from emoji or double-width characters stays still instead, and so does the screen if you keep a fastfetch config of your own: a still logo in those cases is the animation keeping out of the way rather than failing, since sliding a glint across them would land the rest of the line in the wrong place.
