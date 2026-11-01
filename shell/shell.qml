@@ -11,6 +11,7 @@ import qs.Commons as Commons
 import "plugins/bar"
 import "services"
 import "services/AuthServiceStore.js" as AuthServiceStore
+import "services/BackgroundHandoff.js" as BackgroundHandoff
 
 ShellRoot {
   id: shell
@@ -61,6 +62,8 @@ ShellRoot {
 
   property var defaultsConfig: builtinShellConfig
   property var shellConfig: builtinShellConfig
+  // shell.json has text the shell could not use; persisting would replace it with defaults.
+  property bool userConfigUnreadable: false
   property bool pluginReloading: false
   property bool pluginReloadPending: false
 
@@ -91,6 +94,7 @@ ShellRoot {
         console.warn("shell.json parse failed, using defaults:", e)
       }
     }
+    userConfigUnreadable = !!userText.trim() && !user
     shellConfig = user || defaults
   }
 
@@ -116,6 +120,10 @@ ShellRoot {
     var payload = JSON.parse(JSON.stringify(nextConfig))
     payload.version = 1
     shellConfig = payload
+    if (userConfigUnreadable) {
+      console.warn("shell.json is unreadable, not overwriting it; fix it to save bar changes")
+      return
+    }
     userConfigFile.setText(JSON.stringify(payload, null, 2) + "\n")
   }
 
@@ -904,6 +912,17 @@ ShellRoot {
   // Reassigned as each service registers, so a binding that reads this before
   // looking a service up by id re-evaluates once that service exists.
   readonly property var services: _services
+
+  // OWE handoffs must never change the user's disabledPlugins preference.
+  property var _backgroundHandoff: BackgroundHandoff.create()
+
+  function setBackgroundSuspended(value) {
+    return BackgroundHandoff.request(_backgroundHandoff, pluginRegistry,
+      firstPartyServiceFor("omarchy.background"), value, userConfigUnreadable)
+  }
+
+  onServicesChanged: BackgroundHandoff.sync(_backgroundHandoff, pluginRegistry,
+    firstPartyServiceFor("omarchy.background"), userConfigUnreadable)
 
   function serviceFor(pluginId) {
     return _services[String(pluginId)] || null
@@ -1803,6 +1822,10 @@ ShellRoot {
         return "ok"
       }
       return "no-bar"
+    }
+
+    function setBackgroundSuspended(value: string): string {
+      return shell.setBackgroundSuspended(value)
     }
 
     function setPluginEnabled(id: string, enabled: string): string {

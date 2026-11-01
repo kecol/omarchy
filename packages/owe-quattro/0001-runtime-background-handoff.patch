@@ -1,0 +1,200 @@
+--- a/src/daemon/main.c
++++ b/src/daemon/main.c
+@@ -313,14 +313,14 @@
+          * timeout fires, and the still stays up. */
+         if (!app->handoff_pending && app->engine == OWE_ENGINE_SHELL &&
+             owed_render_is_alive(app->supervisor)) {
+-            char reply[1024];
+-            if (owed_supervisor_send(app->supervisor, "{\"cmd\":\"park\"}", reply, sizeof(reply)) == 0 &&
+-                owe_json_ok(reply)) {
+-                app->renderer_warm_until_ms = monotonic_ms() + RENDERER_WARM_MS;
+-                OWE_INFO("renderer parked, the shell draws the still");
+-            } else {
+-                owed_supervisor_stop(app->supervisor);
+-            }
++            /* A parked renderer retains its last Wayland buffer. It cannot
++             * remain underneath the shell: a deliberately disabled background
++             * would expose that stale video frame. Keep the existing handoff
++             * grace and pending-transition guard, then release the owned child. */
++            app->renderer_warm_until_ms = 0;
++            clear_prepared_intro();
++            owed_supervisor_stop(app->supervisor);
++            OWE_INFO("renderer released, the shell owns the background preference");
+         }
+     }
+     if (app->renderer_warm_until_ms && !app->intro_active &&
+--- a/src/daemon/shell.c
++++ b/src/daemon/shell.c
+@@ -42,22 +42,24 @@
+ }
+ 
+ int owed_shell_plugin_set(bool enabled) {
+-    char log[4096];
++    char log[4096] = {0};
+     const char *command = shell_command();
+-    char *argv[] = { (char *)command, "shell", "setPluginEnabled", "omarchy.background",
+-                     (char *)(enabled ? "true" : "false"), NULL };
+-    char *suspend[] = { (char *)command, "background", "setSuspended",
++    char *suspend[] = { (char *)command, "shell", "setBackgroundSuspended",
+                         (char *)(enabled ? "false" : "true"), NULL };
+-    /* omarchy-shell gives the shell 2 seconds to answer by default. A shell
+-     * that is still starting, as at login, can take longer to switch a
+-     * plugin, so let it use most of the time this call waits for it. */
++    /* Transient ownership has a host-level endpoint even when the user's
++     * background plugin is disabled. Never fall back to persistent config. */
+     setenv("OMARCHY_SHELL_IPC_TIMEOUT", "4s", 0);
+-    if (owe_spawn_capture(command, suspend, log, sizeof(log), 5000) != 0 &&
+-        owe_spawn_capture(command, argv, log, sizeof(log), 5000) != 0) {
++    int status = owe_spawn_capture(command, suspend, log, sizeof(log), 5000);
++    log[sizeof(log) - 1] = '\0';
++    size_t len = strlen(log);
++    while (len && (log[len - 1] == '\n' || log[len - 1] == '\r'))
++        log[--len] = '\0';
++    /* IPC can return an error string with exit 0: require explicit ack. */
++    if (status != 0 || (strcmp(log, "ok") != 0 && strcmp(log, "disabled") != 0)) {
+         OWE_WARN("shell background %s failed: %s", enabled ? "enable" : "disable",
+                  log[0] ? log : "command failed");
+         return -1;
+     }
+-    OWE_INFO("shell background %s", enabled ? "enabled" : "disabled");
++    OWE_INFO("shell background %s acknowledged: %s", enabled ? "resume" : "suspend", log);
+     return 0;
+ }
+--- a/src/daemon/shell.h
++++ b/src/daemon/shell.h
+@@ -2,6 +2,7 @@
+ 
+ #include <stdbool.h>
+ 
+-/* Enable or disable the Omarchy shell background plugin. Returns 0 when the
+- * shell accepted the change. */
++/* Request transient background ownership: true resumes, false suspends.
++ * Return 0 only for explicit shell acknowledgement, including user-disabled.
++ * Never change persistent plugin enablement. */
+ int owed_shell_plugin_set(bool enabled);
+--- a/test/daemon.py
++++ b/test/daemon.py
+@@ -154,8 +154,9 @@
+         shell_stub = bin_dir / "omarchy-shell"
+         shell_stub.write_text(
+             "#!/bin/sh\nprintf '%s timeout=%s\\n' \"$*\" \"$OMARCHY_SHELL_IPC_TIMEOUT\" >>\"$OWE_TEST_SHELL_LOG\"\n"
+-            "if [ -e \"$OWE_TEST_SHELL_FAIL\" ] && { [ \"$4\" = true ] || { [ \"$2\" = setSuspended ] && [ \"$3\" = false ]; }; }; then exit 1; fi\n"
+-            "exit 0\n")
++            "[ \"$1\" = shell ] && [ \"$2\" = setBackgroundSuspended ] || exit 99\n"
++            "if [ -e \"$OWE_TEST_SHELL_FAIL\" ] && [ \"$3\" = false ]; then exit 1; fi\n"
++            "printf 'ok\\n'\n")
+         shell_stub.chmod(0o755)
+         shell_log = root / "shell.log"
+         env = os.environ.copy()
+@@ -193,12 +194,12 @@
+                 deadline = time.monotonic() + 8
+                 while time.monotonic() < deadline:
+                     text = shell_log.read_text() if shell_log.exists() else ""
+-                    if "setSuspended true" in text:
++                    if "setBackgroundSuspended true" in text:
+                         disable = True
+                         break
+                     time.sleep(0.1)
+                 check(disable, "daemon disabled the shell background for the video")
+-                check("setSuspended true timeout=4s" in text,
++                check("setBackgroundSuspended true timeout=4s" in text,
+                       "the shell gets longer than omarchy-shell's default to answer", text)
+                 result = subprocess.run(cli + ["status"], env=env, capture_output=True, text=True, timeout=5)
+                 check(result.returncode == 0 and json.loads(result.stdout)["status"] == "ok",
+@@ -291,7 +292,7 @@
+                 deadline = time.monotonic() + 8
+                 while time.monotonic() < deadline:
+                     text = shell_log.read_text() if shell_log.exists() else ""
+-                    if "setSuspended false" in text:
++                    if "setBackgroundSuspended false" in text:
+                         enabled = True
+                         break
+                     time.sleep(0.1)
+@@ -305,19 +306,15 @@
+                     time.sleep(0.1)
+                 check(status["engine"] == "shell", "daemon reports the shell engine",
+                       json.dumps(status))
+-                renderer_parked = False
+-                deadline = time.monotonic() + 5
+-                while time.monotonic() < deadline:
+-                    try:
+-                        renderer = call(render_socket, "status")
+-                        if not renderer["path"] and not renderer["kind"]:
+-                            renderer_parked = True
+-                            break
+-                    except (ConnectionRefusedError, FileNotFoundError, OSError):
+-                        renderer_parked = True
+-                        break
+-                    time.sleep(0.1)
+-                check(renderer_parked, "renderer releases its media while the shell draws the still")
++                renderer_released = False
++                deadline = time.monotonic() + 5
++                while time.monotonic() < deadline:
++                    status = call(daemon_socket, "status")
++                    if not status["render_alive"]:
++                        renderer_released = True
++                        break
++                    time.sleep(0.1)
++                check(renderer_released, "renderer exits after shell handoff; no stale buffer beneath a disabled background")
+ 
+                 result = subprocess.run(cli + ["intro", "good.mp4"], env=env, cwd=root,
+                                         capture_output=True, text=True, timeout=8)
+@@ -347,19 +344,15 @@
+ 
+                 # A login starts its intro on a fresh renderer, after the
+                 # previous intro's renderer has handed the still back.
+-                renderer_parked = False
+-                deadline = time.monotonic() + 5
+-                while time.monotonic() < deadline:
+-                    try:
+-                        renderer = call(render_socket, "status")
+-                        if not renderer["path"] and not renderer["kind"]:
+-                            renderer_parked = True
+-                            break
+-                    except (ConnectionRefusedError, FileNotFoundError, OSError):
+-                        renderer_parked = True
+-                        break
+-                    time.sleep(0.1)
+-                check(renderer_parked, "the intro's renderer releases its media after handing the still back")
++                renderer_released = False
++                deadline = time.monotonic() + 5
++                while time.monotonic() < deadline:
++                    status = call(daemon_socket, "status")
++                    if not status["render_alive"]:
++                        renderer_released = True
++                        break
++                    time.sleep(0.1)
++                check(renderer_released, "the intro's renderer exits after handing the still back")
+                 commands_before = len(commands_path.read_text().splitlines())
+                 result = subprocess.run(cli + ["intro", "--start", "first-frame", "good.mp4"], env=env, cwd=root,
+                                         capture_output=True, text=True, timeout=8)
+--- a/test/startup.py
++++ b/test/startup.py
+@@ -23,7 +23,7 @@
+         (current / 'background').symlink_to(root / selected)
+         (root / 'bin').mkdir()
+         helper = root / 'bin/omarchy-shell'
+-        helper.write_text('#!/bin/bash\ntouch "$XDG_RUNTIME_DIR/handoff"\nwhile [[ ! -e $XDG_RUNTIME_DIR/release ]]; do sleep 0.01; done\n')
++        helper.write_text('#!/bin/bash\ntouch "$XDG_RUNTIME_DIR/handoff"\nwhile [[ ! -e $XDG_RUNTIME_DIR/release ]]; do sleep 0.01; done\nprintf "ok\\n"\n')
+         helper.chmod(0o755)
+         env = os.environ.copy()
+         env.update(XDG_RUNTIME_DIR=str(root), XDG_STATE_HOME=str(root), XDG_CONFIG_HOME=str(root), XDG_CACHE_HOME=str(root),
+--- a/test/lock_policy.c
++++ b/test/lock_policy.c
+@@ -746,8 +746,14 @@
+     renderer.down = false;
+     strcpy(supervisor_reply, "{\"status\":\"ok\"}");
+     g_app.shell_stop_at_ms = monotonic_ms() - 1;
+-    process_shell_handoff();
+-    CHECK(strstr(supervisor_last, "\"cmd\":\"park\"") != NULL);
++    supervisor_last[0] = '\0';
++    {
++        int stops = renderer.stops;
++        process_shell_handoff();
++        CHECK(renderer.stops == stops + 1);
++        CHECK(supervisor_last[0] == '\0');
++        CHECK(g_app.renderer_warm_until_ms == 0);
++    }
+     CHECK(g_app.shell_stop_at_ms == 0);
+ 
+     strcpy(g_app.source_path, "/return.mp4");

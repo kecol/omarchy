@@ -131,6 +131,8 @@ or `omarchy.power`. There is no `bar` target.
 | `listShellConfig`                     | effective shell.json as JSON    |
 | `debugBarGeometry`                    | bar geometry dump for debugging |
 
+`shell setBackgroundSuspended <"true"|"false">` controls transient renderer ownership without writing `shell.json`. It returns `ok` for a loaded background service, `disabled` when the selected plugin is intentionally disabled, or `not ready` / `invalid` when the request cannot be acknowledged. Temporary ownership survives service replacement and does not enable a disabled plugin. OWE must use this method, accept only explicit `ok` / `disabled` acknowledgements, and never fall back to `setPluginEnabled` on failure. The matching OWE daemon change must be qualified and deployed with this shell API; the unchanged old daemon can still execute its destructive fallback. The paired build is defined in [`packages/owe-quattro`](../packages/owe-quattro/README.md). It also releases the owned renderer after the existing handoff grace instead of parking a stale video buffer behind a disabled background.
+
 `setPluginEnabled` takes a string; only literal `"true"` enables. Methods
 answer on stdout with exit 0 — `ok` on success, `unknown` or an error
 string on a miss.
@@ -235,8 +237,9 @@ The shell exposes these tokens to QML via three singletons in
   by the launcher outside shell QML.
 - `Style` — structural tokens (`cornerRadius`), shared interactive
   state tokens/helpers, spacing (`Style.spacing.*` / `Style.space(px)`),
-  the type scale (`Style.font.*`), and bar dimensions
-  (`Style.bar.sizeHorizontal` / `Style.bar.sizeVertical`).
+  the type scale (`Style.font.*`), bar dimensions
+  (`Style.bar.sizeHorizontal` / `Style.bar.sizeVertical`), and motion:
+  `Style.duration(ms)`, which every animation length goes through and which returns 0 when `omarchy toggle animations` has turned Hyprland's animations off (`Style.reduceMotion`), and `Style.easeOut`, the strong ease-out curve (`cubic-bezier(0.23, 1, 0.32, 1)`) for movement and entrances, used as `easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut`. [`agents/skills/motion.md`](../agents/skills/motion.md) has the rules for using them.
 - `Border` — border-spec helpers for QML surfaces. Use with
   `BorderSurface` from `qs.Ui` when a border should honor shell theme
   gradients or per-side widths. `Commons.Color.<section>.border` is only the
