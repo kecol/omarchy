@@ -1,0 +1,6 @@
+{
+  "name": "opencode",
+  "harness": "opencode",
+  "runtime": "podman",
+  "command": ["opencode"]
+}

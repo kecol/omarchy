@@ -75,7 +75,23 @@ cat >"$mock_bin/systemd-run" <<'SH'
 while [[ $1 != "nice" ]]; do shift; done
 exec "$@"
 SH
-chmod +x "$mock_bin/omarchy-cmd-missing" "$mock_bin/podman" "$mock_bin/mise" "$mock_bin/systemd-run"
+# Control-flow adapter only; the real namespace has a separate kernel-access test.
+cat >"$mock_bin/bwrap" <<'SH'
+#!/bin/bash
+while (( $# )); do
+  if [[ $1 == "--ro-bind" && $3 == "/usr/bin/mise" ]]; then
+    mise=$2
+    shift 3
+  elif [[ $1 == "--" ]]; then
+    shift 2
+    exec "$mise" "$@"
+  else
+    shift
+  fi
+done
+exit 1
+SH
+chmod +x "$mock_bin/omarchy-cmd-missing" "$mock_bin/podman" "$mock_bin/mise" "$mock_bin/bwrap" "$mock_bin/systemd-run"
 
 run_build() {
   PATH="$mock_bin:/usr/bin" \

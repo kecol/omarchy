@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -59,27 +60,68 @@ def metadata(name):
     'containerfile': str(recipe), 'ignorefile': str(ignore)}
 
 
+def release_command(work, tool):
+  # Environment overrides alone do not hide account-database HOME, config
+  # includes, credential helpers or sockets. Expose no host home/project tree.
+  sandbox = shutil.which('bwrap')
+  mise = shutil.which('mise')
+  if not sandbox or not mise:
+    raise ValueError('Automatic release lookup requires bubblewrap and mise')
+  home = work / 'home'
+  (work / 'passwd').write_text(f'agent:x:{os.getuid()}:{os.getgid()}::{home}:/bin/sh\n')
+  (work / 'group').write_text(f'agent:x:{os.getgid()}:\n')
+  (work / 'hosts').write_text('127.0.0.1 localhost\n::1 localhost\n')
+  (work / 'nsswitch.conf').write_text('passwd: files\ngroup: files\nhosts: files dns\n')
+  command = [sandbox, '--unshare-all', '--share-net', '--die-with-parent', '--new-session',
+    '--cap-drop', 'ALL', '--ro-bind', '/usr', '/usr']
+  for name in ('bin', 'sbin', 'lib', 'lib64'):
+    if Path('/' + name).exists():
+      command += ['--symlink', 'usr/bin' if name in ('bin', 'sbin') else 'usr/lib', '/' + name]
+  command += ['--dir', '/etc', '--proc', '/proc', '--dev', '/dev',
+    '--tmpfs', '/tmp', '--tmpfs', '/run', '--bind', str(work), str(work)]
+  for name in ('passwd', 'group', 'hosts', 'nsswitch.conf'):
+    command += ['--ro-bind', str(work / name), '/etc/' + name]
+  # Bind the resolved public bundle, not /etc/ssl (which can contain private keys).
+  bundle = Path('/etc/ssl/certs/ca-certificates.crt').resolve(strict=True)
+  command += ['--ro-bind', str(bundle), '/etc/ssl/certs/ca-certificates.crt',
+    '--symlink', 'certs/ca-certificates.crt', '/etc/ssl/cert.pem',
+    '--ro-bind', str(Path('/etc/resolv.conf').resolve(strict=True)), '/etc/resolv.conf',
+    '--ro-bind', str(Path(mise).resolve(strict=True)), '/usr/bin/mise',
+    '--chdir', str(work), '--', '/usr/bin/mise', 'latest', tool]
+  return command
+
+
 def latest(info):
-  # No host installation/config/credentials or project hooks are needed to ask
-  # for a public version. Network resolution happens only after explicit setup.
+  # Network resolution happens only after explicit setup. No provider account,
+  # host installation/configuration or project hooks are needed for this query.
   with tempfile.TemporaryDirectory(prefix='omarchy-harness-release-') as directory:
     work = Path(directory)
-    for name in ('home', 'config', 'data', 'cache', 'system'):
+    for name in ('home', 'config', 'data', 'cache', 'state', 'system'):
       (work / name).mkdir()
     (work / 'empty.toml').write_text('')
     env = {key: value for key, value in os.environ.items()
-      if key in ('PATH', 'LANG', 'LC_ALL', 'TERM', 'NO_COLOR')}
+      if key in ('LANG', 'LC_ALL', 'TERM', 'NO_COLOR')}
     env.update(
+      PATH='/usr/bin:/bin',
       HOME=str(work / 'home'),
       XDG_CONFIG_HOME=str(work / 'config'),
       XDG_DATA_HOME=str(work / 'data'),
       XDG_CACHE_HOME=str(work / 'cache'),
+      XDG_STATE_HOME=str(work / 'state'),
+      MISE_CONFIG_DIR=str(work / 'config' / 'mise'),
+      MISE_DATA_DIR=str(work / 'data' / 'mise'),
+      MISE_CACHE_DIR=str(work / 'cache' / 'mise'),
+      MISE_STATE_DIR=str(work / 'state' / 'mise'),
+      MISE_GLOBAL_CONFIG_ROOT=str(work / 'home'),
       MISE_SYSTEM_CONFIG_DIR=str(work / 'system'),
+      MISE_SYSTEM_CONFIG_FILE=str(work / 'empty.toml'),
       MISE_GLOBAL_CONFIG_FILE=str(work / 'empty.toml'),
       MISE_CONFIG_FILE=str(work / 'empty.toml'),
       MISE_MINIMUM_RELEASE_AGE='0',
+      SSL_CERT_FILE='/etc/ssl/certs/ca-certificates.crt',
+      SSL_CERT_DIR='/etc/ssl/certs',
     )
-    result = subprocess.run(['mise', 'latest', info['mise_tool']], cwd=work, env=env,
+    result = subprocess.run(release_command(work, info['mise_tool']), cwd=work, env=env,
       stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=30)
     if result.returncode or len(result.stdout) > 128:
       raise ValueError('Public release metadata unavailable; current image is unchanged')

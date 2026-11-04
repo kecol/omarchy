@@ -1,0 +1,42 @@
+FROM docker.io/library/archlinux:base AS opencode-installer
+
+ARG OPENCODE_VERSION
+ENV MISE_DATA_DIR=/opt/mise
+ENV MISE_CACHE_DIR=/var/cache/mise
+
+# The registry's npm backend needs Node/npm during installation. Preserve the
+# tool prefix: mise's launcher resolves the native binary through sibling .mise
+# package files. Copying only bin/opencode produces a broken relative launcher.
+RUN pacman -Syu --noconfirm --needed ca-certificates mise nodejs npm \
+    && mise install "opencode@$OPENCODE_VERSION"
+
+# New npm backends use node_modules/.bin rather than bin. Retain the complete
+# prefix and link to the observed relative launcher; do not guess that layout.
+RUN opencode_dir=$(mise where "opencode@$OPENCODE_VERSION") \
+    && launcher=$(mise exec "opencode@$OPENCODE_VERSION" -- /bin/bash -c 'command -v opencode') \
+    && case "$launcher" in "$opencode_dir"/*) ;; *) exit 1 ;; esac \
+    && relative_launcher=${launcher#"$opencode_dir/"} \
+    && mkdir -p /opt/opencode \
+    && cp -a "$opencode_dir/." /opt/opencode/ \
+    && ln -s "/opt/opencode/$relative_launcher" /opt/opencode/.harness-entrypoint \
+    && /opt/opencode/.harness-entrypoint --version
+
+FROM docker.io/library/archlinux:base
+
+ARG HARNESS_UID=1000
+ARG HARNESS_GID=1000
+
+RUN pacman -Syu --noconfirm --needed \
+      ca-certificates curl fd git jq openssh ripgrep \
+    && rm -rf /var/cache/pacman/pkg/* /var/lib/pacman/sync/*
+
+COPY --from=opencode-installer /opt/opencode /opt/opencode
+RUN ln -s /opt/opencode/.harness-entrypoint /usr/local/bin/opencode \
+    && groupadd --gid "$HARNESS_GID" agent \
+    && useradd --uid "$HARNESS_UID" --gid "$HARNESS_GID" --create-home --shell /bin/bash agent \
+    && install -d -o agent -g agent /workspace
+
+ENV HOME=/home/agent
+USER agent
+WORKDIR /workspace
+ENTRYPOINT ["opencode"]
