@@ -1,6 +1,12 @@
 import json
 import os
+import fcntl
 from pathlib import Path
+import pty
+import select
+import struct
+import termios
+import time
 import shutil
 import subprocess
 import tempfile
@@ -26,7 +32,7 @@ class LauncherTests(unittest.TestCase):
     logger = '#!/usr/bin/python3\nimport json,os,sys\nwith open(os.environ["CALLS"],"a") as f: f.write(json.dumps({"args":sys.argv,"cwd":os.getcwd()})+"\\n")\n'
     for name in ('pi', 'codex', 'omarchy-agent-run-podman'):
       self.program(name, logger)
-    self.program('omarchy-default-agent', '#!/bin/bash\necho codex\n')
+    self.program('omarchy-default-agent', '#!/bin/bash\necho "${DEFAULT_AGENT-codex}"\n')
     self.program('omarchy-agent-mode', '#!/bin/bash\necho "${MODE:-host}"\nexit "${MODE_STATUS:-0}"\n')
     self.program('omarchy-cmd-missing', '#!/bin/bash\n! command -v "$1" >/dev/null\n')
     self.program('omarchy-pkg-present', '#!/bin/bash\nexit 1\n')
@@ -45,6 +51,108 @@ class LauncherTests(unittest.TestCase):
   def calls(self):
     return [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
 
+  def picker_tools(self):
+    # Synthetic catalog/UI adapters for launcher control flow. Real gum has a
+    # separate private-PTY qualification; these stubs are not visual evidence.
+    self.picker_log = self.base/'picker-calls'
+    self.program('node', '#!/usr/bin/python3\nimport os,json\nassert "NODE_OPTIONS" not in os.environ\nprint(json.dumps([{"name":"codex","label":"Codex"},{"name":"pi","label":"Pi"},{"name":"claude","label":"Claude Code"}]))\n')
+    self.program('gum', '#!/usr/bin/python3\nimport json,os,sys\nwith open(os.environ["PICKER_CALLS"],"a") as f:f.write(json.dumps(sys.argv[1:])+"\\n")\nprint(os.environ.get("PICKER_CHOICE","Cancel"))\nsys.exit(int(os.environ.get("PICKER_STATUS","0")))\n')
+    self.env['PICKER_CALLS'] = str(self.picker_log)
+
+  def launch_tty(self, *args, **extra):
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 100, 0, 0))
+    process = subprocess.Popen([str(self.bin/'omarchy-agent'), *args], env={**self.env, 'TERM':'xterm-256color', **extra}, cwd=self.project, stdin=slave, stdout=slave, stderr=slave)
+    os.close(slave)
+    output = bytearray()
+    try:
+      deadline = time.monotonic()+15
+      while time.monotonic() < deadline:
+        if select.select([master], [], [], 0.1)[0]:
+          try:
+            data = os.read(master, 65536)
+          except OSError:
+            break
+          if not data:
+            break
+          output.extend(data)
+        elif process.poll() is not None:
+          break
+      code = process.wait(timeout=2)
+    finally:
+      os.close(master)
+    return subprocess.CompletedProcess(args, code, output.decode(errors='replace'), '')
+
+  def test_interactive_cancel_never_launches_or_changes_defaults(self):
+    self.picker_tools()
+    result = self.launch_tty('--inline', MODE='container', NODE_OPTIONS='--synthetic-must-not-run')
+    self.assertEqual(result.returncode, 0, result.stdout)
+    self.assertFalse(self.log.exists(), 'cancelled picker started an agent')
+    self.assertFalse((self.home/'.config').exists())
+    self.assertEqual(len(self.picker_log.read_text().splitlines()), 1)
+
+  def test_interactive_choice_and_override_are_one_launch_only(self):
+    self.picker_tools()
+    result = self.launch_tty('--inline', '--container', MODE='host', PICKER_CHOICE='Pi')
+    self.assertEqual(result.returncode, 0, result.stdout)
+    self.assertIn('pi', self.calls()[0]['args'])
+    self.assertFalse((self.home/'.config').exists())
+    options = json.loads(self.picker_log.read_text().splitlines()[0])
+    self.assertIn('--header=Mode: Container (override)\nDefault agent: Codex\nChoose for this launch only', options)
+    self.assertIn('--selected=Codex (default)', options)
+
+  def test_explicit_agent_and_programmatic_tty_calls_bypass_picker(self):
+    self.picker_tools()
+    for args in [('--inline','--agent','pi'), ('--inline','--agent-internal','pi'), ('--inline','--prompt','literal task'), ('--check',), ('--inline',)]:
+      extra = {'MODE':'container'}
+      if args == ('--inline',):
+        extra['OMARCHY_AGENT_MANAGED'] = 'true'
+      result = self.launch_tty(*args, **extra)
+      self.assertEqual(result.returncode, 0, result.stdout)
+    self.assertFalse(self.picker_log.exists())
+
+  def test_host_picker_uses_installed_only_without_host_account_lookup(self):
+    self.picker_tools()
+    result = self.launch_tty('--inline', MODE='host', PICKER_CHOICE='Pi')
+    self.assertEqual(result.returncode, 0, result.stdout)
+    self.assertEqual(self.calls()[0]['args'][0], str(self.bin/'pi'))
+    self.assertFalse((self.home/'.config').exists())
+    self.assertNotIn('account-query', self.log.read_text())
+
+  def test_oneshot_and_resume_tty_calls_bypass_picker(self):
+    self.picker_tools()
+    for args in [('--oneshot','--prompt','literal task'), ('--inline','--resume-session')]:
+      result = self.launch_tty(*args, MODE='container', DEFAULT_AGENT='pi')
+      self.assertEqual(result.returncode, 0, result.stdout)
+    self.assertFalse(self.picker_log.exists())
+
+  def test_noninteractive_pick_and_prompt_do_not_prompt(self):
+    self.picker_tools()
+    for args in [('--inline',), ('--inline','--pick'), ('--inline','--prompt','literal task')]:
+      result = self.launch(*args, MODE='container')
+      self.assertEqual(result.returncode, 0, result.stderr)
+    result = self.launch('--pick', DEFAULT_AGENT='')
+    self.assertNotEqual(result.returncode, 0)
+    self.assertFalse(self.picker_log.exists())
+
+  def test_picker_refusals_do_not_fall_back_or_read_accounts(self):
+    self.picker_tools()
+    for extra in [dict(MODE='invalid'), dict(MODE='host',MODE_STATUS='1'), dict(MODE='container',PICKER_STATUS='2'), dict(MODE='container',PICKER_CHOICE='invalid output')]:
+      result = self.launch_tty('--inline', **extra)
+      self.assertNotEqual(result.returncode, 0, result.stdout)
+    self.assertFalse(self.log.exists())
+    self.assertFalse((self.home/'.config').exists())
+
+  def test_no_saved_default_cancel_and_explicit_pick_do_not_save(self):
+    self.picker_tools()
+    result = self.launch_tty('--inline','--pick', MODE='container', DEFAULT_AGENT='')
+    self.assertEqual(result.returncode, 0, result.stdout)
+    options = json.loads(self.picker_log.read_text().splitlines()[0])
+    self.assertIn('--selected=Cancel', options)
+    self.assertEqual(options[options.index('--')+1], 'Cancel')
+    self.assertFalse(self.log.exists())
+    self.assertFalse((self.home/'.config').exists())
+
   def test_host_check_resolves_without_running_agent_or_reading_account_state(self):
     result = self.launch('--check', '--agent', 'pi', '--host')
     self.assertEqual(result.returncode, 0, result.stderr)
@@ -59,7 +167,7 @@ class LauncherTests(unittest.TestCase):
     self.assertFalse(self.log.exists())
     result = self.launch('--check', '--agent', 'codex', '--container')
     self.assertEqual(result.returncode, 0, result.stderr)
-    result = self.launch('--check', '--agent', 'claude', '--container')
+    result = self.launch('--check', '--agent', 'hermes', '--container')
     self.assertNotEqual(result.returncode, 0)
     self.assertFalse(self.log.exists())
 

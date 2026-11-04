@@ -40,6 +40,11 @@ class HerdrHintTests(unittest.TestCase):
     self.home.mkdir()
     self.project = self.root/'project with spaces ; $(touch escaped)'
     self.project.mkdir()
+    # Selection UI is covered by agent-menu-test.py. This fixture exercises
+    # real launcher hint propagation after a synthetic per-launch selection.
+    picker = self.root/'default/agents/launch-menu.py'
+    picker.parent.mkdir(parents=True)
+    picker.write_text("import os, sys\nassert sys.argv[1] == '--cli-pick'\nprint(os.environ.get('TEST_PICKED_AGENT', sys.argv[3]))\n")
     self.log = self.root/'result.json'
     self.env = {'PATH': str(self.bin)+':/usr/bin:/bin', 'HOME': str(self.home),
                 'OMARCHY_PATH': str(self.root), 'TEST_LOG': str(self.log),
@@ -102,6 +107,12 @@ class HerdrHintTests(unittest.TestCase):
     code, row = self.launch(['--inline'])
     self.assertEqual(code, 0)
     self.assertEqual(row['hint'], 'pi')
+
+  def test_picker_selection_labels_selected_agent_not_saved_default(self):
+    code, row = self.launch(['--inline'], environment={'TEST_PICKED_AGENT': 'claude'})
+    self.assertEqual(code, 0)
+    self.assertEqual(row['hint'], 'claude')
+    self.assertEqual(row['args'][:3], ['--container', '--select-image', 'claude'])
 
   def test_supported_selected_agent_names(self):
     for agent in ('omp', 'claude', 'opencode', 'agy', 'copilot', 'grok', 'hermes', 'muse', 'kimi'):

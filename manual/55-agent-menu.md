@@ -12,7 +12,7 @@ Select **Workspace Files** to reuse a named container workspace's project files.
 
 The agent picker uses the same catalog as **Setup → Defaults → Agent**. The current default is listed first. Rows distinguish an installed host command from a configured container definition; these are separate requirements.
 
-Select **Host** or **Container** for this launch. The current execution default is listed first. An unsupported selection reports an error; it never falls back to another agent or to Host. The bundled container definition currently supports Pi. Other agents require their own valid container definitions and images.
+Select **Host** or **Container** for this launch. The current execution default is listed first. An unsupported selection reports an error; it never falls back to another agent or to Host. Bundled container definitions and recipes support Pi, Codex, Claude Code, and OpenCode. Other agents require their own valid container definitions and images.
 
 Host checks resolve installed executables without running them. Menu launches bypass mise's lazy shims and do not ask Omarchy to install or update a missing host tool. Install missing tools explicitly. OpenClaw starts through its installed `tui` command; its gateway must already be configured, because this menu does not install/onboard a gateway service.
 
@@ -75,7 +75,15 @@ An invalid or unreadable setting shows **Default: Unknown**, with neither execut
 
 ## Per-launch command-line options
 
-The ordinary CLI remains noninteractive unless its existing flow needs interaction. Project and agent selection are explicit options:
+In an interactive terminal, `omarchy agent` shows a launch-only agent picker. The header shows the effective execution mode (Host or Container), whether it comes from the saved setting or a command-line override, and the saved default agent. The saved agent is preselected. With no saved agent, Cancel is preselected. Choosing an agent does not save a default or change the mode setting; Cancel or Escape launches nothing.
+
+The picker reuses the default-agent catalog and the desktop menu's read-only checks for the effective mode. It lists installed Host commands or usable Container definitions. A saved default that is unavailable in that mode remains visible and preselected with an unavailable label; it is not silently replaced. An unavailable selection fails through the existing launcher without falling back. Definition availability does not establish image availability, authentication, provider access, or task readiness. Host choices use installed-only resolution and do not execute lazy install/update shims. Container image preparation still needs the existing explicit consent. No authentication or usage collector runs for selection.
+
+`--host` or `--container` sets the mode shown in the picker for this launch only. Explicit `--agent NAME` (including `--agent=NAME` and the legacy internal form) bypasses the picker. Prompted launches, checks, one-shot runs, session recovery, managed execution and calls without terminal stdin/stdout/stderr keep their deterministic launch behavior. The existing `--pick` flag requests the same picker for an interactive launch, including a prompted launch, but never overrides an explicit agent or opens default-setting setup. Without a terminal and without a saved/explicit agent, it reports an error instead of opening a dialog.
+
+The default **Super + Shift + Ctrl + A** shortcut opens a terminal for the same launch-only picker. It does not open the default-setting dialog.
+
+Use explicit options to bypass agent selection:
 
 ```bash
 omarchy agent --agent pi --directory ~/Projects/project --container

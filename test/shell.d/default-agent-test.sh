@@ -304,16 +304,15 @@ grep -Fq "Choose default agent with" "$test_tmp/no-agent-output" ||
 [[ ! -s $launch_log ]] || fail "agent launcher starts nothing without a default"
 pass "agent launcher refuses to launch without a default"
 
-# The keybinding uses --pick, where an error on stderr nobody sees would make
-# the keypress look broken. It offers the choice instead.
+# Non-terminal calls must not open a picker or a default-setting dialog.
 : >"$launch_log"
 : >"$menu_log"
-omarchy-agent --pick
-mapfile -d '' -t menu_args <"$menu_log"
-[[ ${menu_args[*]} == "summon setup.default.agent" ]] ||
-  fail "--pick opens the agent defaults menu when none is set"
-[[ ! -s $launch_log ]] || fail "--pick starts nothing when no agent is set"
-pass "--pick opens the agent defaults menu when none is set"
+if omarchy-agent --pick >"$test_tmp/no-agent-pick-output" 2>&1; then
+  fail "noninteractive --pick refuses to launch without an agent"
+fi
+[[ ! -s $menu_log ]] || fail "noninteractive --pick does not open a default-setting dialog"
+[[ ! -s $launch_log ]] || fail "noninteractive --pick starts nothing when no agent is set"
+pass "noninteractive --pick refuses without prompting or changing defaults"
 
 source "$ROOT/default/bash/aliases"
 [[ $(alias a) == "alias a='omarchy-agent --inline'" ]] ||
@@ -824,7 +823,7 @@ mapfile -d '' -t launch_args <"$launch_log"
 [[ ${launch_args[*]} == "--app-id=org.omarchy.agent opencode --auto" ]] ||
   fail "omarchy agent routes to the launcher"
 
-# With an agent chosen there is nothing to pick, so the keybinding launches.
+# Non-terminal calls retain deterministic saved-default launch behavior.
 : >"$launch_log"
 : >"$menu_log"
 omarchy-agent --pick
