@@ -2,13 +2,15 @@
 
 A fresh install needs no pre-existing agent image or running container. In Container mode, an interactive agent launch offers **Prepare and run** when its image is missing. Preparation uses a reviewed bundled recipe; it does not install the agent on the host.
 
-Pi and Codex have bundled definitions and recipes. Other agents are not automatically given generated recipes. Unsupported Container defaults are rejected before saving or installing anything on the host. Selecting a supported default validates its recipe, not engine readiness or authentication.
+Pi, Codex, Claude Code (`claude`), and OpenCode (`opencode`) have bundled definitions and recipes. Other agents are not automatically given generated recipes. Unsupported Container defaults are rejected before saving or installing anything on the host. Selecting a supported default validates its recipe, not engine readiness or authentication.
 
 ## Prepare without starting an agent
 
 ```bash
 omarchy agent prepare --agent codex
 omarchy agent prepare --agent pi
+omarchy agent prepare --agent claude
+omarchy agent prepare --agent opencode
 ```
 
 An existing matching local image is reused without release lookup or rebuilding. Otherwise a confirmation, defaulting to Cancel, explains the download/build and disposable checks. No saved execution mode is changed.
@@ -32,7 +34,7 @@ omarchy agent prepare --agent pi --yes --version=1.4.0
 
 Omarchy uses reviewed bundled recipes and an explicit build-context allowlist. It does not generate recipes or accept arbitrary build commands from user definitions.
 
-Public version lookup runs with an empty temporary home/config/data/cache, without host project hooks, installed-agent dependencies, account configuration, or credential environment variables. Image preparation and execution use the local rootless engine, ignoring remote engine defaults.
+Automatic public version lookup requires Bubblewrap (`bubblewrap`) and mise. It runs inside a filesystem namespace with a temporary home/config/data/cache and synthetic account information. Host account configuration, project hooks, home directories, sockets and credential environment variables are not exposed. It retains public TLS verification and network access to fetch public release metadata. If Bubblewrap is unavailable or the namespace cannot start, lookup stops; it does not fall back to the host configuration. Supplying an exact `--version` skips this lookup, but does not skip build validation or authorize authentication. Image preparation and execution use the local rootless engine, ignoring remote engine defaults.
 
 A private candidate image is built before changing stable tags. Builds use a user scope configured for 2 GiB memory, two CPUs, and 512 tasks, plus container memory/CPU flags and a 30-minute timeout. No unrelated service is restarted. Validation has no network and uses only an empty disposable home volume and temporary project fixture. It checks:
 
@@ -60,6 +62,8 @@ omarchy agent --inline --container --agent codex --directory /path/to/project
 ```
 
 An inline project directory is a **read-write bind mount**, not a private clone. Use the Workspaces workflow for an independent editor workspace. Editor containers and their account stores are not reused for this harness.
+
+Claude Code and OpenCode are optional selections. For example, use `--agent claude` or `--agent opencode` in the launch command above. Selecting either does not change the saved default. Follow the selected agent's in-container sign-in instructions; a browser callback that needs port forwarding is not configured automatically.
 
 Authentication belongs to the agent's explicit in-container sign-in flow and persistent container home. Host sign-in state is not copied during preparation. No provider request is used as a readiness test, and failure never silently falls back to Host.
 

@@ -8,7 +8,7 @@ An interactive `omarchy agent` launch in container mode shows the local image be
 
 If no local image exists, the menu offers **Prepare and run** and **Exit**. Preparation asks for confirmation (default Cancel), builds and checks the image, and starts that image only after success. See [first-run preparation](58-agent-container-preparation.md) for CLI preparation, prerequisites, and authentication limits.
 
-After a successful update, the menu shows the new version. Select **Run** to start it. Omarchy checks the executable/version and disposable runtime fixtures before changing the local `latest` tag. Pi and Codex use the same backend with reviewed per-harness metadata. If building or validation fails, the previous image remains selected.
+After a successful update, the menu shows the new version. Select **Run** to start it. Omarchy checks the executable/version and disposable runtime fixtures before changing the local `latest` tag. Pi, Codex, Claude Code, and OpenCode use the same backend with reviewed per-harness metadata. If building or validation fails, the previous image remains selected.
 
 The `latest` tag means the most recently built and verified local image. It does not check the release server during each launch. The host Pi version and container Pi version can differ.
 

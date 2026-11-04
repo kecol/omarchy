@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import pty
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -22,6 +23,12 @@ with (base/'calls').open('a') as f:f.write(json.dumps([name]+args)+'\\n')
 p=base/'state.json';s=json.loads(p.read_text())
 def save():p.write_text(json.dumps(s))
 if name=='omarchy-cmd-missing':sys.exit(0 if args[0] in s.get('missing',[]) else 1)
+if name=='bwrap':
+ # Control-flow fixture only. Kernel isolation is tested separately below with
+ # real Bubblewrap and an adversarial child, not this transparent adapter.
+ index=next(i for i in range(len(args)-2) if args[i:i+1]==['--ro-bind'] and args[i+2]=='/usr/bin/mise')
+ tail=args[args.index('--')+1:];assert tail[:2]==['/usr/bin/mise','latest']
+ os.execv(args[index+1],[args[index+1],*tail[1:]])
 if name=='mise':
  assert args[:1]==['latest'],args
  assert os.environ['HOME']!=str(base/'home')
@@ -84,7 +91,7 @@ class PrepareTests(unittest.TestCase):
     self.env={'HOME':str(self.home),'PATH':str(self.bin)+':'+str(ROOT/'bin')+':/usr/bin:/bin','OMARCHY_PATH':str(ROOT),'TERM':'dumb'}
     self.state={'tags':{},'choices':[]}
     self.save()
-    for name in ('podman','mise','gum','omarchy-cmd-missing','systemd-run','omarchy-agent'):
+    for name in ('podman','mise','bwrap','gum','omarchy-cmd-missing','systemd-run','omarchy-agent'):
       path=self.bin/name;path.write_text(MOCK);path.chmod(0o755)
 
   def save(self): (self.root/'state.json').write_text(json.dumps(self.state))
@@ -114,6 +121,43 @@ class PrepareTests(unittest.TestCase):
     self.state=json.loads((self.root/'state.json').read_text())
     self.assertEqual(result.returncode,code,result.stderr.decode(errors='replace'))
     return result
+
+  @unittest.skipUnless(shutil.which('bwrap'), 'real Bubblewrap is required')
+  def test_release_namespace_denies_outside_files_and_ambient_credentials(self):
+    # The fake CLI is an adversarial payload, not an isolation implementation:
+    # real kernel file access must fail inside the production resolver namespace.
+    outside=self.root/'outside-secret';outside.write_text('synthetic-do-not-read')
+    project=self.root/'host-project';project.mkdir();(project/'mise.toml').write_text('[tools]\npi="invalid-canary"\n')
+    socket_path=self.root/'outside.sock'
+    import socket
+    sock=socket.socket(socket.AF_UNIX);sock.bind(str(socket_path));self.addCleanup(sock.close)
+    canary=self.root/'native-tools';canary.mkdir()
+    payload=canary/'mise'
+    payload.write_text('#!/usr/bin/python3\nimport os,pathlib,pwd,socket\n'
+      +'assert not pathlib.Path('+repr(str(outside))+').exists(), "outside file exposed"\n'
+      +'assert not pathlib.Path('+repr(str(project))+').exists(), "source checkout exposed"\n'
+      +'s=socket.socket(socket.AF_UNIX)\n'
+      +'try:s.connect('+repr(str(socket_path))+')\n'
+      +'except OSError:pass\n'
+      +'else:raise AssertionError("outside socket exposed")\n'
+      +'assert not any(k in os.environ for k in ("OPENAI_API_KEY","ANTHROPIC_API_KEY","SSH_AUTH_SOCK","NODE_OPTIONS","BASH_ENV"))\n'
+      +'assert pwd.getpwuid(os.getuid()).pw_dir==os.environ["HOME"]\n'
+      +'print("1.2.3")\n')
+    payload.chmod(0o755)
+    spec=importlib.util.spec_from_file_location('native_release_meta',ROOT/'default/agents/harness.py')
+    env={'PATH':str(canary)+':/usr/bin:/bin','OMARCHY_PATH':str(ROOT),'OPENAI_API_KEY':'synthetic','ANTHROPIC_API_KEY':'synthetic','SSH_AUTH_SOCK':str(socket_path),'NODE_OPTIONS':'--synthetic','BASH_ENV':str(outside)}
+    with patch.dict(os.environ,env,clear=True):
+      module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+      self.assertEqual(module.latest({'mise_tool':'pi'}),'1.2.3')
+    self.assertEqual(outside.read_text(),'synthetic-do-not-read')
+
+  def test_missing_release_sandbox_fails_without_starting_mise(self):
+    spec=importlib.util.spec_from_file_location('missing_sandbox_meta',ROOT/'default/agents/harness.py')
+    with patch.dict(os.environ,self.env,clear=True):
+      module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+      with patch.object(module.shutil,'which',side_effect=lambda name:None if name=='bwrap' else str(self.bin/'mise')),patch.object(module.subprocess,'run') as run:
+        with self.assertRaises(ValueError):module.latest({'mise_tool':'pi'})
+        run.assert_not_called()
 
   def test_missing_pi_image_prepares_after_consent_with_no_host_agent(self):
     self.env.update(OPENAI_API_KEY='fixture-only',SSH_AUTH_SOCK=str(self.root/'not-forwarded.sock'),NODE_OPTIONS='--fixture-must-not-propagate')
@@ -240,7 +284,7 @@ class PrepareTests(unittest.TestCase):
   def test_unsupported_default_does_not_save_or_install_host_tool(self):
     mode=self.home/'.config/omarchy/agents/mode';mode.parent.mkdir(parents=True);mode.write_text('container\n')
     defaults=self.home/'.config/omarchy/defaults';defaults.mkdir();(defaults/'agent').write_text('pi\n')
-    self.run_command('omarchy-default-agent','claude',code=1)
+    self.run_command('omarchy-default-agent','hermes',code=1)
     self.assertEqual((defaults/'agent').read_text(),'pi\n')
     self.assertFalse(any(c[0]=='mise' for c in self.calls()))
 
