@@ -69,26 +69,23 @@ jobs:
           sudo chmod 0666 /dev/kvm
           docker run --rm --device /dev/kvm -v "$PWD:/w" -v /dev/shm/image:/image:ro -w /w -e VM_STATE_DIR=/tmp -e MEM=6G \
             ghcr.io/archlinux/archlinux:latest bash -euo pipefail -c '
-              # pacman 7 fails every sync on a kernel without Landlock, which
-              # these runners have; omarchy-iso does the same.
-              if ! grep -qw landlock /sys/kernel/security/lsm 2>/dev/null; then
-                printf "#!/bin/sh\nexec /usr/bin/pacman --disable-sandbox \"\$@\"\n" >/usr/local/bin/pacman
-                chmod 0755 /usr/local/bin/pacman
-              fi
-              # Our own Arch mirror first, the public ones after it; a mirror
-              # that drops one file must not fail the run: try again.
+              # Reject full or partial sandbox opt-outs, including Includes.
+              # Do not rewrite the image configuration to make it acceptable.
+              configuration=$(/usr/bin/pacman-conf --verbose)
+              while IFS=" =" read -r option _; do
+                case $option in
+                  DisableSandbox|DisableSandboxFilesystem|DisableSandboxSyscalls)
+                    echo "::error::CI configuration disables the pacman sandbox: $option" >&2
+                    exit 1
+                    ;;
+                esac
+              done <<< "$configuration"
+              # Prefer our Arch mirror, then the existing public mirrors.
               sed -i "1i Server = https://mirror.omarchy.org/\$repo/os/\$arch" /etc/pacman.d/mirrorlist
-              for attempt in 1 2 3; do
-                if pacman -Syu --noconfirm --needed qemu-system-x86 qemu-hw-display-virtio-gpu qemu-hw-display-virtio-vga qemu-img openssh >/dev/null; then
-                  break
-                elif (( attempt < 3 )); then
-                  echo "pacman failed, attempt $attempt of 3; trying again in 15 s"
-                  sleep 15
-                else
-                  echo "::error::the test container could not install QEMU"
-                  exit 1
-                fi
-              done
+              # Use the native manager once, without bypass flags or a PATH
+              # wrapper. With errexit, unsupported sandboxing or any package
+              # failure stops before QEMU/VM execution with the original status.
+              /usr/bin/pacman -Syu --noconfirm --needed qemu-system-x86 qemu-hw-display-virtio-gpu qemu-hw-display-virtio-vga qemu-img openssh >/dev/null
               qemu-system-x86_64 --version | head -n 1
               src/omarchy/test/ci-vm /image src out
             '
