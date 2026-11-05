@@ -117,7 +117,31 @@ fi
 # neither the commands nor the files added since.
 # The exit status goes to a file of its own, renamed into place whole: the
 # tests print lines like "rc=0" themselves, so the log cannot carry it.
-command='export OMARCHY_PATH=~/src/omarchy PATH=~/src/omarchy/bin:$PATH; cd ~/src/omarchy && date +%s.%N >~/started && ./test/all >~/run.log 2>&1; echo "$?" >~/rc.next && mv ~/rc.next ~/rc'
+# Add serial Node preparation only in this disposable guest, not to local
+# test setup. Capture the actual executable before parallel tests replace
+# HOME/PATH with scratch ones; the guard fixture itself never runs a shim.
+command=$(cat <<'GUEST_TESTS'
+set +e
+(
+  set -euo pipefail
+  export OMARCHY_PATH=~/src/omarchy PATH=~/src/omarchy/bin:$PATH
+  date +%s.%N >~/started
+  cd ~
+  echo "test/ci-vm: preparing Node in the disposable guest (lazy install may download)"
+  OMARCHY_TEST_NODE_BINARY=$(node -p 'process.execPath')
+  if [[ $OMARCHY_TEST_NODE_BINARY != /* || ! -f $OMARCHY_TEST_NODE_BINARY || ! -x $OMARCHY_TEST_NODE_BINARY ]]; then
+    echo "test/ci-vm: Node did not report an absolute installed executable" >&2
+    exit 1
+  fi
+  export OMARCHY_TEST_NODE_BINARY
+  printf 'test/ci-vm: prepared Node executable: %s\n' "$OMARCHY_TEST_NODE_BINARY"
+  cd ~/src/omarchy
+  ./test/all
+) >~/run.log 2>&1
+rc=$?
+printf '%s\n' "$rc" >~/rc.next && mv ~/rc.next ~/rc
+GUEST_TESTS
+)
 ssh_vm "systemd-run --user --quiet --collect --same-dir \
   -E OMARCHY_PKGS_PATH=\$HOME/src/omarchy-pkgs bash -c $(printf %q "$command")"
 last_report="" next_report=0

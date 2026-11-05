@@ -30,6 +30,8 @@ the end and exits non-zero.
 
 Every pull request runs `./test/all` on a real Omarchy install (`.github/workflows/test.yml`): `test/ci-vm` boots the VM image of the current stable release, copies the checkout and omarchy-pkgs in, and runs the suite in the desktop session with `OMARCHY_PATH` at the checkout and its `bin/` first on `PATH`. The image is fetched from Cloudflare on every run, which measured faster than restoring it from the Actions cache. The job uploads every file's log.
 
+`test/ci-vm` prepares Node serially in the disposable guest before `test/all` starts. Normal lazy tool setup may download Node there. It records the actual executable path in `OMARCHY_TEST_NODE_BINARY` for the command-guard fixture, which validates the installed ELF before replacing HOME/PATH. An invalid explicit path fails without falling back to a shim or alias. Local test runners receive no added bootstrap step; the guard fixture requires a preinstalled Node and never installs it.
+
 A new shell test only needs the right name: drop `<area>-test.sh` into
 `test/shell.d/` and `./test/shell` picks it up automatically. Shared fixtures
 live under `test/shell.d/fixtures/`.

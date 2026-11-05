@@ -16,12 +16,20 @@ SECRET='PRIVATE-ARGUMENT-NOT-FOR-GUARD-OUTPUT'
 def installed_node(command=None):
   # Resolve public installed executables by metadata only. Running a mise shim
   # here could load caller config or lazily install after HOME becomes scratch.
-  command = command or shutil.which('node')
+  # CI prepares Node serially in its disposable guest and hands off its actual
+  # executable. An invalid explicit value must never fall back to PATH/aliases.
+  explicit = os.environ.get('OMARCHY_TEST_NODE_BINARY') if command is None else None
+  if explicit is not None:
+    if not explicit or not Path(explicit).is_absolute():
+      raise RuntimeError('OMARCHY_TEST_NODE_BINARY must be an absolute installed Node ELF; no shim was executed or tool installed')
+    command = explicit
+  else:
+    command = command or shutil.which('node')
   if not command:
     raise RuntimeError('Expose a preinstalled Node ELF on PATH; no tool was installed')
   selected = Path(command)
   candidates = [selected]
-  if selected.parent.name == 'shims':
+  if explicit is None and selected.parent.name == 'shims':
     # Omarchy declares node=latest. This existing alias needs no mise lookup.
     candidates.append(selected.parent.parent/'installs/node/latest/bin/node')
   for candidate in candidates:
@@ -34,7 +42,7 @@ def installed_node(command=None):
           return path
     except OSError:
       continue
-  raise RuntimeError('Expose a preinstalled Node ELF on PATH; no shim was executed or tool installed')
+  raise RuntimeError(f'No preinstalled Node ELF found for {selected}; no shim was executed or tool installed')
 
 
 @unittest.skipIf(os.getuid()==0,'guard management deliberately rejects root')
@@ -91,6 +99,63 @@ class GuardsTests(unittest.TestCase):
       with self.assertRaisesRegex(RuntimeError, 'no shim was executed'):
         installed_node(str(shim))
       run.assert_not_called()
+
+  def test_node_selection_uses_explicit_elf_without_resolving_cold_wrapper(self):
+    wrapper = self.root/'mise-data/command-wrappers/bin/node';wrapper.parent.mkdir(parents=True)
+    wrapper.write_text('#!/bin/bash\nexit 99\n');wrapper.chmod(0o755)
+    with patch.dict(os.environ, {'OMARCHY_TEST_NODE_BINARY': str(self.node)}):
+      with patch.object(shutil, 'which', return_value=str(wrapper)) as which, patch.object(subprocess, 'run') as run:
+        self.assertEqual(installed_node(), self.node)
+        which.assert_not_called();run.assert_not_called()
+
+  def test_node_selection_rejects_invalid_explicit_binary_without_fallback(self):
+    data = self.root/'mise-data';shims = data/'shims';shims.mkdir(parents=True)
+    shim = shims/'node';shim.write_text('#!/bin/bash\nexit 99\n');shim.chmod(0o755)
+    alias = data/'installs/node/latest/bin/node';alias.parent.mkdir(parents=True);alias.symlink_to(self.node)
+    for value in ('', 'node', str(self.root/'absent/node'), str(shim)):
+      with self.subTest(value=value), patch.dict(os.environ, {'OMARCHY_TEST_NODE_BINARY': value}):
+        with patch.object(shutil, 'which', return_value=str(self.node)) as which, patch.object(subprocess, 'run') as run:
+          with self.assertRaisesRegex(RuntimeError, 'no shim was executed'):
+            installed_node()
+          which.assert_not_called();run.assert_not_called()
+
+  def test_ci_guest_prepares_node_before_tests_and_records_failures(self):
+    # Execute the real guest payload, never its QEMU/SSH controller. The inert
+    # Node and suite endpoints reveal ordering, handoff and failure propagation.
+    source = (ROOT/'test/ci-vm').read_text()
+    start = source.index('\ncommand=') + 1
+    assignment = source[start:source.index('\nssh_vm "systemd-run', start)]
+    for name, setup_exit, suite_exit, binary, expected in (
+      ('ready', 0, 0, str(self.node), 0),
+      ('setup-fails', 17, 0, str(self.node), 17),
+      ('suite-fails', 0, 23, str(self.node), 23),
+      ('empty-path', 0, 0, '', 1),
+      ('relative-path', 0, 0, 'node', 1),
+    ):
+      with self.subTest(name=name):
+        guest = self.root/('CI guest ' + name);checkout = guest/'src/omarchy'
+        binaries = checkout/'bin';binaries.mkdir(parents=True)
+        tests = checkout/'test';tests.mkdir()
+        node = binaries/'node'
+        node.write_text('#!/bin/bash\nprintf "node:%s:%s\\n" "$PWD" "$*" >>"$CALLS"\nif (( SETUP_EXIT != 0 )); then exit "$SETUP_EXIT"; fi\nprintf "%s\\n" "$NODE_BINARY"\n')
+        node.chmod(0o755)
+        suite = tests/'all'
+        suite.write_text('#!/bin/bash\nprintf "suite:%s\\n" "${OMARCHY_TEST_NODE_BINARY-unset}" >>"$CALLS"\nexit "$SUITE_EXIT"\n')
+        suite.chmod(0o755)
+        calls = guest/'calls'
+        result = subprocess.run(['/bin/bash', '-c', assignment + '\n/bin/bash -c "$command"'], env={
+          'HOME': str(guest), 'PATH': '/usr/bin:/bin', 'CALLS': str(calls),
+          'SETUP_EXIT': str(setup_exit), 'SUITE_EXIT': str(suite_exit), 'NODE_BINARY': binary,
+        }, capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((guest/'rc').read_text(), str(expected) + '\n')
+        self.assertFalse((guest/'rc.next').exists())
+        self.assertTrue((guest/'started').is_file())
+        self.assertTrue((guest/'run.log').is_file())
+        expected_calls = [f'node:{guest}:-p process.execPath']
+        if not setup_exit and binary == str(self.node):
+          expected_calls.append(f'suite:{self.node}')
+        self.assertEqual(calls.read_text().splitlines(), expected_calls)
 
   def test_blocks_bare_pi_without_running_or_echoing_arguments(self):
     self.enable();before=self.mode.read_bytes()
