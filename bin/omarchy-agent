@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# omarchy:summary=Launch the default coding agent in a terminal
+# omarchy:summary=Choose a coding agent interactively or launch an explicit/default agent
 # omarchy:args=[--inline] [--pick] [--agent=NAME] [--directory=PATH] [--host|--container] [--check] [--installed-only]
 # omarchy:examples=omarchy agent | omarchy agent --inline
 
@@ -101,14 +101,9 @@ elif [[ $PWD == "$HOME" && -d $HOME/Work ]]; then
   cd "$HOME/Work" || exit 1
 fi
 
-agent=${selected_agent:-$(omarchy-default-agent)}
-
-# Omarchy ships without a default, so there is nothing to launch until one is
-# picked. --pick offers the choice instead of the error, which is what the
-# keybinding wants: a keypress that opens nothing explains nothing.
-if [[ -z $agent ]]; then
-  [[ $pick == "true" ]] && exec omarchy-menu summon setup.default.agent
-  echo "Choose default agent with: omarchy default agent <name>" >&2
+if [[ -n $selected_agent ]]; then
+  agent=$selected_agent
+elif ! agent=$(omarchy-default-agent); then
   exit 1
 fi
 
@@ -117,6 +112,36 @@ if ! execution_mode=${execution_mode_override:-$(omarchy-agent-mode)}; then
 fi
 if [[ $execution_mode != "host" && $execution_mode != "container" ]]; then
   echo "Invalid agent execution mode: $execution_mode" >&2
+  exit 1
+fi
+
+# Select only for human, unprompted starts (or an explicit --pick). Automation,
+# checks, session recovery and explicit agents must never acquire a new prompt.
+if [[ -z $selected_agent && $checking == "false" && $oneshot == "false" && -z $session_action &&
+      ${OMARCHY_AGENT_MANAGED:-false} != "true" && ${OMARCHY_AGENT_ONESHOT:-false} != "true" &&
+      ${OMARCHY_AGENT_ONESHOT:-0} != "1" && -t 0 && -t 1 && -t 2 ]] &&
+  { [[ $pick == "true" ]] || [[ ! -v prompt && $installed_only == "false" ]]; }; then
+  mode_source=saved
+  if [[ -n $execution_mode_override ]]; then
+    mode_source=override
+  fi
+  if chosen=$(python3 -I -B "$OMARCHY_PATH/default/agents/launch-menu.py" --cli-pick "$execution_mode" "$agent" "$mode_source"); then
+    agent=$chosen
+    # Like the desktop launch picker, do not install/update a lazy host shim.
+    if [[ $execution_mode == "host" ]]; then
+      installed_only=true
+    fi
+  else
+    status=$?
+    if (( status == 130 )); then
+      exit 0
+    fi
+    exit "$status"
+  fi
+fi
+
+if [[ -z $agent ]]; then
+  echo "Choose default agent with: omarchy default agent <name>, or use --agent NAME for one launch." >&2
   exit 1
 fi
 if [[ $execution_mode == "host" && -d ${XDG_DATA_HOME:-$HOME/.local/share}/omarchy/agents/command-guards/bin ]]; then

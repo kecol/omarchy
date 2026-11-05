@@ -107,7 +107,7 @@ def workspace_project(name):
   return record
 
 
-def agent_choices():
+def agent_catalog():
   # Use the existing default-agent menu as the catalog, not another agent list.
   script = '''
 const fs = require("fs"), path = require("path");
@@ -116,7 +116,67 @@ const model = require(path.join(root,"shell/plugins/menu/MenuModel.js"));
 const entries = model.parseMenuJsonc(fs.readFileSync(path.join(root,"default/omarchy/omarchy-menu.jsonc"),"utf8"));
 console.log(JSON.stringify(entries.filter(e => /^setup\\.default\\.agent\\.[a-z0-9-]+$/.test(e.id)).map(e => ({name:e.id.split(".").pop(),label:e.label}))));
 '''
-  records = json.loads(value(["node", "-e", script]))
+  # Read only bundled menu data, never project startup hooks or provider state.
+  env = {k: v for k, v in os.environ.items() if k in ("PATH", "HOME", "LANG", "LC_ALL", "OMARCHY_PATH")}
+  records = json.loads(execute(["node", "-e", script], capture=True, cwd=ROOT, env=env, timeout=5).stdout)
+  if not isinstance(records, list) or not 0 < len(records) <= 128:
+    raise RuntimeError("Invalid agent catalog")
+  names = set()
+  for record in records:
+    if (not isinstance(record, dict) or not isinstance(record.get("name"), str)
+        or not workspaces.NAME.fullmatch(record["name"]) or record["name"] in names
+        or not isinstance(record.get("label"), str) or not 0 < len(record["label"]) <= 80
+        or not record["label"].isprintable()):
+      raise RuntimeError("Invalid agent catalog entry")
+    names.add(record["name"])
+  return records
+
+
+def terminal_agent(mode, default, mode_source):
+  if mode not in ("host", "container") or mode_source not in ("saved", "override"):
+    raise RuntimeError("Invalid execution mode for agent picker")
+  records = agent_catalog()
+  if default and default not in {r["name"] for r in records}:
+    raise RuntimeError("Saved agent is not in the catalog; use --agent NAME or correct the saved default")
+  # Same read-only installed-command/definition checks as the desktop menu,
+  # for this mode only. No image, account, usage or model readiness inference.
+  with ThreadPoolExecutor(max_workers=4) as pool:
+    available = dict(zip((r["name"] for r in records), pool.map(lambda r: ready(r["name"], mode), records)))
+  records = [r for r in records if available[r["name"]] or r["name"] == default]
+  records.sort(key=lambda record: record["name"] != default)
+  rows = {}
+  selected = "Cancel"
+  for record in records:
+    row = record["label"]
+    if record["name"] == default:
+      row += " (default)" if available[record["name"]] else " (default; unavailable)"
+    if row in rows or row == "Cancel":
+      raise RuntimeError("Ambiguous agent label")
+    rows[row] = record["name"]
+    if record["name"] == default:
+      selected = row
+  if default:
+    rows["Cancel"] = None
+  else:
+    rows = {"Cancel": None, **rows}
+  default_label = next((r["label"] for r in records if r["name"] == default), "None")
+  header = f"Mode: {mode.title()} ({mode_source})\nDefault agent: {default_label}\nChoose for this launch only"
+  result = subprocess.run(["gum", "choose", "--limit=1", "--timeout=0", "--height=10",
+    "--header="+header, "--selected="+selected, "--", *rows], text=True, stdout=subprocess.PIPE)
+  if result.returncode in (1, 130):
+    raise ui.Cancelled()
+  if result.returncode != 0:
+    raise RuntimeError("Agent picker failed; no agent was launched")
+  chosen = result.stdout.removesuffix("\n")
+  if chosen not in rows:
+    raise RuntimeError("Invalid picker response; no agent was launched")
+  if rows[chosen] is None:
+    raise ui.Cancelled()
+  return rows[chosen]
+
+
+def agent_choices():
+  records = agent_catalog()
   default = value(["omarchy-default-agent"])
   def available(record):
     return {**record, "host": ready(record["name"], "host"), "container": ready(record["name"], "container")}
@@ -269,6 +329,8 @@ def worker(args):
 def main():
   if sys.argv[1:] == ["--help"]:
     print("Usage: omarchy menu agent\nChoose a project, agent, execution target and access for one launch.")
+  elif len(sys.argv) == 5 and sys.argv[1] == "--cli-pick":
+    print(terminal_agent(*sys.argv[2:]))
   elif sys.argv[1:]:
     worker(sys.argv[1:])
   else:
@@ -280,7 +342,7 @@ if __name__ == "__main__":
     main()
   except ui.Cancelled:
     sys.exit(130 if sys.argv[1:] else 0)
-  except (RuntimeError, OSError, ValueError, KeyError, TypeError, subprocess.CalledProcessError) as error:
+  except (RuntimeError, OSError, ValueError, KeyError, TypeError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
     print(f"Start agent: {error}", file=sys.stderr)
     if not sys.argv[1:]:
       try:

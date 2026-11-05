@@ -28,6 +28,52 @@ class MenuTests(unittest.TestCase):
     env.start()
     self.addCleanup(env.stop)
 
+  def test_terminal_picker_displays_effective_mode_and_maps_only_catalog_rows(self):
+    records = [dict(name='pi',label='Pi'),dict(name='codex',label='Codex')]
+    with patch.object(m,'agent_catalog',return_value=records),patch.object(m.subprocess,'run',return_value=subprocess.CompletedProcess([],0,'Pi\n')) as run,patch.object(m,'ready') as ready,patch.object(m,'remember') as remember:
+      self.assertEqual(m.terminal_agent('container','codex','override'),'pi')
+      args=run.call_args.args[0]
+      self.assertIn('--header=Mode: Container (override)\nDefault agent: Codex\nChoose for this launch only',args)
+      self.assertIn('--selected=Codex (default)',args)
+      self.assertEqual(args[args.index('--')+1:],["Codex (default)","Pi","Cancel"])
+      ready.assert_any_call('pi','container');ready.assert_any_call('codex','container');remember.assert_not_called()
+    self.assertFalse((self.home/'.config').exists())
+
+  def test_terminal_picker_cancellation_and_invalid_output_never_choose_default(self):
+    for status,text in [(1,''),(130,''),(0,'Cancel\n'),(2,''),(0,'not a row\n')]:
+      with patch.object(m,'agent_catalog',return_value=[dict(name='pi',label='Pi')]),patch.object(m.subprocess,'run',return_value=subprocess.CompletedProcess([],status,text)):
+        with self.assertRaises((m.ui.Cancelled,RuntimeError)):
+          m.terminal_agent('host','pi','saved')
+    for mode,default,source in [('bad','pi','saved'),('host','invalid','saved'),('container','pi','bad')]:
+      with patch.object(m,'agent_catalog',return_value=[dict(name='pi',label='Pi')]),patch.object(m.subprocess,'run') as run:
+        with self.assertRaises(RuntimeError):m.terminal_agent(mode,default,source)
+        run.assert_not_called()
+
+  def test_terminal_picker_filters_mode_but_keeps_unavailable_default_explicit(self):
+    records=[dict(name='codex',label='Codex'),dict(name='pi',label='Pi'),dict(name='hermes',label='Hermes')]
+    with patch.object(m,'agent_catalog',return_value=records),patch.object(m,'ready',side_effect=lambda name,mode:name=='pi'),patch.object(m.subprocess,'run',return_value=subprocess.CompletedProcess([],0,'Cancel\n')) as run:
+      with self.assertRaises(m.ui.Cancelled):m.terminal_agent('container','codex','saved')
+      args=run.call_args.args[0]
+      self.assertIn('--selected=Codex (default; unavailable)',args)
+      self.assertEqual(args[args.index('--')+1:],['Codex (default; unavailable)','Pi','Cancel'])
+
+  def test_terminal_picker_unset_default_preselects_cancel_without_saving(self):
+    with patch.object(m,'agent_catalog',return_value=[dict(name='pi',label='Pi')]),patch.object(m.subprocess,'run',return_value=subprocess.CompletedProcess([],0,'Cancel\n')) as run:
+      with self.assertRaises(m.ui.Cancelled):m.terminal_agent('host','','saved')
+      args=run.call_args.args[0];self.assertIn('--selected=Cancel',args)
+      self.assertEqual(args[args.index('--')+1:],["Cancel","Pi"])
+    self.assertFalse((self.home/'.config').exists())
+
+  def test_shared_catalog_rejects_duplicate_and_terminal_control_data(self):
+    for records in [[dict(name='pi',label='Pi'),dict(name='pi',label='Other')],[dict(name='pi',label='bad\x1b[31m')],[dict(name='invalid/name',label='Bad')]]:
+      with patch.object(m,'execute',return_value=subprocess.CompletedProcess([],0,json.dumps(records))):
+        with self.assertRaises(RuntimeError):m.agent_catalog()
+    with patch.object(m,'execute',return_value=subprocess.CompletedProcess([],0,'[{"name":"pi","label":"Pi"}]')) as execute,patch.dict(os.environ,NODE_OPTIONS='--synthetic',ANTHROPIC_API_KEY='synthetic'):
+      self.assertEqual(m.agent_catalog(),[dict(name='pi',label='Pi')])
+      self.assertEqual(execute.call_args.kwargs['cwd'],ROOT)
+      self.assertNotIn('NODE_OPTIONS',execute.call_args.kwargs['env'])
+      self.assertNotIn('ANTHROPIC_API_KEY',execute.call_args.kwargs['env'])
+
   def test_recent_state_is_private_bounded_and_does_not_modify_defaults(self):
     self.assertEqual(m.recent_projects(), [])
     self.assertFalse((self.base/'state').exists())
