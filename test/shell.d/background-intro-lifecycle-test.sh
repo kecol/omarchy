@@ -16,9 +16,26 @@ cp "$SHELL_TEST_DIR/fixtures/background-intro-lifecycle/shell.qml" "$stage/shell
 cat >"$stage/bin/omarchy-theme-bg-boot-intro" <<'SH'
 #!/bin/bash
 printf 'intro\n' >>"$INTRO_TEST_LOG"
-sleep 2
+if [[ -n ${INTRO_TEST_LAUNCHER_DONE:-} ]]; then
+  for (( attempt = 0; attempt < 150; attempt++ )); do
+    [[ ! -f $INTRO_TEST_LAUNCHER_DONE ]] || exit 0
+    sleep 0.02
+  done
+  echo "Fixture launcher was not released before its deadline" >&2
+  exit 1
+else
+  sleep 2
+fi
 SH
-chmod +x "$stage/bin/omarchy-theme-bg-boot-intro"
+cat >"$stage/bin/hyprctl" <<'SH'
+#!/bin/bash
+case ${*: -1} in
+  animations:enabled) printf '{"bool":%s}\n' "${INTRO_TEST_ANIMATIONS:-true}" ;;
+  general:gaps_out) printf '{"css":"5 5 5 5"}\n' ;;
+  *) printf '{"int":0}\n' ;;
+esac
+SH
+chmod +x "$stage/bin/omarchy-theme-bg-boot-intro" "$stage/bin/hyprctl"
 cat >"$stage/bin/owe" <<'SH'
 #!/bin/bash
 if [[ -n ${INTRO_TEST_POLLS:-} ]]; then
@@ -32,16 +49,27 @@ elif [[ -f $INTRO_TEST_FRAME_READY ]]; then
   sleep 0.25
   printf '{"kind":"video","ready":true,"has_transition":false,"time_pos":0.05}\n'
 else
+  [[ -z ${INTRO_TEST_COVERED:-} ]] || printf 'covered\n' >>"$INTRO_TEST_COVERED"
   printf '{"kind":"video","ready":true,"has_transition":true,"time_pos":0}\n'
 fi
 SH
 chmod +x "$stage/bin/owe"
-output=$(HOME="$stage/home" PATH="$stage/bin:$PATH" INTRO_TEST_LOG="$stage/starts" INTRO_TEST_COVER="$stage/cover.ppm" INTRO_TEST_FRAME_READY="$stage/video-ready" timeout 10 quickshell -p "$stage" --no-color 2>&1) || fail "background intro fixture exits cleanly" "$output"
-[[ $output == *"RESULT pass"* ]] || fail "background intro lifecycle assertions pass" "$output"
-if rg -q 'RESULT fail|ReferenceError|TypeError|Error:|Unable to assign|Binding loop' <<<"$output"; then
-  fail "background intro fixture has no QML errors" "$output"
-fi
-[[ $(wc -l <"$stage/starts") == 1 ]] || fail "recreating the background service does not run another launcher"
+for animations in true false; do
+  rm -f "$stage/video-ready" "$stage/launcher-done"
+  : >"$stage/starts"
+  : >"$stage/covered"
+  output=$(HOME="$stage/home" PATH="$stage/bin:$PATH" INTRO_TEST_ANIMATIONS="$animations" \
+    INTRO_TEST_LOG="$stage/starts" INTRO_TEST_COVER="$stage/cover.ppm" INTRO_TEST_FRAME_READY="$stage/video-ready" \
+    INTRO_TEST_COVERED="$stage/covered" INTRO_TEST_LAUNCHER_DONE="$stage/launcher-done" \
+    timeout 10 quickshell -p "$stage" --no-color 2>&1) || fail "background intro fixture exits cleanly (animations=$animations)" "$output"
+  printf '%s\n' "$output"
+  [[ $output == *"RESULT pass"* ]] || fail "background intro lifecycle assertions pass (animations=$animations)" "$output"
+  if rg -q 'RESULT fail|ReferenceError|TypeError|Error:|Unable to assign|Binding loop' <<<"$output"; then
+    fail "background intro fixture has no QML errors (animations=$animations)" "$output"
+  fi
+  [[ $(wc -l <"$stage/starts") == 1 ]] || fail "recreating the background service does not run another launcher"
+  [[ -f $stage/launcher-done ]] || fail "the observed renderer handoff releases the fixture launcher"
+done
 
 # A login whose intro ends on a still never reports a video frame, so the
 # frame poll has to stop once the cover is released.

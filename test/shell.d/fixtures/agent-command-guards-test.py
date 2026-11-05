@@ -4,6 +4,7 @@ import os
 import shutil
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -12,15 +13,43 @@ ROOT=Path(os.environ['ROOT'])
 SECRET='PRIVATE-ARGUMENT-NOT-FOR-GUARD-OUTPUT'
 
 
+def installed_node(command=None):
+  # Resolve public installed executables by metadata only. Running a mise shim
+  # here could load caller config or lazily install after HOME becomes scratch.
+  command = command or shutil.which('node')
+  if not command:
+    raise RuntimeError('Expose a preinstalled Node ELF on PATH; no tool was installed')
+  selected = Path(command)
+  candidates = [selected]
+  if selected.parent.name == 'shims':
+    # Omarchy declares node=latest. This existing alias needs no mise lookup.
+    candidates.append(selected.parent.parent/'installs/node/latest/bin/node')
+  for candidate in candidates:
+    path = candidate.resolve()
+    if path.name != 'node' or not os.access(path, os.X_OK):
+      continue
+    try:
+      with path.open('rb') as stream:
+        if stream.read(4) == b'\x7fELF':
+          return path
+    except OSError:
+      continue
+  raise RuntimeError('Expose a preinstalled Node ELF on PATH; no shim was executed or tool installed')
+
+
 @unittest.skipIf(os.getuid()==0,'guard management deliberately rejects root')
 class GuardsTests(unittest.TestCase):
+  @classmethod
+  def setUpClass(cls):
+    cls.node = installed_node()
+    print(f'Guard fixture uses installed Node: {cls.node}', file=sys.stderr)
+
   def setUp(self):
     temp=tempfile.TemporaryDirectory(prefix='agent guards ');self.addCleanup(temp.cleanup)
     self.root=Path(temp.name);self.home=self.root/'home';self.home.mkdir()
     self.bin=self.root/'tools';self.bin.mkdir();self.calls=self.root/'calls'
-    # Node is mise-managed on the host; expose its installed binary directly,
-    # not a lazy shim, while keeping the fixture PATH and HOME isolated.
-    (self.bin/'node').symlink_to(Path(shutil.which('node')).resolve())
+    # Keep the selected real Node available after HOME/PATH become scratch.
+    (self.bin/'node').symlink_to(self.node)
     self.env={'HOME':str(self.home),'PATH':str(self.bin)+':'+str(ROOT/'bin')+':/usr/bin:/bin','OMARCHY_PATH':str(ROOT),'ROOT':str(ROOT),'CALLS':str(self.calls),'TERM':'dumb'}
     self.state=self.home/'.local/share/omarchy/agents/command-guards'
     self.mode=self.home/'.config/omarchy/agents/mode';self.mode.parent.mkdir(parents=True)
@@ -43,6 +72,25 @@ class GuardsTests(unittest.TestCase):
   def enable(self):
     self.ctl('enable')
     self.env['PATH']=str(self.state/'bin')+':'+self.env['PATH']
+
+  def test_node_selection_uses_installed_alias_without_executing_mise(self):
+    data = self.root/'mise-data';shims = data/'shims';shims.mkdir(parents=True)
+    mise = self.root/'mise';mise.write_text('#!/bin/bash\nexit 99\n');mise.chmod(0o755)
+    shim = shims/'node';shim.symlink_to(mise)
+    binary = data/'installs/node/latest/bin/node';binary.parent.mkdir(parents=True)
+    binary.symlink_to(self.node)
+    with patch.object(subprocess, 'run') as run:
+      self.assertEqual(installed_node(str(shim)), self.node)
+      run.assert_not_called()
+
+  def test_node_selection_refuses_shim_without_installed_node(self):
+    shims = self.root/'uninstalled/shims';shims.mkdir(parents=True)
+    mise = self.root/'mise';mise.write_text('#!/bin/bash\nexit 99\n');mise.chmod(0o755)
+    shim = shims/'node';shim.symlink_to(mise)
+    with patch.object(subprocess, 'run') as run:
+      with self.assertRaisesRegex(RuntimeError, 'no shim was executed'):
+        installed_node(str(shim))
+      run.assert_not_called()
 
   def test_blocks_bare_pi_without_running_or_echoing_arguments(self):
     self.enable();before=self.mode.read_bytes()

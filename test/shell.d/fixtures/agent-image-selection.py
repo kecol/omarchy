@@ -25,6 +25,12 @@ def read(name,default=None):
 def write(name,value):(base/name).write_text(json.dumps(value))
 old='sha256:'+'a'*64;new='sha256:'+'b'*64
 if name=='omarchy-cmd-missing':sys.exit(1)
+if name=='bwrap':
+ # Control-flow adapter only; harness-prepare tests real kernel isolation.
+ index=next(i for i in range(len(args)-2) if args[i]=='--ro-bind' and args[i+2]=='/usr/bin/mise')
+ source=args[index+1];tail=args[args.index('--')+1:]
+ assert Path(source)==base/'bin/mise' and tail==['/usr/bin/mise','latest','pi']
+ os.execv(source,[source,*tail[1:]])
 if name=='mise':
  if read('controls',{}).get('RESOLVE_FAIL'):sys.exit(1)
  print('1.4.0');sys.exit()
@@ -69,7 +75,7 @@ def run(choices=(), current=OLD, terminal=True, interactive=True, extra=None, ad
     base = Path(temp)
     binaries = base / 'bin'
     binaries.mkdir()
-    for name in ('podman', 'mise', 'gum', 'omarchy-cmd-missing', 'systemd-run'):
+    for name in ('podman', 'mise', 'bwrap', 'gum', 'omarchy-cmd-missing', 'systemd-run'):
       path = binaries / name
       path.write_text(MOCK)
       path.chmod(0o755)
@@ -127,8 +133,8 @@ def run(choices=(), current=OLD, terminal=True, interactive=True, extra=None, ad
     return process.returncode, (stdout or b'').decode().strip(), stderr, calls
 
 
-def check(condition, message):
-  assert condition, message
+def check(condition, message, detail=None):
+  assert condition, message + ('\n' + json.dumps(detail, indent=2) if detail is not None else '')
   print('ok - ' + message)
 
 
@@ -148,7 +154,8 @@ code, image, _, calls = run(['Run'], extra={'RETAG': '1'})
 check(code == 0 and image == OLD, 'retagging latest after inspection cannot change the selected image')
 code, image, text, calls = run(['Update to latest release', 'Run'])
 check(code == 0 and image == NEW and 'Version: 1.4.0' in text,
-      'update verifies and promotes the image then displays the new version')
+      'update verifies and promotes the image then displays the new version',
+      {'exit': code, 'image': image, 'transcript': text, 'calls': calls})
 check(called(calls, 'gum', 'confirm') and called(calls, 'podman', 'run'),
       'update requires confirmation and checks the actual Pi version')
 for failure in ('BUILD_FAIL', 'VERIFY_FAIL', 'RESOLVE_FAIL'):
