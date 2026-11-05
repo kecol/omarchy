@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # omarchy:summary=Choose a coding agent interactively or launch an explicit/default agent
-# omarchy:args=[--inline] [--pick] [--agent=NAME] [--directory=PATH] [--host|--container] [--check] [--installed-only]
-# omarchy:examples=omarchy agent | omarchy agent --inline
+# omarchy:args=[--inline] [--pick] [--agent=NAME] [--directory=PATH] [--host|--container] [--local] [--local-model <recipe>] [--prefer-local] [--check] [--installed-only]
+# omarchy:examples=omarchy agent | omarchy agent --inline | omarchy agent --host --local
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
@@ -15,6 +15,10 @@ execution_mode_override=
 project_directory=
 checking=false
 installed_only=false
+use_local=false
+local_requested=false
+prefer_local=false
+local_model=""
 
 # Flags only. A bare prompt would shadow the subcommands under this group, so
 # prompts go through omarchy-agent-prompt, which passes one here as --prompt.
@@ -39,6 +43,21 @@ while (($#)); do
       ;;
     --container)
       execution_mode_override=container
+      shift
+      ;;
+    --local)
+      use_local=true
+      local_requested=true
+      shift
+      ;;
+    --local-model)
+      use_local=true
+      local_requested=true
+      local_model=${2:?--local-model needs a recipe id}
+      shift 2
+      ;;
+    --prefer-local)
+      prefer_local=true
       shift
       ;;
     --prompt)
@@ -115,9 +134,59 @@ if [[ $execution_mode != "host" && $execution_mode != "container" ]]; then
   exit 1
 fi
 
-# Select only for human, unprompted starts (or an explicit --pick). Automation,
-# checks, session recovery and explicit agents must never acquire a new prompt.
-if [[ -z $selected_agent && $checking == "false" && $oneshot == "false" && -z $session_action &&
+# Upstream local overlays name Host paths. Never pass those paths into a
+# container, broaden its mounts/network, or change the saved execution mode.
+if [[ $use_local == "true" && $execution_mode != "host" ]]; then
+  echo "Local model overlays require Host mode; use --host explicitly for this launch." >&2
+  if [[ $checking == "false" && ! -t 2 ]]; then
+    omarchy-notification-send -u critical "$(omarchy-i18n agents.localHostOnly)" "$(omarchy-i18n agents.localHostOnlyBody)"
+  fi
+  exit 1
+fi
+
+# Preference is advisory, Host-only, and never replaces an explicit unsupported
+# agent. Checks inspect availability only, not model services or overlay state.
+if [[ $prefer_local == "true" && $use_local == "false" && $execution_mode == "host" && $checking == "false" ]] &&
+  { [[ -z $selected_agent ]] || [[ $selected_agent == "pi" || $selected_agent == "opencode" ]]; }; then
+  local_model=$(omarchy-agent-local status --json 2>/dev/null | jq -r '
+    [.models // {} | to_entries[] | select(.value.unit == "active" and .value.sub_state == "running") | .key] as $up
+    | if (.last as $last | $up | index($last)) != null then .last else ($up[0] // empty) end' 2>/dev/null)
+  [[ -n $local_model ]] && use_local=true
+fi
+
+# An explicit local request may use an installed compatible agent when the
+# saved default has no overlay, but must not replace --agent or install a shim.
+if [[ $use_local == "true" && $agent != "pi" && $agent != "opencode" ]]; then
+  if [[ -n $selected_agent ]]; then
+    echo "Local model overlays support Pi and OpenCode; the explicit agent was not changed." >&2
+    exit 1
+  fi
+  local_agent=""
+  for candidate in pi opencode; do
+    if "$script_dir/omarchy-agent-host-command" "$candidate" >/dev/null 2>&1; then
+      local_agent=$candidate
+      break
+    fi
+  done
+  if [[ -n $local_agent ]]; then
+    agent=$local_agent
+  elif [[ $prefer_local == "true" && $local_requested == "false" ]]; then
+    use_local=false
+  else
+    echo "Install Pi or OpenCode explicitly before launching a local model." >&2
+    if [[ $checking == "false" && ! -t 2 ]]; then
+      omarchy-notification-send -u critical "$(omarchy-i18n agents.localUnsupported)" "$(omarchy-i18n agents.localUnsupportedBody)"
+    fi
+    exit 1
+  fi
+fi
+if [[ $use_local == "true" ]]; then
+  installed_only=true
+fi
+
+# Explicit/resolved local launches already select their compatible agent.
+# Automation, checks, recovery and explicit agents must not acquire a prompt.
+if [[ -z $selected_agent && $use_local == "false" && $checking == "false" && $oneshot == "false" && -z $session_action &&
       ${OMARCHY_AGENT_MANAGED:-false} != "true" && ${OMARCHY_AGENT_ONESHOT:-false} != "true" &&
       ${OMARCHY_AGENT_ONESHOT:-0} != "1" && -t 0 && -t 1 && -t 2 ]] &&
   { [[ $pick == "true" ]] || [[ ! -v prompt && $installed_only == "false" ]]; }; then
@@ -154,6 +223,9 @@ fi
 if [[ $checking == "false" && $installed_only == "false" && $execution_mode == "host" ]] && omarchy-cmd-missing "$agent" &&
   ! { [[ $agent == "openclaw" ]] && omarchy-pkg-present openclaw; }; then
   echo "$agent is not installed. Choose an installed agent with: omarchy default agent <name>" >&2
+  if [[ -n $selected_agent && ! -t 2 ]]; then
+    omarchy-notification-send "$(omarchy-i18n agents.harnessMissing "$agent")" "$(omarchy-i18n agents.harnessMissingBody "$agent")"
+  fi
   exit 1
 fi
 
@@ -371,6 +443,24 @@ if [[ $installed_only == "true" && $execution_mode == "host" ]]; then
       fi
     done
   fi
+fi
+
+# --check returns above: it never generates an overlay or queries a model.
+# Propagate helper failure even if it printed three lines before failing.
+if [[ $use_local == "true" ]]; then
+  overlay_text=$(omarchy-agent-local overlay "$agent" ${local_model:+"$local_model"}) || exit 1
+  mapfile -t overlay <<<"$overlay_text"
+  (( ${#overlay[@]} == 3 )) || exit 1
+  case "$agent" in
+  opencode)
+    # The shared background service never sees the overlay, so run a private one.
+    model=$(jq -nc --arg model "${overlay[1]}/${overlay[2]}" '{model: $model}')
+    command=(env "OPENCODE_CONFIG=${overlay[0]}" "OPENCODE_CONFIG_CONTENT=$model" "${command[@]}" --standalone)
+    ;;
+  pi)
+    command+=(--extension "${overlay[0]}" --provider "${overlay[1]}" --model "${overlay[2]}")
+    ;;
+  esac
 fi
 
 # An agent with no way to take a starting prompt still opens, with the prompt

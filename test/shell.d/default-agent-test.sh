@@ -304,6 +304,23 @@ grep -Fq "Choose default agent with" "$test_tmp/no-agent-output" ||
 [[ ! -s $launch_log ]] || fail "agent launcher starts nothing without a default"
 pass "agent launcher refuses to launch without a default"
 
+# An explicit Host local launch can use an installed compatible agent without
+# a saved default. The executable and overlay helper are inert fixtures.
+cat >"$mock_bin/omarchy-agent-local" <<'SH'
+#!/bin/bash
+[[ $1 == "overlay" ]] && printf '%s\n' "/overlays/$2-local.config" omarchy-local test-model
+SH
+printf '#!/bin/bash\nexit 0\n' >"$mock_bin/pi"
+chmod +x "$mock_bin/omarchy-agent-local" "$mock_bin/pi"
+: >"$launch_log"
+omarchy-agent --host --local-model test-model >"$test_tmp/local-output" 2>&1 ||
+  fail "agent launcher opens a local model without a default: $(<"$test_tmp/local-output")"
+mapfile -d '' -t launch_args <"$launch_log"
+[[ ${launch_args[*]} == *"/overlays/"*"-local.config"* ]] ||
+  fail "agent launcher points the local model's agent at its overlay: ${launch_args[*]}"
+rm "$mock_bin/omarchy-agent-local" "$mock_bin/pi"
+pass "agent launcher opens a local model without a default"
+
 # Non-terminal calls must not open a picker or a default-setting dialog.
 : >"$launch_log"
 : >"$menu_log"
@@ -319,7 +336,7 @@ source "$ROOT/default/bash/aliases"
   fail "terminal alias launches the default agent inline"
 pass "terminal alias launches the default agent inline"
 
-grep -Fq 'o.bind("SUPER + SHIFT + CTRL + A", "Agent", "omarchy-agent --pick")' \
+grep -Fq 'o.bind("SUPER + SHIFT + CTRL + A", "Agent", "omarchy-launch-tui --app-id=org.omarchy.agent omarchy-agent --inline --pick")' \
   "$ROOT/default/hypr/bindings/utilities.lua" ||
   fail "agent launcher has a keyboard shortcut"
 pass "agent launcher has a keyboard shortcut"
@@ -428,8 +445,8 @@ for selection in "${!expected_agents[@]}"; do
   esac
 
   mapfile -d '' -t agent_open_args <"$agent_open_log"
-  [[ ${#agent_open_args[@]} == 1 && ${agent_open_args[0]} == "omarchy-agent" ]] ||
-    fail "default agent opens $selection after selecting it"
+  [[ ${agent_open_args[*]} == "omarchy-agent --agent $expected" ]] ||
+    fail "default agent opens $selection explicitly after selecting it"
 done
 pass "default agent selects and opens every supported provider and alias"
 [[ -f $agent_file && ! -e $test_home/.local/state/omarchy/defaults/agent ]] ||
@@ -441,7 +458,7 @@ OMARCHY_TEST_AGENT_INSTALLED=true omarchy-default-agent pi
 OMARCHY_TEST_AGENT_INSTALLED=true OMARCHY_TEST_EXTENSION_FAIL=true omarchy-default-agent claude >"$test_tmp/extension-failure" 2>&1
 [[ $(omarchy-default-agent) == "claude" ]] || fail "extension installation failure still selects Claude"
 mapfile -d '' -t agent_open_args <"$agent_open_log"
-[[ ${agent_open_args[*]} == "omarchy-agent" ]] || fail "extension installation failure still launches Claude"
+[[ ${agent_open_args[*]} == "omarchy-agent --agent claude" ]] || fail "extension installation failure still launches Claude"
 [[ ! -s $test_tmp/extension-failure ]] || fail "extension installation failure is silent"
 pass "extension installation failure silently continues selecting and launching Claude"
 OMARCHY_TEST_AGENT_INSTALLED=true omarchy-default-agent pi
@@ -465,9 +482,55 @@ mapfile -d '' -t mise_args <"$mise_log"
 [[ $(<"$test_tmp/install-output") == $'\033[2J\033[3J\033[H' ]] ||
   fail "visible agent installation clears its terminal before opening the agent"
 mapfile -d '' -t agent_open_args <"$agent_open_log"
-[[ ${#agent_open_args[@]} == 2 && ${agent_open_args[0]} == "omarchy-agent" && ${agent_open_args[1]} == "--inline" ]] ||
-  fail "newly installed agent opens in the installation terminal"
+[[ ${agent_open_args[*]} == "omarchy-agent --inline --agent copilot" ]] ||
+  fail "newly installed agent opens explicitly in the installation terminal"
 pass "missing agents install visibly and open in the same terminal"
+
+rm "$mock_bin/hyprctl"
+cat >"$mock_bin/hyprctl" <<SH
+#!/bin/bash
+if [[ \$1 == "clients" ]]; then
+  echo '[{"pid": $$, "address": "0xc0ffee", "workspace": {"name": "special:qconsole"}}]'
+else
+  printf '%s\n' "\$*" >>"$test_tmp/dispatch"
+fi
+SH
+chmod +x "$mock_bin/hyprctl"
+: >"$agent_open_log"
+omarchy-default-agent --install github-copilot >/dev/null
+[[ ! -s $agent_open_log ]] || fail "an install from the Quake console leaves its floating terminal"
+grep -qF 'hl.dsp.exec_cmd("omarchy-launch-tui --app-id=org.omarchy.agent omarchy-agent --inline --agent copilot --prefer-local", { workspace = "special:qconsole silent" })' "$test_tmp/dispatch" ||
+  fail "an install from the Quake console opens the agent tiled in the console"
+! grep -qF 'window.close' "$test_tmp/dispatch" ||
+  fail "an install must not close a terminal by a sampled compositor address"
+pass "an agent installed from the Quake console opens tiled in the console"
+
+# A terminal serving every window from one process matches them all by PID, so
+# the installer names its own window. The mock applies whatever title the
+# installer printed to the console window alone, as the terminal would.
+cat >"$mock_bin/hyprctl" <<SH
+#!/bin/bash
+if [[ \$1 == "clients" ]]; then
+  title=\$(grep -ao 'omarchy-default-agent-[0-9]*' "$test_tmp/installer-tty" 2>/dev/null | head -n1)
+  echo "[{\"pid\": $$, \"address\": \"0xdead\", \"title\": \"shell\", \"workspace\": {\"name\": \"1\"}},
+        {\"pid\": $$, \"address\": \"0xc0ffee\", \"title\": \"\$title\", \"workspace\": {\"name\": \"special:qconsole\"}}]"
+else
+  printf '%s\n' "\$*" >>"$test_tmp/dispatch"
+fi
+SH
+: >"$test_tmp/dispatch"
+: >"$agent_open_log"
+omarchy-default-agent --install github-copilot >"$test_tmp/installer-tty"
+[[ ! -s $agent_open_log ]] || fail "an install from a shared terminal process leaves its floating terminal"
+grep -qF -- '--agent copilot --prefer-local' "$test_tmp/dispatch" ||
+  fail "an install from a shared terminal process pins the selected agent"
+! grep -qF 'window.close' "$test_tmp/dispatch" ||
+  fail "an install from a shared terminal process does not force-close a client"
+! grep -qF 'address:0xdead' "$test_tmp/dispatch" ||
+  fail "an install from a shared terminal process leaves the terminal's other windows alone"
+rm "$mock_bin/hyprctl"
+ln -s omarchy-test-noop "$mock_bin/hyprctl"
+pass "an install from a terminal sharing one process across windows finds its own window"
 
 : >"$notification_history"
 : >"$agent_open_log"
@@ -479,8 +542,8 @@ mapfile -d '' -t mise_args <"$mise_log"
 [[ ${mise_args[0]} == "use" && ${mise_args[1]} == "-g" && ${mise_args[2]} == "copilot" ]] ||
   fail "default agent still activates an installed provider globally through mise"
 mapfile -d '' -t agent_open_args <"$agent_open_log"
-[[ ${#agent_open_args[@]} == 1 && ${agent_open_args[0]} == "omarchy-agent" ]] ||
-  fail "installed agent opens in a new terminal after selection"
+[[ ${agent_open_args[*]} == "omarchy-agent --agent copilot" ]] ||
+  fail "installed agent opens explicitly in a new terminal after selection"
 pass "installed agents select and open without notifications"
 
 # Cursor's installer links the wrapper's path, and the mise shims precede
@@ -496,8 +559,8 @@ omarchy-default-agent cursor-agent
 [[ ! -s $mise_log ]] || fail "an official Cursor CLI install is left to itself by mise"
 [[ $(<"$agent_file") == "cursor-agent" ]] || fail "an official Cursor CLI install becomes the default"
 mapfile -d '' -t agent_open_args <"$agent_open_log"
-[[ ${#agent_open_args[@]} == 1 && ${agent_open_args[0]} == "omarchy-agent" ]] ||
-  fail "an official Cursor CLI install opens after selection"
+[[ ${agent_open_args[*]} == "omarchy-agent --agent cursor-agent" ]] ||
+  fail "an official Cursor CLI install opens explicitly after selection"
 rm -f "$test_home/.local/bin/cursor-agent" "$test_home/.local/bin/cursor-agent.official"
 printf '%s\n' copilot >"$agent_file"
 pass "selecting an official Cursor CLI install skips mise"
@@ -613,8 +676,8 @@ grep -q '^use ' "$mise_history" && fail "Muse selection leaves the user config a
 [[ ! -s $muse_login_log ]] || fail "Muse selection runs a separate login flow"
 [[ $(omarchy-default-agent) == "muse" ]] || fail "visible Muse installation changes the selection"
 mapfile -d '' -t agent_open_args <"$agent_open_log"
-[[ ${#agent_open_args[@]} == 2 && ${agent_open_args[0]} == "omarchy-agent" && ${agent_open_args[1]} == "--inline" ]] ||
-  fail "newly installed Muse opens in the installation terminal"
+[[ ${agent_open_args[*]} == "omarchy-agent --inline --agent muse" ]] ||
+  fail "newly installed Muse opens explicitly in the installation terminal"
 pass "Muse installs visibly through mise and opens directly"
 
 saved_agent=$(<"$agent_file")
@@ -647,8 +710,8 @@ OMARCHY_TEST_AGENT_INSTALLED=true omarchy-default-agent muse-code
 [[ ! -s $muse_login_log ]] || fail "installed Muse selection skips the login"
 [[ $(omarchy-default-agent) == "muse" ]] || fail "default agent canonicalizes muse-code"
 mapfile -d '' -t agent_open_args <"$agent_open_log"
-[[ ${#agent_open_args[@]} == 1 && ${agent_open_args[0]} == "omarchy-agent" ]] ||
-  fail "installed Muse opens in a new terminal after selection"
+[[ ${agent_open_args[*]} == "omarchy-agent --agent muse" ]] ||
+  fail "installed Muse opens explicitly in a new terminal after selection"
 pass "installed Muse selects and opens directly"
 
 OMARCHY_TEST_AGENT_INSTALLED=true omarchy-default-agent pi
@@ -832,6 +895,53 @@ mapfile -d '' -t launch_args <"$launch_log"
   fail "--pick launches once an agent is chosen"
 [[ ! -s $menu_log ]] || fail "--pick opens no menu once an agent is chosen"
 pass "--pick launches once an agent is chosen"
+
+# The Quake console seeds with --prefer-local: the local model when one is
+# running, the usual agent otherwise. The mock reports whatever status the test
+# writes to OMARCHY_TEST_LOCAL_STATUS, and no status at all when it is unset.
+cat >"$mock_bin/omarchy-agent-local" <<'SH'
+#!/bin/bash
+case $1 in
+status) [[ -n ${OMARCHY_TEST_LOCAL_STATUS:-} ]] && printf '%s\n' "$OMARCHY_TEST_LOCAL_STATUS" || exit 1 ;;
+overlay) printf '%s\n' "/overlays/$2-${3:-last}.config" omarchy-local "${3:-last}" ;;
+esac
+SH
+chmod +x "$mock_bin/omarchy-agent-local"
+prefer_local_launch() {
+  : >"$launch_log"
+  OMARCHY_TEST_LOCAL_STATUS=$1 omarchy-agent --pick --prefer-local
+  mapfile -d '' -t launch_args <"$launch_log"
+}
+
+prefer_local_launch '{"last":"big","models":{"big":{"unit":"active","sub_state":"running"}}}'
+[[ ${launch_args[*]} == *"OPENCODE_CONFIG=/overlays/opencode-big.config"*"opencode --auto --standalone" ]] ||
+  fail "--prefer-local opens the running local model: ${launch_args[*]}"
+
+prefer_local_launch '{"last":"big","models":{"big":{"unit":"inactive","sub_state":"dead"},"small":{"unit":"active","sub_state":"running"}}}'
+[[ ${launch_args[*]} == *"/overlays/opencode-small.config"* ]] ||
+  fail "--prefer-local opens whichever model is running when the last one is stopped: ${launch_args[*]}"
+
+prefer_local_launch '{"last":"big","models":{"big":{"unit":"activating","sub_state":"start"}}}'
+[[ ${launch_args[*]} == "--app-id=org.omarchy.agent opencode --auto" ]] ||
+  fail "--prefer-local opens the usual agent while the model is still loading: ${launch_args[*]}"
+
+prefer_local_launch ''
+[[ ${launch_args[*]} == "--app-id=org.omarchy.agent opencode --auto" ]] ||
+  fail "--prefer-local opens the usual agent without a local model: ${launch_args[*]}"
+
+# A default that can't take the overlay, with no pi or OpenCode to stand in,
+# still opens rather than failing as --local would.
+printf '%s\n' "codex" >"$agent_file"
+: >"$notification_history"
+printf '#!/bin/bash\nexit 1\n' >"$mock_bin/omarchy-cmd-present"
+chmod +x "$mock_bin/omarchy-cmd-present"
+prefer_local_launch '{"last":"big","models":{"big":{"unit":"active","sub_state":"running"}}}'
+[[ ${launch_args[*]} == *"codex --approve-for-me" && ${launch_args[*]} != *overlays* ]] ||
+  fail "--prefer-local falls back to a default that can't take the overlay: ${launch_args[*]}"
+[[ ! -s $notification_history ]] || fail "--prefer-local falling back raises no notification"
+printf '%s\n' "opencode" >"$agent_file"
+rm "$mock_bin/omarchy-agent-local" "$mock_bin/omarchy-cmd-present"
+pass "--prefer-local opens the running local model, and the usual agent otherwise"
 
 : >"$launch_log"
 omarchy agent prompt "Review this project"

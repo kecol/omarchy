@@ -57,6 +57,12 @@ Capture commands — Screenshots and screen recording:
 
 Every command takes `--help` too, whether you ask a whole group (`omarchy capture --help`) or a single command (`omarchy capture screenshot --help`).
 
+### Reloading a Hyprland session
+
+`omarchy restart hyprctl` reloads the configuration of the session identified by `HYPRLAND_INSTANCE_SIGNATURE`. Run it from the intended graphical session. A remote caller must explicitly carry that session's context; the command does not select instance zero or another session when context is missing.
+
+Missing context or an unreachable session is a failure, not a successful no-op. The native failure status and diagnostics remain visible. A successful reload request does not prove that every configuration value is valid or authorize a shell restart while locked.
+
 ### Opening the menu from the terminal
 
 The Omarchy menu is scriptable as well, which is handy for your own keybindings. `omarchy menu` opens it at the root, and you can jump straight to any point in the tree by naming it: `omarchy menu summon appearance.theme` goes right to the theme picker, `omarchy menu toggle system` opens the system menu and closes it again if it's already up, and `omarchy menu close` puts it away.

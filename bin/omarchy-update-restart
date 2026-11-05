@@ -55,15 +55,21 @@ if [[ $mode != "--reboot-only" ]]; then
       filename=$(basename "$file")
       service=$(echo "$filename" | sed 's/restart-\(.*\)-required/\1/')
       echo "Restarting $service"
-      omarchy-state clear "$filename"
-      omarchy-restart-"$service"
+      if omarchy-restart-"$service"; then
+        omarchy-state clear "$filename" || exit "$?"
+      else
+        exit "$?"
+      fi
     fi
   done
 
   # Updates routinely replace the shell's QML, and a stale process can lazy-load
-  # new files into old code. A restart failure (locked session, ssh, TTY) only
-  # prints its reason: the next update or login gets a fresh shell anyway.
+  # new files into old code. Refusal or failure is not a completed restart and
+  # must stop the caller rather than permit later update/reboot steps.
   echo -e "\e[32m\nRestarting shell\e[0m"
-  echo "All plugins have been reloaded"
-  omarchy-restart-shell || true
+  if omarchy-restart-shell; then
+    echo "All plugins have been reloaded"
+  else
+    exit "$?"
+  fi
 fi

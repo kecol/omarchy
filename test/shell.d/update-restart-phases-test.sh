@@ -6,9 +6,16 @@ source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/base-test.sh"
 source "$SHELL_TEST_DIR/fixtures/sudo-boundary-test.sh"
 rm "$SUDO_TEST_ROOT/bin/omarchy-update-restart"
 copy_boundary_file bin/omarchy-update-restart
-for step in omarchy-state omarchy-restart-sshd omarchy-restart-shell omarchy-system; do
+for step in omarchy-restart-sshd omarchy-system; do
   ln -s test-step "$SUDO_TEST_ROOT/bin/$step"
 done
+cat >"$SUDO_TEST_ROOT/bin/omarchy-state" <<'STUB'
+#!/bin/bash
+printf 'step:omarchy-state %s\n' "$*" >>"$SUDO_TEST_LOG"
+[[ ${1:-} == "clear" ]] || exit 2
+rm -f -- "$SUDO_TEST_HOME/.local/state/omarchy/$2"
+STUB
+chmod +x "$SUDO_TEST_ROOT/bin/omarchy-state"
 cat >"$SUDO_TEST_ROOT/bin/gum" <<'STUB'
 #!/bin/bash
 printf 'prompt:%s\n' "$*" >>"$SUDO_TEST_LOG"
@@ -37,3 +44,25 @@ if grep -Eq "^(prompt:|step:omarchy-restart-|step:omarchy-system)" "$SUDO_TEST_L
   fail "unattended reboot phase prompted or performed service work"
 fi
 pass "unattended reboot phase reports a required reboot without prompting"
+
+reset_boundary
+touch "$SUDO_TEST_HOME/.local/state/omarchy/restart-sshd-required"
+status=0
+SUDO_TEST_FAIL_STEP=omarchy-restart-sshd PATH="$SUDO_TEST_ROOT/bin:$PATH" \
+  "$SUDO_TEST_ROOT/bin/omarchy-update-restart" --services-only >"$boundary_tmp/output" 2>&1 || status=$?
+(( status == 17 )) || fail "failed service restart status was lost" "$status"
+[[ -f $SUDO_TEST_HOME/.local/state/omarchy/restart-sshd-required ]] || fail "failed service restart lost its retry marker"
+if grep -Eq '^step:(omarchy-state clear restart-sshd-required|omarchy-restart-shell)' "$SUDO_TEST_LOG"; then
+  fail "failed service restart cleared its marker or continued to the shell"
+fi
+pass "a failed marked restart retains its marker and stops later restart work"
+
+reset_boundary
+status=0
+SUDO_TEST_FAIL_STEP=omarchy-restart-shell PATH="$SUDO_TEST_ROOT/bin:$PATH" \
+  "$SUDO_TEST_ROOT/bin/omarchy-update-restart" --services-only >"$boundary_tmp/output" 2>&1 || status=$?
+(( status == 17 )) || fail "post-update shell restart failure status was lost" "$status"
+if grep -Fq 'All plugins have been reloaded' "$boundary_tmp/output"; then
+  fail "failed shell restart printed a false completion message"
+fi
+pass "post-update shell restart failure stays nonzero without a false reload receipt"
