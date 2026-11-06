@@ -1,5 +1,20 @@
 #!/bin/bash
 
-# omarchy:summary=Reload hyprland configuration (used by the Omarchy theme switching).
+# omarchy:summary=Reload the configuration of an explicitly identified Hyprland session.
 
-hyprctl reload >/dev/null
+# Native environment routing identifies the intended session socket. Do not
+# replace missing context with an index, discovery order, or a successful no-op.
+if [[ -z ${HYPRLAND_INSTANCE_SIGNATURE:-} ]]; then
+  echo "Hyprland configuration was not reloaded: HYPRLAND_INSTANCE_SIGNATURE must identify the intended session." >&2
+  exit 1
+fi
+
+# Keep successful reloads quiet, but preserve the native failure status and
+# diagnostics on either stream. A stale signature must not select a fallback.
+if output=$(hyprctl reload); then
+  exit 0
+else
+  status=$?
+  [[ -z $output ]] || printf '%s\n' "$output" >&2
+  exit "$status"
+fi

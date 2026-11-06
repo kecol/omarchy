@@ -51,6 +51,81 @@ class LauncherTests(unittest.TestCase):
   def calls(self):
     return [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
 
+  def local_tools(self):
+    self.local_log = self.base/'local-calls'
+    self.env['LOCAL_CALLS'] = str(self.local_log)
+    self.program('omarchy-agent-local', '#!/usr/bin/python3\nimport json,os,sys\nwith open(os.environ["LOCAL_CALLS"],"a") as f:f.write(json.dumps(sys.argv[1:])+"\\n")\nif sys.argv[1]=="status": print(json.dumps({"last":"fixture-model","models":{"fixture-model":{"unit":"active","sub_state":"running"}}}))\nelse:\n print("/synthetic/local-overlay.ts\\nomarchy-local\\nfixture-model")\n sys.exit(int(os.environ.get("OVERLAY_EXIT","0")))\n')
+    self.program('omarchy-notification-send', '#!/bin/bash\nexit 0\n')
+    self.program('omarchy-i18n', '#!/bin/bash\nprintf "%s\\n" "$1"\n')
+
+  def test_missing_host_selection_notifies_but_checks_stay_read_only(self):
+    self.local_tools()
+    notification=self.base/'notification'
+    self.env['NOTIFICATION']=str(notification)
+    self.program('omarchy-notification-send','#!/bin/bash\nprintf "%s\\n" "$@" >"$NOTIFICATION"\n')
+    result=self.launch('--host','--agent','missing-agent')
+    self.assertNotEqual(result.returncode,0)
+    self.assertTrue(notification.exists())
+    notification.unlink()
+    result=self.launch('--check','--host','--agent','missing-agent')
+    self.assertNotEqual(result.returncode,0)
+    self.assertFalse(notification.exists())
+    self.assertFalse(self.local_log.exists())
+    self.assertFalse(self.log.exists())
+
+  def test_local_container_refusal_and_preference_never_cross_mode(self):
+    self.local_tools()
+    for args in [('--check','--local'),('--inline','--local-model','fixture-model')]:
+      result=self.launch(*args,'--container','--agent','pi')
+      self.assertNotEqual(result.returncode,0)
+      self.assertIn('Host mode',result.stderr)
+      self.assertFalse(self.log.exists())
+    result=self.launch('--inline','--container','--prefer-local','--agent','pi')
+    self.assertEqual(result.returncode,0,result.stderr)
+    self.assertIn('omarchy-agent-run-podman',self.calls()[0]['args'][0])
+    self.assertFalse(self.local_log.exists())
+    self.assertFalse((self.home/'.config').exists())
+
+  def test_local_checks_never_query_service_or_generate_overlay(self):
+    self.local_tools()
+    result=self.launch('--check','--host','--agent','pi','--local','--prefer-local')
+    self.assertEqual(result.returncode,0,result.stderr)
+    self.assertFalse(self.local_log.exists())
+    self.assertFalse(self.log.exists())
+
+  def test_local_host_overlay_and_failure_exit_are_preserved(self):
+    self.local_tools()
+    result=self.launch('--inline','--host','--local-model','fixture-model','--agent','pi',MODE='container')
+    self.assertEqual(result.returncode,0,result.stderr)
+    argv=self.calls()[0]['args']
+    self.assertEqual(argv[0],str(self.bin/'pi'))
+    self.assertEqual(argv[-6:],['--extension','/synthetic/local-overlay.ts','--provider','omarchy-local','--model','fixture-model'])
+    self.assertEqual(json.loads(self.local_log.read_text().splitlines()[0]),['overlay','pi','fixture-model'])
+    self.log.unlink()
+    result=self.launch('--inline','--host','--local','--agent','pi',OVERLAY_EXIT='23')
+    self.assertNotEqual(result.returncode,0)
+    self.assertFalse(self.log.exists(),'failed overlay still launched an agent')
+    self.assertFalse((self.home/'.config').exists())
+
+  def test_explicit_local_agent_is_never_replaced_by_preference(self):
+    self.local_tools()
+    self.program('omp', '#!/usr/bin/python3\nimport json,os,sys\nwith open(os.environ["CALLS"],"a") as f:f.write(json.dumps({"args":sys.argv})+"\\n")\n')
+    result=self.launch('--inline','--host','--local','--agent','omp')
+    self.assertNotEqual(result.returncode,0)
+    self.assertFalse(self.log.exists())
+    result=self.launch('--inline','--host','--prefer-local','--agent','omp')
+    self.assertEqual(result.returncode,0,result.stderr)
+    self.assertEqual(self.calls()[0]['args'][0],str(self.bin/'omp'))
+    self.assertFalse(self.local_log.exists())
+
+  def test_preference_cannot_cancel_an_explicit_local_request(self):
+    self.local_tools()
+    self.program('omarchy-agent-host-command','#!/bin/bash\nexit 1\n')
+    result=self.launch('--inline','--host','--local','--prefer-local')
+    self.assertNotEqual(result.returncode,0)
+    self.assertFalse(self.log.exists())
+    self.assertFalse(self.local_log.exists())
+
   def picker_tools(self):
     # Synthetic catalog/UI adapters for launcher control flow. Real gum has a
     # separate private-PTY qualification; these stubs are not visual evidence.
