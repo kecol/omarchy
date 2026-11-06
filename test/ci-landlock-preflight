@@ -1,0 +1,67 @@
+#!/bin/bash
+
+# CI-only diagnostic. Never install packages or start the VM. Even complete
+# probe success exits nonzero so skipped suites cannot become a green check.
+set -euo pipefail
+ulimit -c 0
+
+if [[ ${GITHUB_ACTIONS:-} != "true" || ${RUNNER_OS:-} != "Linux" || ${RUNNER_ARCH:-} != "X64" ]]; then
+  echo "This diagnostic requires the explicit Linux/X64 GitHub CI context" >&2
+  exit 2
+fi
+image=${CI_ARCH_IMAGE:-}
+if [[ ! $image =~ ^ghcr\.io/archlinux/archlinux@sha256:[0-9a-f]{64}$ ]]; then
+  echo "CI_ARCH_IMAGE must pin the official Arch image by digest" >&2
+  exit 2
+fi
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+mkdir -p out
+if ! mkdir out/ci-landlock; then
+  echo "Refusing to overwrite existing diagnostic evidence" >&2
+  exit 2
+fi
+results=$PWD/out/ci-landlock
+printf '%s\n' "$image" >"$results/image.txt"
+work=$(mktemp -d "${RUNNER_TEMP:?}/omarchy-ci-landlock.XXXXXX")
+trap 'rm -rf -- "$work"' EXIT
+mkdir -p "$work/fixtures/allowed"
+printf 'inside\n' >"$work/fixtures/allowed/inside"
+printf 'outside\n' >"$work/fixtures/outside"
+sha256sum "$script_dir/ci-landlock-probe.c" /usr/bin/cc >"$results/source-and-compiler.sha256"
+
+# Existing native compiler/headers/static libc only. A missing prerequisite is
+# a visible failure, not permission to install tools or guess syscall numbers.
+if /usr/bin/cc -std=c11 -Wall -Wextra -Werror -O2 -static "$script_dir/ci-landlock-probe.c" -o "$work/probe" >"$results/compile.stdout" 2>"$results/compile.stderr"; then
+  sha256sum "$work/probe" >"$results/probe.sha256"
+else
+  status=$?
+  printf 'compile_exit=%s\nrunner_exit=not_run\ncontainer_exit=not_run\n' "$status" >"$results/status.txt"
+  cat "$results/compile.stderr" >&2
+  exit "$status"
+fi
+
+# Attempt each context once, even if the runner probe fails. Both use only
+# synthetic markers. No caps/profile/unconfined/network settings are changed.
+if "$work/probe" runner "$work/fixtures/allowed" "$work/fixtures/outside" >"$results/runner.log" 2>&1; then
+  runner_status=0
+else
+  runner_status=$?
+fi
+if /usr/bin/docker run --rm --device /dev/kvm \
+  --mount "type=bind,src=$work/probe,dst=/probe,readonly" \
+  --mount "type=bind,src=$work/fixtures,dst=/fixture,readonly" \
+  "$image" /probe container /fixture/allowed /fixture/outside >"$results/container.log" 2>&1; then
+  container_status=0
+else
+  container_status=$?
+fi
+printf 'compile_exit=0\nrunner_exit=%s\ncontainer_exit=%s\n' "$runner_status" "$container_status" >"$results/status.txt"
+cat "$results/runner.log" "$results/container.log" "$results/status.txt"
+if (( runner_status == 0 && container_status == 0 )); then
+  echo "::error::Both filesystem probes passed; diagnostic-only stop. Package setup and suites were not executed." >&2
+  exit 78
+else
+  echo "::error::Sandbox diagnostic failed; package setup and suites were not executed." >&2
+  exit 1
+fi
