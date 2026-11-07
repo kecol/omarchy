@@ -18,6 +18,8 @@ sed '/^presize_window$/,$d' "$about" >"$tmp_dir/about.bash"
 
 export HOME="$tmp_dir/home"
 export PATH="$ROOT/bin:$PATH"
+# Keep generated About configuration away from any existing runtime copy.
+export XDG_RUNTIME_DIR="$tmp_dir/runtime"
 mkdir -p "$HOME/.config/omarchy/branding"
 printf '%s\n' '████████' '████████' >"$HOME/.config/omarchy/branding/about.txt"
 
@@ -291,3 +293,22 @@ printf '%s\n' 'stale' >"$ABOUT_CONFIG"
 write_about_config 2>"$tmp_dir/jsonc.stderr"
 [[ ! -e $ABOUT_CONFIG && ! -e $ABOUT_CONFIG.new ]] || fail "unsupported JSONC falls back without a stale copy"
 pass "unsupported JSONC falls back without a stale copy"
+
+# The continuation row is empty when the full CPU line fits the box.
+mkdir -p "$tmp_dir/cpu-bin"
+cat >"$tmp_dir/cpu-bin/fastfetch" <<'STUB'
+#!/bin/bash
+printf '[{"result":{"cpu":"%s","cores":{"online":16},"coreTypes":%s,"frequency":{"base":0,"max":4032}}}]\n' "$CPU_NAME" "${CPU_CORE_TYPES:-[]}"
+STUB
+chmod +x "$tmp_dir/cpu-bin/fastfetch"
+about_cpu() { PATH="$tmp_dir/cpu-bin:$PATH" omarchy-branding-about-cpu "$1"; }
+
+export CPU_NAME="AMD Ryzen 7 7840U w/ Radeon 780"
+[[ $(about_cpu name) == "$CPU_NAME (16) @ 4.03 GHz" && -z $(about_cpu details) ]] ||
+  fail "a CPU line that fits the box stays on one row" "name: $(about_cpu name) details: $(about_cpu details)"
+pass "a CPU line that fits the box stays on one row"
+
+export CPU_NAME="Qualcomm Snapdragon X2 Elite X2E-88/90-100" CPU_CORE_TYPES='[{"count":12},{"count":6}]'
+[[ $(about_cpu name) == "$CPU_NAME" && $(about_cpu details) == "(12+6) @ 4.03 GHz" ]] ||
+  fail "a CPU line that overruns the box splits under its name" "name: $(about_cpu name) details: $(about_cpu details)"
+pass "a CPU line that overruns the box splits under its name"
