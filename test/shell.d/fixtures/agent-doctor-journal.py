@@ -78,10 +78,50 @@ sys.exit(int(os.environ.get('TEST_JOURNAL_EXIT','0')))
     path.write_text(content)
     path.chmod(0o755)
 
-  def run_check(self, entries, doctor=False, **environment):
+  def enable_full_probe(self, root_writable=False):
+    self.env['TEST_ROOT_WRITABLE'] = '1' if root_writable else '0'
+    self.env['TEST_CONTAINER_STDERR'] = str(self.root/'container-stderr')
+    self.env['TEST_CONTAINER_TMP'] = str(self.root/'container-tmp-probe')
+    self.program('podman', r"""#!/usr/bin/python3
+import json, os, pathlib, subprocess, sys
+args = sys.argv[1:]
+if 'run' not in args:
+  if 'info' in args:
+    print('true' if any('Rootless' in arg for arg in args) else os.environ['TEST_GRAPH'])
+  elif 'volume' not in args:
+    sys.exit(99)
+  sys.exit(0)
+# Model the kernel's root-write outcome, not shell redirection or doctor logic.
+# The real Bash payload produces stderr; conmon forwards exactly those bytes.
+payload = args[args.index('bash')+2]
+payload = payload.replace('/tmp/omarchy-agent-doctor', os.environ['TEST_CONTAINER_TMP'])
+wrapper = r'''
+touch() {
+  if [[ $1 == /omarchy-agent-doctor-root ]]; then
+    if [[ $TEST_ROOT_WRITABLE == 1 ]]; then return 0; fi
+    printf "touch: cannot touch '/omarchy-agent-doctor-root': Read-only file system\\n" >&2
+    return 1
+  fi
+  command touch "$@"
+}
+'''
+prelude = 'printf "I/O error in fixture container startup\\n" >&2\n' if os.environ.get('TEST_CONTAINER_ERROR') else ''
+result = subprocess.run(['/usr/bin/bash', '-c', wrapper+prelude+payload], capture_output=True, env=os.environ)
+pathlib.Path(os.environ['TEST_CONTAINER_STDERR']).write_bytes(result.stderr)
+if result.stderr:
+  path = pathlib.Path(os.environ['TEST_DATA'])
+  entries = json.loads(path.read_text())
+  entries.append({'MESSAGE': result.stderr.decode(), '_COMM': 'conmon', 'PRIORITY': '3'})
+  path.write_text(json.dumps(entries))
+sys.stdout.buffer.write(result.stdout)
+sys.stderr.buffer.write(result.stderr)
+sys.exit(result.returncode)
+""")
+
+  def run_check(self, entries, doctor=False, full_doctor=False, **environment):
     self.data.write_text(json.dumps(entries))
     self.drained.unlink(missing_ok=True)
-    command = [str(self.bin/'omarchy-agent-container-doctor'), '--quick'] if doctor else [
+    command = [str(self.bin/'omarchy-agent-container-doctor'), *([] if full_doctor else ['--quick'])] if doctor else [
       '/usr/bin/python3', '-I', '-B', str(ROOT/'default/agents/journal-filesystem-check.py')]
     result = subprocess.run(command, env={**self.env, **environment}, cwd=self.project,
                             capture_output=True, text=True, timeout=15)
@@ -95,6 +135,28 @@ sys.exit(int(os.environ.get('TEST_JOURNAL_EXIT','0')))
 
   def classifier(self):
     return self.checker_module().message_has_warning
+
+  def test_full_probe_denial_does_not_poison_its_own_journal(self):
+    self.enable_full_probe()
+    result = self.run_check([], doctor=True, full_doctor=True)
+    self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
+    self.assertEqual((self.root/'container-stderr').read_bytes(), b'')
+    self.assertIn('Podman can start a disposable hardened container', result.stdout)
+    self.assertTrue(self.drained.exists())
+
+  def test_full_probe_does_not_silence_other_container_errors(self):
+    self.enable_full_probe()
+    result = self.run_check([], doctor=True, full_doctor=True, TEST_CONTAINER_ERROR='1')
+    self.assertNotEqual(result.returncode, 0)
+    self.assertIn('I/O error in fixture container startup', result.stderr)
+    self.assertIn('recent kernel or system logs contain filesystem', result.stderr)
+
+  def test_full_probe_still_rejects_a_writable_container_root(self):
+    self.enable_full_probe(root_writable=True)
+    result = self.run_check([], doctor=True, full_doctor=True)
+    self.assertNotEqual(result.returncode, 0)
+    self.assertIn('Podman cannot start a disposable hardened container', result.stderr)
+    self.assertNotIn('Agent container doctor passed.', result.stdout)
 
   def test_doctor_accepts_observed_policy_label_reconstruction(self):
     result = self.run_check([event(), event(PODMAN_EVENT='remove')], doctor=True)

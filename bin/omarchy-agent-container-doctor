@@ -97,7 +97,8 @@ else
 
   if [[ $quick != "true" ]]; then
     image=${OMARCHY_AGENT_CONTAINER_IMAGE:-docker.io/library/archlinux:base}
-    if podman run --rm --pull=missing --network=none --read-only --tmpfs=/tmp:rw,nosuid,nodev,size=64m --volume="$PWD:/workspace/doctor:rw,rprivate" --workdir=/workspace/doctor "$image" bash -lc 'printf ok >/tmp/omarchy-agent-doctor && printf ok >.omarchy-agent-doctor && rm -f .omarchy-agent-doctor && ! touch /omarchy-agent-doctor-root'; then
+    # Keep the expected write denial out of conmon's journal, which is checked below.
+    if podman run --rm --pull=missing --network=none --read-only --tmpfs=/tmp:rw,nosuid,nodev,size=64m --volume="$PWD:/workspace/doctor:rw,rprivate" --workdir=/workspace/doctor "$image" bash -lc 'printf ok >/tmp/omarchy-agent-doctor && printf ok >.omarchy-agent-doctor && rm -f .omarchy-agent-doctor && ! touch /omarchy-agent-doctor-root 2>/dev/null'; then
       check_ok "Podman can start a disposable hardened container"
     else
       check_fail "Podman cannot start a disposable hardened container"
