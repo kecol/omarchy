@@ -409,6 +409,7 @@ select_recorder() {
 
 # Stops the recorder screenrecording_active selected.
 stop_screenrecording() {
+  local stop_status=0
   omarchy-capture-screenrecording-process "${RECORDER[@]}" --signal INT # SIGINT required to save video properly
 
   # Wait a maximum of 5 seconds to finish before hard killing
@@ -423,6 +424,8 @@ stop_screenrecording() {
   wf_audio_cleanup
 
   if omarchy-capture-screenrecording-process "${RECORDER[@]}"; then
+    # Cleanup must still run, but a forced stop must not report success.
+    stop_status=1
     omarchy-capture-screenrecording-process "${RECORDER[@]}" --signal KILL
     omarchy-notification-send -u critical -t 5000 "$(omarchy-i18n capture.recordingError)" "$(omarchy-i18n capture.recordingKilled)"
   elif [[ ! -f $(cat "$RECORDING_FILE" 2>/dev/null) ]]; then
@@ -466,7 +469,8 @@ stop_screenrecording() {
     ) 9>&- &
   fi
 
-  rm -f "$RECORDING_FILE" "$REC_PID_FILE"
+  rm -f "$RECORDING_FILE" "$REC_PID_FILE" || return 1
+  return "$stop_status"
 }
 
 # How long the saved recording runs and how big it is, like "1:07 · 12.4 MB".
