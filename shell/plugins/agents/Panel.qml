@@ -10,6 +10,7 @@ import "../panels/elsewhen/Model.js" as Reorder
 
 Panel {
   id: root
+  readonly property bool vertical: bar ? bar.vertical : false
   moduleName: "omarchy.agents"
   ipcTarget: "omarchy.agents"
   manageIpc: false
