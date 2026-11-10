@@ -68,7 +68,14 @@ stop_event_monitors() {
 # started: what is still below it, and whatever still carries this run's log
 # in its environment, which finds the ones that were reparented.
 cleanup() {
-  local pid leftovers=()
+  local status=$? pid leftovers=()
+
+  # Keep bounded, sanitized diagnostics in the runner's existing stderr log
+  # before removing the scratch HOME. Collection never changes the test result.
+  if (( status != 0 )) && [[ -n $TMPDIR && -d $TMPDIR ]]; then
+    /usr/bin/python3 -I -B "$SHELL_TEST_DIR/fixtures/idle-shell/diagnostics.py" "$TMPDIR" / "$status" ||
+      printf '# idle-shell diagnostic collection failed; original failure retained\n' >&2
+  fi
 
   stop_event_monitors
   if [[ -n $QS_PID ]] && kill -0 "$QS_PID" 2>/dev/null; then
@@ -87,6 +94,9 @@ cleanup() {
   return 0
 }
 trap cleanup EXIT
+
+# These exercise only failure evidence and synthetic cleanup, not a desktop.
+/usr/bin/python3 -I -B "$SHELL_TEST_DIR/fixtures/idle-shell/test-diagnostics.py"
 
 require_compositor "idle shell spawn test"
 

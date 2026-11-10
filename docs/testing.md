@@ -112,6 +112,8 @@ A handful of tests fail when a fast path gets slow again. Each prefers a count t
 - `test/shell.d/menu-open-budget-test.sh` times a warm menu summon until the compositor maps its surface at a real size: the fastest of three within 150ms scaled to the machine (about 40ms today). Compositor-gated, and it reads the live session, so a busy desktop can fail it.
 - `test/shell.d/panel-open-budgets-test.sh` times each bar panel (audio, Bluetooth, monitor, network, and power where there is a battery) from its IPC open until the compositor maps it: the first open, which builds the panel's content, within 400ms and the faster of two reopens within 150ms, scaled to the machine (about 30 to 60ms for both today). Compositor-gated, and it reads the live session, so a busy desktop can fail it.
 
+On failure, the idle-shell test writes a bounded diagnostic JSON record to its existing stderr log before it removes its scratch HOME. The record contains file hashes, public package versions and sanitized frame symbols and signal numbers when the scratch Quickshell report provides them. It does not copy cores, process environments, command arguments or raw report text. Missing files, symlinks, special files, oversized files and incomplete metadata stay explicit gaps. These post-failure named-file observations are not original process identity, authenticated symbolization or proof of the crash cause. The collector cannot change the test's failure status, readiness assertions or idle budget. Its fixture tests use synthetic files and cleanup only; they do not start Quickshell.
+
 Override a budget through the environment variable named at the top of each file when measuring something slower on purpose.
 
 ## Companion checkouts
