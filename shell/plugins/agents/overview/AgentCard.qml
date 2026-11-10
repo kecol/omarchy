@@ -8,6 +8,8 @@ Rectangle {
   id: root
   required property var record
   property bool expanded: false
+  property bool actionsEnabled: false
+  signal stopRequested(var targetRecord)
   implicitHeight: body.implicitHeight + Style.space(20)
   radius: Style.cornerRadius
   color: Style.selectedFillFor(Commons.Color.foreground, Commons.Color.accent)
@@ -174,5 +176,14 @@ Rectangle {
       onClicked: root.expanded = !root.expanded
     }
     Label { width: parent.width; visible: root.expanded; text: visible ? root.details() : "" }
+    Ui.Button {
+      width: Math.min(implicitWidth, parent.width)
+      visible: root.expanded && !!root.record.stop
+      enabled: root.actionsEnabled
+      text: Commons.I18n.t("agents.overview.stopContainer")
+      focusable: true
+      fontSize: Style.font.bodySmall
+      onClicked: root.stopRequested(root.record)
+    }
   }
 }

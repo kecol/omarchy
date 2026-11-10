@@ -6,6 +6,7 @@
   "agents.overview.close": "Close",
   "agents.overview.changeDefault": "Change default",
   "agents.overview.inspectSessions": "Inspect sessions…",
+  "agents.overview.stopContainer": "Stop container…",
   "agents.overview.snapshot": "Snapshot: %1",
   "agents.overview.noSnapshot": "No snapshot yet",
   "agents.overview.error": "A valid snapshot is unavailable. Use Refresh to try again.",

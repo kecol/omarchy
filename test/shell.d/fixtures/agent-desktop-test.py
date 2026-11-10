@@ -224,6 +224,155 @@ class DesktopTests(DesktopFixture):
     self.assertEqual((ws['id'],ws['slot'],ws['label']),(20,10,'0'))
 
 
+class PodmanTests(DesktopFixture):
+  def attached_agent(self):
+    self.clients=[]
+    self.add_process(10,'codex','/opt/codex/bin/codex',namespace=('pid:[2]','mnt:[2]'),ppid=20)
+    self.add_process(20,'tini','/usr/bin/tini',namespace=('pid:[2]','mnt:[2]'),ppid=30)
+    self.add_process(30,'conmon','/usr/bin/conmon',namespace=('pid:[1]','mnt:[3]'))
+    self.add_process(40,'podman','/usr/bin/podman',namespace=('pid:[1]','mnt:[3]'),ppid=50)
+    self.add_process(50,'bash','/usr/bin/bash',ppid=61)
+    self.add_process(61,'foot','/usr/bin/foot')
+    self.ids=['a'*64]
+    self.details='\t'.join(json.dumps(v) for v in [self.ids[0],'agent-container',20,'agent','codex','',None,None,[]])
+    self.socket_fd(30,301)
+    self.socket_fd(40,401)
+    self.sockets='u_seq ESTAB 0 0 /proc/self/fd/12/attach 301 * 401 users:(("conmon",pid=30,fd=7))\n'+'u_seq ESTAB 0 0 * 401 * 301 users:(("podman",pid=40,fd=8))\n'
+    self.window()
+
+  def found(self):
+    return self.report(use_desktop=True,use_herdr=False)['processes'][0]['desktop']
+
+  def snapshot(self):
+    processes,_=self.proc.scan()
+    containers=m.container_snapshot(self.query,self.proc)
+    windows,_=d.compositor_windows(self.clients,self.monitors,self.workspaces,processes,self.proc)
+    return processes,containers,windows
+
+  def direct(self,processes,containers,windows):
+    return d.podman_clients(d.socket_rows(self.sockets,attach=True),containers,{self.ids[0]},processes,windows,self.proc)[0].get(self.ids[0],[])
+
+  def test_seqpacket_attach_bridges_private_podman_mount_to_host_terminal(self):
+    self.attached_agent()
+    report=self.report(use_desktop=True,use_herdr=False)
+    self.assertEqual(len(report['processes']),1)
+    found=report['processes'][0]['desktop']
+    self.assertEqual(found['state'],'matched')
+    window=found['windows'][0]
+    self.assertEqual((window['pid'],window['client_pid'],window['container_id']),(61,40,self.ids[0]))
+    self.assertEqual(window['association'],'podman-attach-client')
+    self.assertEqual(window['workspace']['id'],11)
+    self.assertIn('pane visibility',found['detail'])
+    self.assertIn('attached Podman terminal',m.desktop_label(found))
+    self.assertNotIn(f.SECRET,json.dumps(report))
+    self.assertEqual(sum(c[0]=='ss' for c in self.calls),1)
+    processes,_,windows=self.snapshot()
+    self.assertEqual(d.ancestor_windows(40,processes,windows,self.proc),[], 'Generic namespace refusal must remain intact')
+
+  def test_missing_reciprocity_ownership_protocol_and_attach_path_refuse(self):
+    for case in ('stream','missing-reverse','wrong-reverse','conmon-fd','client-fd','control-socket','ambiguous-owner','conflicting-owner'):
+      with self.subTest(case=case):
+        self.attached_agent()
+        if case=='stream':self.sockets=self.sockets.replace('u_seq','u_str')
+        elif case=='missing-reverse':self.sockets=self.sockets.splitlines()[0]
+        elif case=='wrong-reverse':self.sockets=self.sockets.replace('401 * 301','401 * 999')
+        elif case=='conmon-fd':(self.proc_root/'30/fd/301').unlink()
+        elif case=='client-fd':(self.proc_root/'40/fd/401').unlink()
+        elif case=='control-socket':self.sockets=self.sockets.replace('/attach','/control')
+        elif case=='ambiguous-owner':self.sockets=self.sockets.replace('("podman",pid=40,fd=8)','("podman",pid=40,fd=8),("bash",pid=50,fd=9)')
+        else:self.sockets+='u_seq ESTAB 0 0 * 401 * 301 users:(("bash",pid=50,fd=9))\n'
+        self.assertEqual(self.found()['state'],'unknown')
+
+  def test_wrong_role_host_pid_namespace_and_nonhost_parent_refuse(self):
+    for pid,field,value in ((30,'exe','/tmp/conmon'),(40,'exe','/tmp/podman'),(30,'namespaces',('pid:[9]','mnt:[3]')),(40,'namespaces',('pid:[9]','mnt:[3]')),(50,'namespaces',('pid:[1]','mnt:[3]'))):
+      with self.subTest(pid=pid,field=field):
+        self.attached_agent()
+        path=self.proc_root/str(pid)/('exe' if field=='exe' else 'ns/pid' if value[0]=='pid:[9]' else 'ns/mnt')
+        path.unlink();path.symlink_to(value if field=='exe' else value[0] if value[0]=='pid:[9]' else value[1])
+        self.assertEqual(self.found()['state'],'unknown')
+
+  def test_stale_birth_parent_namespace_or_executable_refuse_every_boundary_actor(self):
+    for pid in (20,30,40,50,61):
+      for field in ('birth','parent','namespace','executable'):
+        with self.subTest(pid=pid,field=field):
+          self.attached_agent()
+          processes,containers,windows=self.snapshot()
+          if field in ('birth','parent'):
+            path=self.proc_root/str(pid)/'stat';prefix,values=path.read_text().rsplit(')',1);values=values.split();values[19 if field=='birth' else 1]='999';path.write_text(prefix+') '+' '.join(values))
+          else:
+            path=self.proc_root/str(pid)/('ns/mnt' if field=='namespace' else 'exe');path.unlink();path.symlink_to('mnt:[999]' if field=='namespace' else '/tmp/replaced')
+          self.assertEqual(self.direct(processes,containers,windows),[])
+
+  def test_identity_and_fd_changes_during_traversal_do_not_publish_old_location(self):
+    for actor in (20,30,40,50,61,'client-fd','conmon-fd'):
+      with self.subTest(actor=actor):
+        self.attached_agent()
+        processes,containers,windows=self.snapshot()
+        original=d.ancestor_windows
+        def changing(*args):
+          found=original(*args)
+          if actor in ('client-fd','conmon-fd'):
+            (self.proc_root/('40/fd/401' if actor=='client-fd' else '30/fd/301')).unlink()
+          else:
+            path=self.proc_root/str(actor)/'stat';prefix,values=path.read_text().rsplit(')',1);values=values.split();values[19]='999';path.write_text(prefix+') '+' '.join(values))
+          return found
+        with f.patch.object(d,'ancestor_windows',changing):
+          self.assertEqual(self.direct(processes,containers,windows),[])
+
+  def test_multiple_attachments_preserve_all_windows_and_duplicate_rows_deduplicate(self):
+    self.attached_agent()
+    self.add_process(41,'podman','/usr/bin/podman',namespace=('pid:[1]','mnt:[3]'),ppid=51)
+    self.add_process(51,'bash','/usr/bin/bash',ppid=62)
+    self.add_process(62,'foot','/usr/bin/foot')
+    self.socket_fd(30,302);self.socket_fd(41,402)
+    self.sockets+='u_seq ESTAB 0 0 /proc/self/fd/12/attach 302 * 402 users:(("conmon",pid=30,fd=9))\n'+'u_seq ESTAB 0 0 * 402 * 302 users:(("podman",pid=41,fd=8))\n'
+    self.sockets+=self.sockets
+    self.window(pid=62,address='0xdef',workspace=12,focusHistoryID=0)
+    found=self.found()
+    self.assertEqual(found['state'],'multiple')
+    self.assertEqual({w['pid'] for w in found['windows']},{61,62})
+    self.assertEqual(len(found['windows']),2)
+
+  def test_init_metadata_missing_duplicate_stale_or_wrong_namespace_refuses(self):
+    for case in ('missing','duplicate','stale','namespace','missing-namespace','host-namespace','kind'):
+      with self.subTest(case=case):
+        self.attached_agent()
+        processes,containers,windows=self.snapshot()
+        if case=='missing':containers=[]
+        elif case=='duplicate':containers+=containers
+        elif case=='stale':containers[0]['init_start']=999
+        elif case=='namespace':containers[0]['namespaces']=('pid:[9]','mnt:[9]')
+        elif case=='missing-namespace':containers[0]['namespaces']=None
+        elif case=='host-namespace':containers[0]['namespaces']=self.proc.namespaces
+        else:containers[0]['kind']='other'
+        self.assertEqual(self.direct(processes,containers,windows),[])
+
+  def test_time_and_endpoint_limits_discard_incomplete_attachment_results(self):
+    self.attached_agent()
+    processes,containers,windows=self.snapshot()
+    with f.patch.object(d.time,'monotonic',side_effect=[0,2]):
+      result,coverage=d.podman_clients(d.socket_rows(self.sockets,attach=True),containers,{self.ids[0]},processes,windows,self.proc)
+    self.assertEqual(result,{})
+    self.assertEqual(coverage['state'],'partial')
+    for index in range(64):
+      self.sockets+=f'u_seq ESTAB 0 0 /proc/self/fd/12/attach {1000+index} * {2000+index} users:(("conmon",pid=30,fd=9))\n'
+    result,coverage=d.podman_clients(d.socket_rows(self.sockets,attach=True),containers,{self.ids[0]},processes,windows,self.proc)
+    self.assertEqual(result,{})
+    self.assertEqual(coverage['state'],'partial')
+
+  def test_disabled_and_unavailable_sources_never_infer_attachment(self):
+    self.attached_agent()
+    report=self.report(use_desktop=True,use_podman=False,use_herdr=False)
+    self.assertEqual(report['processes'][0]['desktop']['state'],'unknown')
+    self.assertFalse(any(c[0]=='ss' for c in self.calls))
+    self.calls.clear()
+    report=self.report(use_desktop=False,use_herdr=False)
+    self.assertEqual(report['processes'][0]['desktop']['state'],'disabled')
+    self.assertFalse(any(c[0] in ('ss','hyprctl') for c in self.calls))
+    self.clients=None
+    self.assertEqual(self.found()['state'],'unavailable')
+
+
 class EditorTests(DesktopFixture):
   def editor(self):
     self.profile=self.root/'editor profile'

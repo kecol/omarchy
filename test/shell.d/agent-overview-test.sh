@@ -45,6 +45,14 @@ assertNode.equal(result.groups[0].label,'special:term')
 assertNode.equal(result.groups[0].workspace,-99)
 pass('multiple windows are never selected by focus and special desktops retain raw identity')
 
+result=parse({processes:[processRow(90,{agent:'codex',boundary:'container',activity:{state:'process-observed',source:'procfs'},desktop:{state:'matched',windows:[windowRow(16,{association:'podman-attach-client',client_pid:700,container_id:'a'.repeat(64),privateMarker:'DO-NOT-DISPLAY'})]}})]})
+assertNode.equal(result.groups[0].type,'desktop')
+assertNode.equal(result.groups[0].workspace,16)
+assertNode.equal(result.groups[0].rows[0].windows[0].source,'podman-attach-client')
+assertNode.equal(result.groups[0].rows[0].activity,'observed')
+assertNode.ok(!JSON.stringify(result).includes('DO-NOT-DISPLAY'))
+pass('Podman attachment locations retain source attribution and grouping without exposing extra report fields or inferring activity')
+
 const malformed=[null,{schema_version:2},{observed_at:'invalid'},{processes:null},{coverage:{}},{processes:[processRow(0)]},{processes:[processRow(10),processRow(10)]},{processes:[host],candidates:[host]},{processes:[processRow(10,{boundary:'safe'})]},{coverage:{desktop:{state:'invented'}}},{processes:[processRow(10,{desktop:{state:'matched',windows:[windowRow(true)]}})]}]
 malformed.forEach(extra=>assertNode.throws(()=>model.parse(JSON.stringify(extra===null?null:report(extra)))))
 assertNode.throws(()=>model.parse('x'.repeat(model.MAX_OUTPUT+1)))
@@ -114,6 +122,22 @@ assertNode.equal(editor.workspaceFiles.mode,'mount')
 assertNode.equal(editor.workspaceFiles.access,'read-only')
 pass('editor workspace cards separate actual files, registry source/mode, internal path and ID without inventing mismatched mappings')
 
+const stopIdentity={pid:70,start_ticks:100,boot_id:'12345678-1234-1234-1234-123456789abc'}
+const stopRow=processRow(70,{identity:stopIdentity,boundary:'container',container:{kind:'workspace',id:'a'.repeat(64),name:'unsafe; name',workspace_name:'project'}})
+const stopCard=parse({processes:[stopRow]}).groups[0].rows[0]
+const stopCommand=model.stopCommand(stopCard)
+assertNode.equal(stopCommand,'omarchy-launch-tui --app-id=org.omarchy.container-stop omarchy-agent-container-stop '+'a'.repeat(64)+' '+stopIdentity.boot_id+' 70 100')
+assertNode.ok(!stopCommand.includes('unsafe; name'))
+for(const change of [{boundary:'host'},{container:{...stopRow.container,kind:'other'}},{container:{...stopRow.container,id:'a'.repeat(64)+'; bad'}},{container:{...stopRow.container,id:'a'.repeat(64)+'\n'}},{identity:{...stopIdentity,boot_id:'bad boot'}},{identity:{...stopIdentity,boot_id:stopIdentity.boot_id+'\n'}}]) {
+  assertNode.equal(parse({processes:[{...stopRow,...change}]}).groups[0].rows[0].stop,null)
+}
+assertNode.throws(()=>parse({processes:[{...stopRow,identity:{...stopIdentity,start_ticks:1.5}}]}),/invalid identity/)
+assertNode.equal(parse({candidates:[stopRow]}).groups[0].rows[0].stop,null)
+assertNode.equal(model.stopCommand({...stopCard,candidate:true}),'')
+assertNode.equal(model.stopCommand({...stopCard,stop:{...stopCard.stop,cid:'--all'}}),'')
+assertNode.equal(model.stopCommand({...stopCard,stop:{...stopCard.stop,cid:{toString(){return 'a'.repeat(64)}}}}),'')
+pass('stop action only serializes exact managed-container identity tokens; host/candidate/unmanaged/malformed selectors cannot launch it')
+
 const stateSource=fs.readFileSync(base+'overview/State.qml','utf8')
 function extract(name) {
   const begin=stateSource.indexOf('function '+name+'(')
@@ -157,6 +181,21 @@ const widget=fs.readFileSync(base+'ExecutionDefault.qml','utf8')
 const button=fs.readFileSync(base+'execution/Button.qml','utf8')
 const popup=fs.readFileSync(base+'overview/Popup.qml','utf8')
 const card=fs.readFileSync(base+'overview/AgentCard.qml','utf8')
+const stopAction=popup.match(/function stopContainer\(record\) \{[\s\S]*?\n  \}/)
+assertNode.ok(stopAction)
+const stopLaunches=[]
+const stopContext={inventory:{loading:false,failed:false},close(){stopLaunches.push('close')},bar:{run(command){stopLaunches.push(command)}}}
+function tryStop(record) {vm.runInNewContext('('+stopAction[0]+')(record)',{root:stopContext,Model:model,record})}
+tryStop(stopCard)
+assertNode.deepEqual(stopLaunches,['close',stopCommand])
+for(const flag of ['loading','failed']) {stopContext.inventory[flag]=true;tryStop(stopCard);stopContext.inventory[flag]=false}
+tryStop({...stopCard,stop:{...stopCard.stop,cid:'bad'}})
+assertNode.equal(stopLaunches.length,2)
+assertNode.ok(card.includes('visible: root.expanded && !!root.record.stop') && card.includes('enabled: root.actionsEnabled'))
+assertNode.ok(card.includes('onClicked: root.stopRequested(root.record)'))
+assertNode.ok(popup.includes('onStopRequested: function(targetRecord) { root.stopContainer(targetRecord) }'))
+assertNode.ok(stateSource.includes('target: "omarchy.agent-overview"') && stateSource.includes('function refresh(): void { root.refresh() }'))
+pass('stop click opens only the fixed confirmation terminal; stale/loading/invalid cards do not launch; completion has a refresh-only IPC target')
 const inspectAction=popup.match(/function inspectSessions\(\) \{[\s\S]*?\n  \}/)
 assertNode.ok(inspectAction)
 const launches=[]

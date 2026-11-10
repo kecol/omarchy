@@ -1,0 +1,8 @@
+#!/bin/bash
+
+# omarchy:summary=Confirm a graceful stop of one observed local managed container
+# omarchy:args=<container-id> <boot-id> <pid> <start-ticks>
+# omarchy:hidden=true
+
+set -euo pipefail
+exec python3 -I -B "$OMARCHY_PATH/default/agents/container-stop.py" "$@"

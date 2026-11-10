@@ -4,10 +4,12 @@ import hashlib
 import os
 import re
 import stat
+import time
 
 ADDRESS = re.compile(r'0x[0-9a-fA-F]{1,32}\Z')
-# Only reciprocal Unix stream peers are used. Unsupported formats remain unknown.
+# Keep stream/editor/Herdr and seqpacket/Podman protocols separate.
 SOCKET_ROW = re.compile(r'^u_str\s+(LISTEN|ESTAB)\s+\d+\s+\d+\s+(.+?)\s+(\d+)\s+\*\s+(\d+)(?:\s+(.*))?$')
+ATTACH_ROW = re.compile(r'^u_seq\s+(LISTEN|ESTAB)\s+\d+\s+\d+\s+(.+?)\s+(\d+)\s+\*\s+(\d+)(?:\s+(.*))?$')
 
 
 def positive(value):
@@ -37,12 +39,12 @@ def ancestor_windows(pid, processes, windows, proc):
   return []
 
 
-def socket_rows(text):
+def socket_rows(text, attach=False):
   rows = []
   if len(text.splitlines()) > 8192:
     raise ValueError('too many Unix sockets')
   for line in text.splitlines():
-    match = SOCKET_ROW.fullmatch(line.strip())
+    match = (ATTACH_ROW if attach else SOCKET_ROW).fullmatch(line.strip())
     if match:
       state, path, local, peer, owners = match.groups()
       rows.append({'state': state, 'path': path, 'local': int(local), 'peer': int(peer), 'pids': {int(pid) for pid in re.findall(r'\bpid=(\d+)', owners or '')}})
@@ -142,6 +144,102 @@ def editor_windows(rows, profiles, targets, processes, windows, proc):
   return result, {'state': 'partial' if failed else 'ok' if targets else 'not-needed', 'profiles_checked': len(targets), 'unavailable_profiles': failed}
 
 
+def podman_current(proc, process):
+  try:
+    return (process and fresh(proc, process)
+      and proc.namespace(process['pid']) == process['namespaces']
+      and os.readlink(proc.root/str(process['pid'])/'exe') == process['exe'])
+  except OSError:
+    return False
+
+
+def podman_clients(rows, containers, targets, processes, windows, proc):
+  """Bridge only a live engine init's conmon -> reciprocal Podman attach peer.
+
+  Rootless Podman can enter a private mount namespace. Cross that ONE verified
+  client-to-parent edge, then use the unchanged host-only ancestry checker.
+  Socket paths filter protocol, never establish identity. Never connect/attach.
+  """
+  peers = {}
+  for row in rows:
+    if row['state'] == 'ESTAB' and row['local'] > 0 and row['peer'] > 0:
+      peers.setdefault((row['local'], row['peer']), []).append(row)
+
+  def current(process):
+    return podman_current(proc, process)
+
+  def endpoint(process, role):
+    return (current(process) and process['exe'] == '/usr/bin/'+role
+      and process['namespaces'] and process['namespaces'][0] == proc.namespaces[0])
+
+  result, failed = {}, 0
+  deadline = time.monotonic() + 1
+  by_owner = {}
+  for key, endpoints in peers.items():
+    for pid in {pid for row in endpoints for pid in row['pids']}:
+      by_owner.setdefault(pid, []).append((key, endpoints))
+  by_id = {}
+  for container in containers:
+    by_id.setdefault(container['id'], []).append(container)
+  for cid in targets:
+    if time.monotonic() >= deadline:
+      return {}, {'state': 'partial', 'containers_checked': len(targets), 'detail': 'attachment validation budget exceeded'}
+    matches = []
+    candidates = by_id.get(cid, [])
+    container = candidates[0] if len(candidates) == 1 else None
+    init = processes.get(container['init_pid']) if container else None
+    if (not container or container['kind'] != 'agent' or not init
+      or not container['namespaces'] or container['namespaces'] == proc.namespaces
+      or init['start_ticks'] != container['init_start']
+      or init['namespaces'] != container['namespaces'] or not current(init)):
+      failed += 1
+      continue
+    conmon = processes.get(init['ppid'])
+    if not endpoint(conmon, 'conmon'):
+      failed += 1
+      continue
+    endpoints_for_monitor = by_owner.get(conmon['pid'], [])
+    if len(endpoints_for_monitor) > 64:
+      failed += 1
+      continue
+    conmon_fds = socket_inodes(proc, conmon['pid'])
+    for (local, peer), endpoints in endpoints_for_monitor:
+      if time.monotonic() >= deadline:
+        return {}, {'state': 'partial', 'containers_checked': len(targets), 'detail': 'attachment validation budget exceeded'}
+      # Duplicate identical rows are harmless. Conflicting ownership is not.
+      if {tuple(sorted(row['pids'])) for row in endpoints} != {(conmon['pid'],)}:
+        continue
+      if local not in conmon_fds or not any(Path(row['path']).is_absolute() and Path(row['path']).name == 'attach' for row in endpoints):
+        continue
+      reverse = peers.get((peer, local), [])
+      owners = {tuple(sorted(row['pids'])) for row in reverse}
+      if len(owners) != 1:
+        continue
+      owner = next(iter(owners))
+      if len(owner) != 1:
+        continue
+      client = processes.get(owner[0])
+      if not endpoint(client, 'podman') or peer not in socket_inodes(proc, client['pid']):
+        continue
+      parent = processes.get(client['ppid'])
+      if not parent or parent['namespaces'] != proc.namespaces or not current(parent):
+        continue
+      found = ancestor_windows(parent['pid'], processes, windows, proc)
+      # Recheck both ownership ends and every boundary actor after traversal.
+      if (not current(init) or not endpoint(conmon, 'conmon') or not endpoint(client, 'podman')
+        or not current(parent) or local not in socket_inodes(proc, conmon['pid'])
+        or peer not in socket_inodes(proc, client['pid'])):
+        continue
+      for window in found:
+        owner_process = processes.get(window['pid'])
+        if owner_process and current(owner_process):
+          matches.append({**window, 'association': 'podman-attach-client', 'client_pid': client['pid'], 'container_id': cid})
+    result[cid] = matches
+  if targets and time.monotonic() >= deadline:
+    return {}, {'state': 'partial', 'containers_checked': len(targets), 'detail': 'attachment validation budget exceeded'}
+  return result, {'state': 'partial' if failed else 'ok' if targets else 'not-needed', 'containers_checked': len(targets), 'unavailable_identities': failed}
+
+
 def herdr_clients(rows, sessions, processes, windows, proc):
   """Identify session servers by API listeners, then their local frontend peers."""
   peers = {}
@@ -191,6 +289,8 @@ def location(matches, reason='no verified window association'):
     detail = reason
   elif any(row['association'] == 'herdr-session-client' for row in windows):
     detail = 'attached terminal location; agent pane visibility is not verified'
+  elif any(row['association'] == 'podman-attach-client' for row in windows):
+    detail = 'attached Podman terminal location; agent pane visibility is not verified'
   elif any(row['association'] == 'workspace-editor-profile' for row in windows):
     detail = 'workspace editor profile location; remote connection and agent visibility are not verified'
   else:
@@ -241,7 +341,7 @@ def compositor_windows(clients, monitors, workspaces, processes, proc):
   return result, skipped
 
 
-def discover(query, proc, processes, records, sessions, unavailable, profiles=None):
+def discover(query, proc, processes, records, sessions, unavailable, profiles=None, containers=None):
   if proc.container_observer or not proc.namespaces:
     for record in records:
       record['desktop'] = {'state': 'unavailable', 'windows': [], 'detail': 'desktop association requires a host observer'}
@@ -259,12 +359,15 @@ def discover(query, proc, processes, records, sessions, unavailable, profiles=No
     return {'state': 'unavailable', 'detail': 'Hyprland metadata unavailable'}
   profiles = profiles or {}
   targets = {r['container']['workspace_id'] for r in records if r['boundary'] == 'container' and r.get('container') and r['container']['workspace_id'] in profiles}
+  attach_targets = {r['container']['id'] for r in records if r['boundary'] == 'container' and r.get('container') and r['container']['kind'] == 'agent'}
   herdr_needed = any(session.get('_socket_path') for session in sessions)
-  session_windows, peer_state, socket_state, rows = {}, 'not-needed', 'not-needed', []
-  if targets or herdr_needed:
+  session_windows, peer_state, socket_state, rows, attach_rows = {}, 'not-needed', 'not-needed', [], []
+  if targets or herdr_needed or attach_targets:
     try:
-      rows = socket_rows(query(['ss', '-xHapn'], json_output=False))
-      socket_state = 'ok' if rows else 'unavailable'
+      text = query(['ss', '-xHapn'], json_output=False)
+      rows = socket_rows(text)
+      attach_rows = socket_rows(text, attach=True)
+      socket_state = 'ok' if rows or attach_rows else 'unavailable'
       if herdr_needed:
         session_windows = herdr_clients(rows, sessions, processes, windows, proc)
         peer_state = socket_state
@@ -273,6 +376,7 @@ def discover(query, proc, processes, records, sessions, unavailable, profiles=No
       if herdr_needed:
         peer_state = 'unavailable'
   editors, editor_coverage = editor_windows(rows, profiles, targets, processes, windows, proc)
+  attached, attach_coverage = podman_clients(attach_rows, containers or [], attach_targets, processes, windows, proc)
   for session in sessions:
     reason = 'no attached local Herdr client window identified' if peer_state != 'unavailable' else 'local Herdr peer metadata unavailable'
     session['desktop'] = location(session_windows.get(session['name'], []), reason)
@@ -292,5 +396,9 @@ def discover(query, proc, processes, records, sessions, unavailable, profiles=No
     if not matches and record['boundary'] == 'container' and record.get('container'):
       if proc.namespace(pid) == process['namespaces']:
         matches.extend(editors.get(record['container']['workspace_id'], []))
+        if not matches:
+          matches.extend(attached.get(record['container']['id'], []))
+    if any(window['association'] == 'podman-attach-client' for window in matches) and not podman_current(proc, process):
+      matches = []
     record['desktop'] = location(matches, 'no verified GUI association; background/container processes are not assigned by guesswork')
-  return {'state': 'partial' if skipped or socket_state == 'unavailable' or editor_coverage['state'] == 'partial' else 'ok', 'herdr_peers': peer_state, 'unix_peers': socket_state, 'vscode_profiles': editor_coverage, 'skipped_windows': skipped}
+  return {'state': 'partial' if skipped or socket_state == 'unavailable' or editor_coverage['state'] == 'partial' or attach_coverage['state'] == 'partial' else 'ok', 'herdr_peers': peer_state, 'unix_peers': socket_state, 'vscode_profiles': editor_coverage, 'podman_attachments': attach_coverage, 'skipped_windows': skipped}

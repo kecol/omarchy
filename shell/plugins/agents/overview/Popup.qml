@@ -5,6 +5,7 @@ import qs.Commons
 import qs.Commons as Commons
 import qs.Ui as Ui
 import "../execution" as Execution
+import "Model.js" as Model
 import "." as Overview
 
 Item {
@@ -21,6 +22,13 @@ Item {
   function inspectSessions() {
     root.close()
     root.bar.run("omarchy-launch-tui --app-id=org.omarchy.agent-sessions omarchy agent sessions")
+  }
+  function stopContainer(record) {
+    if (root.inventory.loading || root.inventory.failed) return
+    var command = Model.stopCommand(record)
+    if (!command) return
+    root.close()
+    root.bar.run(command)
   }
   Component.onCompleted: { ready = true; if (opened) inventory.refresh() }
   onOpenedChanged: if (ready && opened) inventory.refresh()
@@ -142,7 +150,13 @@ Item {
                 Label { width: parent.width; text: root.groupTitle(group.modelData); font.bold: true; font.pixelSize: Style.font.body }
                 Repeater {
                   model: group.modelData.rows
-                  delegate: AgentCard { required property var modelData; width: list.width; record: modelData }
+                  delegate: AgentCard {
+                    required property var modelData
+                    width: list.width
+                    record: modelData
+                    actionsEnabled: !root.inventory.loading && !root.inventory.failed
+                    onStopRequested: function(targetRecord) { root.stopContainer(targetRecord) }
+                  }
                 }
               }
             }

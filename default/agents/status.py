@@ -470,12 +470,12 @@ def workspace_snapshot():
     'mode': row['mode'], 'source': row['source'], 'directory': row['directory']} for row in rows}
 
 
-def desktop_locations(proc, query, processes, records, sessions, profiles):
+def desktop_locations(proc, query, processes, records, sessions, profiles, containers=None):
   path = Path(os.environ['OMARCHY_PATH'])/'default/agents/desktop.py'
   spec = importlib.util.spec_from_file_location('omarchy_status_desktop', path)
   backend = importlib.util.module_from_spec(spec)
   spec.loader.exec_module(backend)
-  return backend.discover(query, proc, processes, records, sessions, Unavailable, profiles)
+  return backend.discover(query, proc, processes, records, sessions, Unavailable, profiles, containers)
 
 
 def build_report(proc, query, use_herdr=True, use_podman=True, workspace_reader=None, use_desktop=True):
@@ -594,7 +594,7 @@ def build_report(proc, query, use_herdr=True, use_podman=True, workspace_reader=
   if use_desktop:
     try:
       profiles = {wid: row['editor_profile'] for wid, row in workspaces.items() if row.get('editor_profile')}
-      coverage['desktop'] = desktop_locations(proc, query, processes, identified+candidates, sessions, profiles)
+      coverage['desktop'] = desktop_locations(proc, query, processes, identified+candidates, sessions, profiles, containers)
     except (Unavailable, OSError, ValueError, KeyError, TypeError):
       coverage['desktop'] = {'state': 'unavailable', 'detail': 'desktop adapter unavailable'}
       for value in identified+candidates+sessions:
@@ -619,6 +619,8 @@ def desktop_label(desktop):
     text = f"{window['monitor']['name']} / desktop {ws['label']} (Hyprland {ws['id']})"
     if window['association'] == 'herdr-session-client':
       text += ' [attached Herdr terminal; pane visibility unknown]'
+    if window['association'] == 'podman-attach-client':
+      text += ' [attached Podman terminal; pane visibility unknown]'
     if window['association'] == 'workspace-editor-profile':
       text += ' [workspace VS Code profile; connection/agent visibility unverified]'
     if window['hidden']:
