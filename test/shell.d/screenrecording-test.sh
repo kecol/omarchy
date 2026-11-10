@@ -662,3 +662,6 @@ recorder --status || status=$?
 (( status == 1 )) || fail "status reports inactive before the recorder starts"
 [[ ! -s $audio_calls && -e $audio_modules ]] || fail "status preserves the audio mix created before the recorder starts"
 pass "status leaves the starting recorder's audio mix alone"
+
+# Exercise the real stop command with inert helpers: no recorder or signals.
+python3 "$ROOT/test/shell.d/fixtures/screenrecording-stop-status.py" "$ROOT"
