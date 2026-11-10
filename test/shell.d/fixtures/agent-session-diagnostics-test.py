@@ -210,4 +210,160 @@ class SessionsTests(unittest.TestCase):
     self.assertEqual(m.callback_listener(root),'present')
 
 
+spec=importlib.util.spec_from_file_location('widget_stop',ROOT/'default/agents/container-stop.py')
+cs=importlib.util.module_from_spec(spec);spec.loader.exec_module(cs)
+spec=importlib.util.spec_from_file_location('status_fixture',ROOT/'test/shell.d/fixtures/agent-status-test.py')
+f=importlib.util.module_from_spec(spec);spec.loader.exec_module(f)
+
+
+class WidgetStopTests(unittest.TestCase):
+  add_process=f.StatusTests.add_process
+
+  def setUp(self):
+    f.StatusTests.setUp(self)
+    self.boot='12345678-1234-1234-1234-123456789abc'
+    self.proc.boot_id=self.boot
+    self.actions=[];self.notified=[]
+    self.data=self.root/'data'
+    env=patch.dict(os.environ,{'XDG_DATA_HOME':str(self.data)})
+    env.start();self.addCleanup(env.stop)
+    self.seed()
+
+  def seed(self,kind='workspace'):
+    self.cid='a'*64;self.wid='b'*32;self.instance='568a857f-e55a-4420-9411-be8c1b183113'
+    self.kind=kind;self.running=True;self.signal='15';self.rootless='true';self.started='2026-11-08T00:00:00Z'
+    self.add_process(10,'codex','/opt/codex/bin/codex',namespace=('pid:[2]','mnt:[2]'),ppid=20)
+    self.add_process(20,'tini','/usr/bin/tini',namespace=('pid:[2]','mnt:[2]'))
+    (self.data/'omarchy/workspaces').mkdir(parents=True,exist_ok=True,mode=0o700)
+    self.registry=self.data/'omarchy/workspaces/project/workspace.json'
+    self.registry.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+    self.registry.write_text(json.dumps({'version':1,'name':'project','id':self.wid,'mode':'clone','source':'/original/source','directory':str(self.registry.parent/'repo')}));self.registry.chmod(0o600)
+    (self.registry.parent/'identity').write_bytes(SECRET)
+    self.target=(self.cid,self.boot,10,100)
+
+  def query(self,args,json_output=True):
+    self.calls.append(args)
+    self.assertFalse(any(x in args for x in ('stop','kill','rm','exec','start')))
+    if args[2]=='info':return self.rootless
+    if args[2]=='ps':
+      if '--filter' in args:return json.dumps(self.cid) if self.running else ''
+      return [{'Id':self.cid}] if self.running else []
+    if args[2]=='inspect':
+      self.assertNotIn('Env',args[4]);self.assertNotIn('Auth',args[4])
+      if '.Config.StopSignal' in args[4]:return '\t'.join(json.dumps(v) for v in (self.cid,self.running,self.started,self.signal,self.instance))
+      name='omarchy-workspace-'+self.wid if self.kind=='workspace' else 'omarchy-agent-codex-'+self.instance.replace('-','')[:12]
+      return '\t'.join(json.dumps(v) for v in (self.cid,name,20,self.kind,'codex',self.wid if self.kind=='workspace' else '',None,None,[]))
+    raise AssertionError(args)
+
+  def action(self,command):
+    self.actions.append(command);self.running=False
+
+  def request(self,confirm=lambda row:True,action=None,notify=None,clock=lambda:0):
+    return cs.request_stop(self.target,self.proc,lambda:self.query,confirm,action or self.action,notify or (lambda:self.notified.append('refresh')),clock)
+
+  def test_workspace_and_harness_stop_one_exact_id_without_force_or_deletion(self):
+    original=Path.open
+    def private(path,*args,**kwargs):
+      if path.name in ('identity','identity.pub','ssh_config','known_hosts'):raise AssertionError('Credential content read')
+      return original(path,*args,**kwargs)
+    for kind in ('workspace','agent'):
+      with self.subTest(kind=kind):
+        self.seed(kind);self.actions.clear();self.notified.clear()
+        with patch.object(Path,'open',private):
+          self.assertEqual(self.request(),'stopped')
+        self.assertEqual(self.actions,[['podman','--remote=false','stop','--time=-1',self.cid]])
+        self.assertEqual(self.notified,['refresh'])
+        self.assertTrue(self.registry.exists())
+
+  def test_cancel_is_not_stop_and_sends_no_command(self):
+    self.assertEqual(self.request(confirm=lambda row:False),'cancelled')
+    self.assertEqual(self.actions,[]);self.assertEqual(self.notified,[])
+
+  def test_invalid_or_injected_identity_never_queries_or_stops(self):
+    for index,value in ((0,'--all'),(0,'a'*64+';echo BAD'),(1,'bad boot'),(2,True),(2,-1),(3,9007199254740992)):
+      with self.subTest(index=index,value=value):
+        target=list(self.target);target[index]=value
+        self.calls.clear()
+        with self.assertRaises(cs.Unavailable):cs.request_stop(tuple(target),self.proc,lambda:self.query,lambda row:True,self.action,lambda:None)
+        self.assertFalse(self.calls);self.assertFalse(self.actions)
+
+  def test_changed_identity_during_confirmation_requires_refresh(self):
+    for case in ('cid','restart','process','namespace','registry','boot','started','instance'):
+      with self.subTest(case=case):
+        self.seed('agent' if case=='instance' else 'workspace');self.actions.clear()
+        def changed(row):
+          if case=='cid':self.cid='c'*64
+          elif case=='restart':self.add_process(20,'tini','/usr/bin/tini',namespace=('pid:[2]','mnt:[2]'),start=200)
+          elif case=='process':self.add_process(10,'codex','/different/codex',namespace=('pid:[2]','mnt:[2]'),ppid=20)
+          elif case=='namespace':self.add_process(10,'codex','/opt/codex/bin/codex',namespace=('pid:[3]','mnt:[3]'),ppid=20)
+          elif case=='registry':self.registry.unlink()
+          elif case=='boot':self.proc.boot_id='87654321-1234-1234-1234-123456789abc'
+          elif case=='instance':self.instance='168a857f-e55a-4420-9411-be8c1b183113'
+          else:self.started='replacement-start'
+          return True
+        with self.assertRaises(cs.Unavailable):self.request(confirm=changed)
+        self.assertFalse(self.actions)
+        self.proc.boot_id=self.boot
+
+  def test_unsafe_or_unmanaged_sources_never_reach_confirmation(self):
+    for case in ('rootful','signal','unmanaged','no-registry','host-namespace','container-observer'):
+      with self.subTest(case=case):
+        self.seed();self.proc.container_observer=False
+        if case=='rootful':self.rootless='false'
+        elif case=='signal':self.signal='SIGKILL'
+        elif case=='unmanaged':self.kind='other'
+        elif case=='no-registry':self.registry.unlink()
+        elif case=='host-namespace':self.add_process(20,'tini','/usr/bin/tini')
+        else:self.proc.container_observer=True
+        confirm=unittest.mock.Mock(return_value=True)
+        with self.assertRaises(cs.Unavailable):self.request(confirm=confirm)
+        confirm.assert_not_called();self.assertFalse(self.actions)
+
+  def test_root_and_weak_name_only_processes_never_get_a_stop(self):
+    with patch.object(cs.os,'getuid',return_value=0):
+      with self.assertRaises(cs.Unavailable):self.request()
+    self.add_process(10,'codex','/unrecognized/binary',namespace=('pid:[2]','mnt:[2]'),ppid=20)
+    with self.assertRaises(cs.Unavailable):self.request()
+    self.assertFalse(self.actions)
+
+  def test_shared_namespace_cannot_select_a_container_by_guesswork(self):
+    rows=cs.status.container_snapshot(self.query,self.proc)
+    with patch.object(cs.status,'container_snapshot',return_value=rows+[{**rows[0],'id':'d'*64,'name':'another-container'}]):
+      with self.assertRaises(cs.Unavailable):self.request()
+    self.assertFalse(self.actions)
+
+  def test_confirmation_expiry_before_and_after_recheck_does_not_stop(self):
+    for times in ((0,121),(0,0,121)):
+      with self.subTest(times=times):
+        clock=unittest.mock.Mock(side_effect=times)
+        with self.assertRaises(cs.Unavailable):self.request(clock=clock)
+        self.assertFalse(self.actions)
+
+  def test_engine_failure_and_unconfirmed_result_never_retry_or_force(self):
+    def fails(command):self.actions.append(command);raise cs.Unavailable('not confirmed')
+    with self.assertRaises(cs.Unavailable):self.request(action=fails)
+    self.assertEqual(len(self.actions),1);self.assertEqual(self.notified,['refresh'])
+    self.actions.clear();self.notified.clear()
+    with self.assertRaises(cs.Unavailable):self.request(action=self.actions.append)
+    self.assertEqual(len(self.actions),1);self.assertEqual(self.notified,['refresh'])
+
+  def test_refresh_failure_does_not_rewrite_success(self):
+    with contextlib.redirect_stderr(io.StringIO()) as errors:
+      self.assertEqual(self.request(notify=lambda:(_ for _ in ()).throw(OSError('fixture'))),'stopped')
+    self.assertIn('refresh unavailable',errors.getvalue())
+
+  def test_foreground_default_no_terminal_confirmation_and_warning(self):
+    class Terminal(io.StringIO):
+      def isatty(self):return True
+      def fileno(self):return 0
+    streams=[Terminal(),Terminal(),Terminal()]
+    with patch.object(sys,'argv',['container-stop',*map(str,self.target)]),patch.object(sys,'stdin',streams[0]),patch.object(sys,'stdout',streams[1]),patch.object(sys,'stderr',streams[2]),patch.object(cs.os,'tcgetpgrp',return_value=123),patch.object(cs.os,'getpgrp',return_value=123),patch.object(cs.status,'Proc',return_value=self.proc),patch.object(cs.status,'Query',return_value=self.query),patch.object(cs.subprocess,'run',return_value=subprocess.CompletedProcess([],1)) as run:
+      self.assertEqual(cs.main(),0)
+      self.assertEqual(run.call_args.args[0],['gum','confirm','--default=false','Stop this exact container?'])
+      self.assertEqual(run.call_count,1)
+    self.assertIn('Unsaved work may be lost',streams[1].getvalue())
+    self.assertIn('Cancelled; no stop requested',streams[1].getvalue())
+    self.assertFalse(self.actions)
+
+
 if __name__=='__main__':unittest.main()

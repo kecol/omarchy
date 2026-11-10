@@ -2,6 +2,7 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import qs.Commons as Commons
 import "Model.js" as Model
 
 // One bounded on-demand read shared by every monitor. No startup/hover reads,
@@ -47,6 +48,11 @@ Singleton {
     }
     buffer = ""
     loading = false
+  }
+
+  Commons.ShellIpc {
+    target: "omarchy.agent-overview"
+    function refresh(): void { root.refresh() }
   }
 
   Process {

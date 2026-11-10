@@ -21,7 +21,7 @@ function identity(row) {
 }
 function windowRow(row) {
   if (!object(row) || !object(row.monitor) || !object(row.workspace) || !integer(row.workspace.id) || !integer(row.pid) || row.pid <= 0 || !/^0x[0-9a-fA-F]{1,32}$/.test(row.address)) throw new Error('invalid location')
-  var source = ['process-ancestor', 'herdr-session-client', 'workspace-editor-profile'].indexOf(row.association) >= 0 ? row.association : 'unknown'
+  var source = ['process-ancestor', 'herdr-session-client', 'workspace-editor-profile', 'podman-attach-client'].indexOf(row.association) >= 0 ? row.association : 'unknown'
   return {address: row.address, pid: row.pid, monitor: clean(row.monitor.name), workspace: row.workspace.id,
     label: clean(row.workspace.label), source: source, hidden: row.hidden === true}
 }
@@ -45,6 +45,25 @@ function workspaceFiles(row) {
   return {state: mapping.state, host: mapping.host, target: mapping.target, access: mapping.access,
     registry: registry, mode: registry === 'matched' ? mode : '', source: registry === 'matched' ? source : ''}
 }
+function stopTarget(row, candidate) {
+  var container = object(row.container) ? row.container : {}
+  var id = object(row.identity) ? row.identity : {}
+  if (candidate || row.boundary !== 'container' || ['agent','workspace'].indexOf(container.kind) < 0
+      || typeof container.id !== 'string' || typeof id.boot_id !== 'string' || container.id.length !== 64 || id.boot_id.length !== 36
+      || !/^[a-f0-9]{64}$/.test(container.id || '') || !/^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(id.boot_id || '')
+      || !integer(id.pid) || !integer(id.start_ticks) || id.pid <= 0 || id.start_ticks <= 0
+      || id.pid > 9007199254740991 || id.start_ticks > 9007199254740991) return null
+  return {cid: container.id, boot: id.boot_id, pid: id.pid, start: id.start_ticks}
+}
+function stopCommand(record) {
+  if (!object(record) || record.boundary !== 'container' || record.candidate || !object(record.stop)) return ''
+  var target = record.stop
+  // Revalidate the narrow tokens even if a caller bypassed report parsing.
+  if (!stopTarget({boundary: 'container', container: {kind: 'agent', id: target.cid},
+      identity: {boot_id: target.boot, pid: target.pid, start_ticks: target.start}}, false)) return ''
+  return 'omarchy-launch-tui --app-id=org.omarchy.container-stop omarchy-agent-container-stop '
+    + target.cid + ' ' + target.boot + ' ' + target.pid + ' ' + target.start
+}
 function card(row, candidate) {
   if (!object(row) || typeof row.agent !== 'string' || ['host','container','observer','unknown'].indexOf(row.boundary) < 0 || !object(row.desktop)) throw new Error('invalid process')
   var id = identity(row)
@@ -60,7 +79,7 @@ function card(row, candidate) {
   var reported = activity.source === 'herdr'
   var state = reported && ['working','idle','waiting','attention','needs_input','needs-input','unknown','exited','conflicting-reports'].indexOf(activity.state) >= 0 ? activity.state : 'observed'
   return {key: JSON.stringify([id.boot,id.pid,id.start]), identity: id, agent: clean(row.agent, 96), boundary: row.boundary,
-    activity: state, reported: reported, candidate: candidate, windows: windows, herdr: herdr,
+    activity: state, reported: reported, candidate: candidate, windows: windows, herdr: herdr, stop: stopTarget(row, candidate),
     single: row.desktop.state === 'matched' && windows.length === 1,
     multiple: row.desktop.state === 'multiple' || windows.length > 1,
     container: clean(container.name), workspace: clean(container.workspace_name), workspaceId: clean(container.workspace_id, 96),
@@ -109,4 +128,4 @@ function parse(raw) {
     timestamp: report.observed_at}
 }
 
-if (typeof module !== 'undefined') module.exports = {parse: parse, clean: clean, MAX_OUTPUT: MAX_OUTPUT, MAX_CARDS: MAX_CARDS}
+if (typeof module !== 'undefined') module.exports = {parse: parse, clean: clean, stopCommand: stopCommand, MAX_OUTPUT: MAX_OUTPUT, MAX_CARDS: MAX_CARDS}
