@@ -118,7 +118,7 @@ hl.config({
     -- died, so omarchy-restart-shell can recover the LOCK failsafe.
     allow_session_lock_restore = true,
     -- Don't chime on every terminal BEL (tab-completion misses, TUI alerts).
-    bell_sound = "none",
+    -- bell_sound = "none",
   },
 
   cursor = {
