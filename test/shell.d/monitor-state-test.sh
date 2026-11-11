@@ -57,7 +57,7 @@ assert_line_count() {
 }
 
 extended='[
-  { "name": "eDP-1", "mirrorOf": "none", "disabled": false, "focused": false, "width": 1920, "height": 1080 },
+  { "name": "eDP-1", "mirrorOf": "none", "disabled": false, "focused": false, "width": 1920, "height": 1080, "physicalWidth": 344, "physicalHeight": 194 },
   { "name": "DP-1", "mirrorOf": "none", "disabled": false, "focused": true, "width": 2560, "height": 1440 }
 ]'
 
@@ -95,6 +95,9 @@ assert_line 4 "" "monitor state reports no mirror while extended"
 assert_line 5 DP-1 "monitor state reports the focused monitor"
 assert_line 6 1.5 "monitor state reports the scale"
 pass "monitor state keeps its lines aligned when nothing is mirrored"
+jq -e '.[] | select(.name == "eDP-1") | .physicalWidth == 344 and .physicalHeight == 194' <<<"${state_lines[7]-}" >/dev/null ||
+  fail "monitor state retains EDID dimensions for the pixel-density subtitle" "displays: ${state_lines[7]-<missing>}"
+pass "monitor state retains EDID dimensions for the pixel-density subtitle"
 
 monitor_state "$mirrored"
 assert_line_count "monitor state answers every line while mirroring"
