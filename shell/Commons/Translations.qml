@@ -1,5 +1,4 @@
 import QtQuick
-import Quickshell.Io
 import "Plural.js" as Plural
 
 // Strings for a plugin that ships its own catalogs, following the language
@@ -28,9 +27,8 @@ QtObject {
   readonly property string baseLanguage: language.split("-")[0]
   readonly property string directoryPath: String(directory).replace(/^file:\/\//, "").replace(/\/+$/, "")
 
-  // Read through FileView synchronously, on the first lookup and on every
-  // change (see the FileViews in I18n.qml for why no read runs in the
-  // background), and keep the maps bound to the watched files.
+  // Read synchronously with an independent watcher, as I18n.qml does.
+  // Keep the maps bound to changes without rebuilding the watcher on reads.
   readonly property var englishStrings: parseCatalog(englishFile.text())
   readonly property var baseStrings: parseCatalog(baseFile.text())
   readonly property var languageStrings: parseCatalog(languageFile.text())
@@ -74,31 +72,16 @@ QtObject {
     return root.directoryPath !== "" ? root.directoryPath + "/" + code + ".json" : ""
   }
 
-  property FileView englishFile: FileView {
+  property WatchedTextFile englishFile: WatchedTextFile {
     path: root.catalogPath("en")
-    watchChanges: true
-    printErrors: false
-    preload: false
-    blockAllReads: true
-    onFileChanged: reload()
   }
 
   // Only read for a regional code; for "da" the language file covers it.
-  property FileView baseFile: FileView {
+  property WatchedTextFile baseFile: WatchedTextFile {
     path: root.baseLanguage !== root.language && root.baseLanguage !== "en" ? root.catalogPath(root.baseLanguage) : ""
-    watchChanges: true
-    printErrors: false
-    preload: false
-    blockAllReads: true
-    onFileChanged: reload()
   }
 
-  property FileView languageFile: FileView {
+  property WatchedTextFile languageFile: WatchedTextFile {
     path: root.language !== "en" ? root.catalogPath(root.language) : ""
-    watchChanges: true
-    printErrors: false
-    preload: false
-    blockAllReads: true
-    onFileChanged: reload()
   }
 }

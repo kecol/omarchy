@@ -6,6 +6,32 @@ import "Commons" as Commons
 ShellRoot {
   id: root
 
+  // Force one real catalog replacement inside the native read/watch gap.
+  // The unwrapped FileView is the before-fix subject; the helper owns _reader.
+  property bool catalogGapArmed: Quickshell.env("OMARCHY_TEST_CATALOG_GAP") !== ""
+  property var catalogReader: {
+    var view = Commons.I18n.languageCatalogFile
+    return view._reader || view
+  }
+  FileView {
+    id: catalogMutator
+    path: Quickshell.env("OMARCHY_TEST_CATALOG_GAP")
+    preload: false
+    blockWrites: true
+    atomicWrites: true
+    printErrors: false
+  }
+  Connections {
+    target: root.catalogGapArmed ? root.catalogReader : null
+    function onTextChanged() { root.catalogReader.text() }
+    function onLoaded() {
+      if (root.catalogReader.path === Quickshell.env("OMARCHY_TEST_CATALOG_GAP")) {
+        root.catalogGapArmed = false
+        catalogMutator.setText("{}")
+      }
+    }
+  }
+
   // Remember the first binding evaluation, even if a later file load repairs it.
   property var first: ({})
   function remember(key, value) {
