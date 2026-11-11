@@ -66,7 +66,7 @@ def write_json(path, data):
 
 
 class Probe:
-    def __init__(self, language=None, malformed=False, malformed_english=False):
+    def __init__(self, language=None, malformed=False, malformed_english=False, catalog_gap=False):
         self.tmp = tempfile.TemporaryDirectory(prefix='omarchy-i18n-startup-')
         self.path = Path(self.tmp.name)
         self.config = self.path / 'config'
@@ -103,6 +103,7 @@ class Probe:
         env.update({
             'OMARCHY_PATH': str(self.path / 'install'), 'OMARCHY_LANGUAGE_FILE': str(self.language),
             'OMARCHY_TEST_PLUGIN_DIRECTORY': str(self.directory), 'OMARCHY_TEST_RESULT': str(self.result),
+            'OMARCHY_TEST_CATALOG_GAP': str(self.catalogs / 'da/shell.json') if catalog_gap else '',
             'XDG_RUNTIME_DIR': str(self.path / 'runtime'), 'HOME': str(self.path / 'home'),
             'XDG_CONFIG_HOME': str(self.path / 'home/.config'), 'XDG_CACHE_HOME': str(self.path / 'cache'),
             'XDG_STATE_HOME': str(self.path / 'state'), 'QT_QPA_PLATFORM': 'offscreen',
@@ -152,7 +153,23 @@ def startup(description, expected, **kwargs):
         probe.close()
 
 
+def catalog_change_during_read():
+    probe = Probe(catalog_gap=True)
+    try:
+        probe.wait(english)
+        write_text(probe.language, 'da')
+        # A real atomic replacement from the native reader's loaded signal
+        # lands after the read but before FileView installs its own watcher.
+        # Keep Danish metadata/plugin strings, but use the English shell fallback.
+        probe.wait(dict(danish, shellText='Hello Ada', shellPlural='2 items'))
+        assert json.loads((probe.catalogs / 'da/shell.json').read_text()) == {}
+        print('ok - a selected catalog replaced during its read does not leave stale translations', flush=True)
+    finally:
+        probe.close()
+
+
 try:
+    catalog_change_during_read()
     startup('missing language file gives correct English on the first binding', english)
     startup('selected Danish, plurals, and locale metadata are ready on the first binding', danish, language='da\n')
     startup('regional plugin catalogs fall back through the base language and English', portuguese, language='pt-BR\n')
