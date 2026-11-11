@@ -1,7 +1,6 @@
 pragma Singleton
 import QtQuick
 import Quickshell
-import Quickshell.Io
 import "Plural.js" as Plural
 import "Numbers.js" as Numbers
 
@@ -80,47 +79,24 @@ QtObject {
     return code
   }
 
-  // The catalogs are small local files, read synchronously so the first
-  // binding to call t() already gets the string rather than the raw key.
-  // Every read is synchronous, not just the first (blockAllReads with no
-  // preload): FileView's reload() joins a background read already running
-  // for the same path, so a file deleted or replaced while that read is
-  // open would keep the old contents until the next change.
-  property FileView languageFile: FileView {
+  // Small local files are read synchronously on every lookup. The helper
+  // installs its independent watch first, so deleting or replacing a file
+  // during a read cannot leave old strings waiting for another change.
+  property WatchedTextFile languageFile: WatchedTextFile {
     // OMARCHY_LANGUAGE_FILE overrides the location, as it does for
     // omarchy-i18n, so tests can pin a language whatever the machine uses.
     path: Quickshell.env("OMARCHY_LANGUAGE_FILE") || (root.configHome + "/omarchy/language")
-    watchChanges: true
-    printErrors: false
-    preload: false
-    blockAllReads: true
-    onFileChanged: reload()
   }
 
-  property FileView englishCatalogFile: FileView {
+  property WatchedTextFile englishCatalogFile: WatchedTextFile {
     path: root.omarchyPath + "/default/i18n/en/shell.json"
-    watchChanges: true
-    printErrors: false
-    preload: false
-    blockAllReads: true
-    onFileChanged: reload()
   }
 
-  property FileView languageCatalogFile: FileView {
+  property WatchedTextFile languageCatalogFile: WatchedTextFile {
     path: root.omarchyPath + "/default/i18n/" + root.language + "/shell.json"
-    watchChanges: true
-    printErrors: false
-    preload: false
-    blockAllReads: true
-    onFileChanged: reload()
   }
 
-  property FileView registryFile: FileView {
+  property WatchedTextFile registryFile: WatchedTextFile {
     path: root.omarchyPath + "/default/i18n/locales.json"
-    watchChanges: true
-    printErrors: false
-    preload: false
-    blockAllReads: true
-    onFileChanged: reload()
   }
 }
