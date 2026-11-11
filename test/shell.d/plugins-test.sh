@@ -185,7 +185,7 @@ for (const manifestPath of manifests) {
   }
 }
 
-// A plugin rescan recreates every service that is not kept loaded. For the
+// A full plugin reload recreates every service that is not kept loaded. For the
 // lock, a polkit prompt or the idle timer that locks the session, that means a
 // lock or an authentication dropped mid-flight.
 const manifestsById = Object.fromEntries(manifests.map(manifestPath => {
