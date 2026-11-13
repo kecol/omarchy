@@ -262,14 +262,48 @@ class GuardsTests(unittest.TestCase):
     self.assertTrue((self.state/'bin/later-agent').is_file())
     self.assertFalse(self.calls.exists())
 
+  def catalog_fixture(self):
+    checkout=self.root/'catalog checkout'
+    (checkout/'default/agents').mkdir(parents=True)
+    (checkout/'default/omarchy').mkdir(parents=True)
+    shutil.copy2(ROOT/'default/agents/catalog.js',checkout/'default/agents/catalog.js')
+    spec=importlib.util.spec_from_file_location('guards_fixture',ROOT/'default/agents/command-guards.py')
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    return module,checkout,checkout/'default/omarchy/omarchy-menu.jsonc'
+
   def test_future_catalog_entry_is_discovered_without_definition_or_registration(self):
     self.tool('future-catalog')
-    with patch.dict(os.environ,self.env,clear=True):
-      spec=importlib.util.spec_from_file_location('guards_fixture',ROOT/'default/agents/command-guards.py')
-      module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
-      result=subprocess.CompletedProcess(['node'],0,json.dumps(['pi','future-catalog']).encode(),b'')
-      with patch.object(module.subprocess,'run',return_value=result):
-        self.assertEqual(module.discover(self.state,{})['future-catalog'],'future-catalog')
+    module,checkout,menu=self.catalog_fixture()
+    menu.write_text('// bundled data only\n{"items":{"setup.default.agent.future-catalog":{},"other.pi":{}},}')
+    with patch.dict(os.environ,{**self.env,'OMARCHY_PATH':str(checkout)},clear=True),patch.object(module,'ROOT',checkout):
+      self.assertEqual(module.discover(self.state,{}),{'future-catalog':'future-catalog'})
+      # Empty/malformed catalog retains the existing guard-only registration path.
+      for raw in ('', '{', '[]', '{}'):
+        menu.write_text(raw)
+        self.assertEqual(module.discover(self.state,{}),{})
+        self.assertEqual(module.discover(self.state,{'pi':'pi'}),{'pi':'pi'})
+      menu.unlink()
+      with self.assertRaises(subprocess.CalledProcessError):module.discover(self.state,{})
+      menu.write_text('{}')
+      (checkout/'default/agents/catalog.js').unlink()
+      with self.assertRaises(subprocess.CalledProcessError):module.discover(self.state,{})
+    self.assertFalse(self.calls.exists())
+
+  def test_catalog_transport_failures_and_guard_limits_are_not_accepted(self):
+    module,checkout,menu=self.catalog_fixture()
+    responses=[b'{}',b'not json',json.dumps(['pi']*257).encode(),b' '*(module.LIMIT+1)]
+    with patch.dict(os.environ,{**self.env,'NODE_OPTIONS':'--synthetic','NODE_PATH':'/synthetic'},clear=True):
+      for response in responses:
+        with self.subTest(response_length=len(response)),patch.object(module.subprocess,'run',return_value=subprocess.CompletedProcess(['node'],0,response,b'')) as run:
+          with self.assertRaises(ValueError):module.discover(self.state,{})
+          self.assertNotIn('NODE_OPTIONS',run.call_args.kwargs['env'])
+          self.assertNotIn('NODE_PATH',run.call_args.kwargs['env'])
+          self.assertEqual(run.call_args.kwargs['stdin'],subprocess.DEVNULL)
+          self.assertEqual(run.call_args.kwargs['cwd'],self.home)
+          self.assertEqual(run.call_args.kwargs['timeout'],5)
+      for error in (subprocess.CalledProcessError(17,['node']),subprocess.TimeoutExpired(['node'],5)):
+        with self.subTest(error=type(error).__name__),patch.object(module.subprocess,'run',side_effect=error):
+          with self.assertRaises(type(error)):module.discover(self.state,{})
     self.assertFalse(self.calls.exists())
 
   def test_definition_runner_is_not_guarded_and_explicit_generic_alias_is_rejected(self):

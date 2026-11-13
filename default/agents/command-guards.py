@@ -102,9 +102,9 @@ def owned(path, command, agent):
 
 def discover(root, extra):
   script = '''const fs=require('fs'),path=require('path');
-const root=process.env.OMARCHY_PATH,model=require(path.join(root,'shell/plugins/menu/MenuModel.js'));
-const rows=model.parseMenuJsonc(fs.readFileSync(path.join(root,'default/omarchy/omarchy-menu.jsonc'),'utf8'));
-console.log(JSON.stringify(rows.filter(e=>/^setup\\.default\\.agent\\.[a-z0-9-]+$/.test(e.id)).map(e=>e.id.split('.').pop())));'''
+const root=process.env.OMARCHY_PATH,catalog=require(path.join(root,'default/agents/catalog.js'));
+const rows=catalog.agentCatalog(fs.readFileSync(path.join(root,'default/omarchy/omarchy-menu.jsonc'),'utf8'));
+console.log(JSON.stringify(rows.map(e=>e.name)));'''
   env=dict(os.environ)
   for key in ('NODE_OPTIONS','NODE_PATH'):env.pop(key,None)
   result = subprocess.run(['node','-e',script], capture_output=True, stdin=subprocess.DEVNULL, cwd=Path.home(), env=env, timeout=5, check=True)

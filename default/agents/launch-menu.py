@@ -112,9 +112,9 @@ def agent_catalog():
   script = '''
 const fs = require("fs"), path = require("path");
 const root = process.env.OMARCHY_PATH;
-const model = require(path.join(root,"shell/plugins/menu/MenuModel.js"));
-const entries = model.parseMenuJsonc(fs.readFileSync(path.join(root,"default/omarchy/omarchy-menu.jsonc"),"utf8"));
-console.log(JSON.stringify(entries.filter(e => /^setup\\.default\\.agent\\.[a-z0-9-]+$/.test(e.id)).map(e => ({name:e.id.split(".").pop(),label:e.label}))));
+const catalog = require(path.join(root,"default/agents/catalog.js"));
+const entries = catalog.agentCatalog(fs.readFileSync(path.join(root,"default/omarchy/omarchy-menu.jsonc"),"utf8"));
+console.log(JSON.stringify(entries));
 '''
   # Read only bundled menu data, never project startup hooks or provider state.
   env = {k: v for k, v in os.environ.items() if k in ("PATH", "HOME", "LANG", "LC_ALL", "OMARCHY_PATH")}
