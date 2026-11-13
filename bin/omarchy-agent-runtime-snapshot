@@ -5,18 +5,18 @@
 
 set -euo pipefail
 
-if omarchy-cmd-missing podman || ! podman info >/dev/null 2>&1; then
+if omarchy-cmd-missing podman || ! podman --remote=false info >/dev/null 2>&1; then
   printf '[]\n'
   exit 0
 fi
 
-mapfile -t container_ids < <(podman ps --filter label=org.omarchy.managed=agent --format '{{.ID}}')
+mapfile -t container_ids < <(podman --remote=false ps --filter label=org.omarchy.managed=agent --format '{{.ID}}')
 if (( ${#container_ids[@]} == 0 )); then
   printf '[]\n'
   exit 0
 fi
 
-podman inspect "${container_ids[@]}" | jq '[.[] | {
+podman --remote=false inspect "${container_ids[@]}" | jq '[.[] | {
   instance: .Config.Labels["org.omarchy.instance"],
   agent: .Config.Labels["org.omarchy.agent"],
   harness: .Config.Labels["org.omarchy.harness"],

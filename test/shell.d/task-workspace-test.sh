@@ -50,6 +50,12 @@ SH
 cat >"$mock_bin/podman" <<'SH'
 #!/bin/bash
 printf '%s\n' "$*" >>"$OMARCHY_TEST_PODMAN_LOG"
+if [[ ${1:-} == "--remote=false" ]]; then
+  shift
+elif [[ ${1:-} == "stop" ]]; then
+  echo "missing local engine selection" >&2
+  exit 92
+fi
 if [[ ${1:-} == "image" && ${2:-} == "exists" ]]; then
   exit 0
 fi
@@ -92,6 +98,7 @@ export OMARCHY_TEST_RUNTIME_SNAPSHOT="$runtime_snapshot"
 export OMARCHY_TEST_AUDIT_FAIL="$audit_fail_file"
 export OMARCHY_TEST_PODMAN_LOG="$podman_log"
 export PATH="$mock_bin:$ROOT/bin:/usr/bin"
+export CONTAINER_HOST=ssh://engine.example.invalid CONTAINER_CONNECTION=fixture-remote
 
 create_json=$(cd "$source_repo" && "$ROOT/bin/omarchy-task-create" --json "Implement isolated workspaces")
 task_id=$(jq -r '.task' <<<"$create_json")
@@ -265,7 +272,7 @@ assignment_id=$(jq -r '.assignment' <<<"$second_json")
 jq -n --arg assignment "$assignment_id" '[{assignment_id: $assignment, runtime: "podman", container: "omarchy-agent-pi-test", status: "running"}]' >"$runtime_snapshot"
 "$ROOT/bin/omarchy-task-stop" "$assignment_id" >"$test_tmp/stop-output"
 grep -Fq 'Stopped omarchy-agent-pi-test' "$test_tmp/stop-output" || fail "task stop reports stopped containers"
-grep -Fxq 'stop omarchy-agent-pi-test' "$podman_log" || fail "task stop asks Podman to stop the active container"
+grep -Fxq -- '--remote=false stop omarchy-agent-pi-test' "$podman_log" || fail "task stop asks Podman to stop the active container"
 [[ $(omarchy-agent-state assignment-get "$assignment_id" | jq -r '.[0].status') == "stopped" ]] || fail "task stop records stopped assignment status"
 printf '[]\n' >"$runtime_snapshot"
 pass "task stop stops active assignment containers"

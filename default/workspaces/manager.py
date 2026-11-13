@@ -134,7 +134,7 @@ def list_workspaces(root, runtime=False):
     available = True
     if records:
       try:
-        result = subprocess.run(["podman", "ps", "--all", "--format=json", "--filter", "label="+LABEL],
+        result = subprocess.run(["podman", "--remote=false", "ps", "--all", "--format=json", "--filter", "label="+LABEL],
           capture_output=True, text=True, check=True, timeout=5)
         for container in json.loads(result.stdout):
           identity = container.get("Labels", {}).get(LABEL)
@@ -152,7 +152,7 @@ def list_workspaces(root, runtime=False):
 def rootless():
   if os.getuid() == 0 or os.getgid() == 0:
     fail("Run workspace commands as an unprivileged user, not under sudo")
-  info = json.loads(output(["podman", "info", "--format", "json"]))
+  info = json.loads(output(["podman", "--remote=false", "info", "--format", "json"]))
   host = info.get("host", info.get("Host", {}))
   security = host.get("security", host.get("Security", {}))
   if security.get("rootless", security.get("Rootless")) is not True:
@@ -162,11 +162,11 @@ def rootless():
 
 
 def inspect(container):
-  return json.loads(output(["podman", "inspect", container]))[0]
+  return json.loads(output(["podman", "--remote=false", "inspect", container]))[0]
 
 
 def exists(kind, name):
-  return run(["podman", kind, "exists", name], capture=True, check=False).returncode == 0
+  return run(["podman", "--remote=false", kind, "exists", name], capture=True, check=False).returncode == 0
 
 
 def owned(container, data):
@@ -251,13 +251,13 @@ def ssh_quote(path):
 
 
 def connect_files(directory, data, container):
-  binding = output(["podman", "port", container, "2222/tcp"])
+  binding = output(["podman", "--remote=false", "port", container, "2222/tcp"])
   match = re.fullmatch(r"127\.0\.0\.1:([0-9]+)", binding)
   if not match or not 0 < int(match[1]) < 65536:
     fail("Expected one loopback-only SSH endpoint")
   public = None
   for _ in range(40):
-    result = run(["podman", "exec", container, "cat", "/home/workspace/.omarchy-sshd/host_ed25519.pub"], capture=True, check=False, stderr=subprocess.DEVNULL)
+    result = run(["podman", "--remote=false", "exec", container, "cat", "/home/workspace/.omarchy-sshd/host_ed25519.pub"], capture=True, check=False, stderr=subprocess.DEVNULL)
     if result.returncode == 0:
       public = result.stdout.strip().split()
       break
@@ -314,27 +314,27 @@ def start(directory, data):
     current = inspect(container)
     audit(current, data, directory)
     if not current.get("State", {}).get("Running"):
-      run(["podman", "start", container])
+      run(["podman", "--remote=false", "start", container])
   else:
     image = data.get("image_id") or IMAGE
     if not exists("image", image):
       if data.get("image_id"):
         fail("Pinned workspace image is missing. Recover that image, or preserve changes and create a new workspace; rebuilding the tag does not upgrade this workspace")
       fail("Workspace image is missing. Explicitly run: omarchy workspace build")
-    image_info = json.loads(output(["podman", "image", "inspect", image]))[0]
+    image_info = json.loads(output(["podman", "--remote=false", "image", "inspect", image]))[0]
     labels = image_info.get("Labels") or image_info.get("Config", {}).get("Labels", {})
     if labels.get(IMAGE_LABEL) != "1" or labels.get("org.omarchy.workspace.uid") != str(os.getuid()) or labels.get("org.omarchy.workspace.gid") != str(os.getgid()):
       fail("Workspace image version or user identity mismatch; rebuild the dedicated workspace image")
     data["image_id"] = image_info["Id"]
     private_json(directory/"workspace.json", data)
     if exists("volume", volume):
-      labels = json.loads(output(["podman", "volume", "inspect", volume]))[0].get("Labels", {})
+      labels = json.loads(output(["podman", "--remote=false", "volume", "inspect", volume]))[0].get("Labels", {})
       if labels.get(LABEL) != data["id"]:
         fail("Workspace home volume identity mismatch")
     else:
-      run(["podman", "volume", "create", "--label", f"{LABEL}={data['id']}", volume])
+      run(["podman", "--remote=false", "volume", "create", "--label", f"{LABEL}={data['id']}", volume])
     uid, gid = os.getuid(), os.getgid()
-    run(["podman", "run", "--detach", "--pull=never", "--name", container,
+    run(["podman", "--remote=false", "run", "--detach", "--pull=never", "--name", container,
       "--label", f"{LABEL}={data['id']}", "--userns=keep-id", "--user", f"{uid}:{gid}",
       "--cap-drop=ALL", "--security-opt=no-new-privileges", "--read-only",
       "--cgroups=enabled", "--cgroupns=private", "--pid=private", "--ipc=private", "--uts=private",
@@ -351,7 +351,7 @@ def start(directory, data):
     try:
       audit(inspect(container), data, directory)
     except RuntimeError:
-      run(["podman", "stop", "--time", "10", container], check=False)
+      run(["podman", "--remote=false", "stop", "--time", "10", container], check=False)
       raise
   return connect_files(directory, data, container)
 
@@ -409,7 +409,7 @@ def main():
   if args.operation == "build":
     rootless()
     context = Path(os.environ["OMARCHY_PATH"])/"containers/workspace"
-    run(["podman", "build", "--http-proxy=false", "--tls-verify=true", "--pull=missing", "--tag", IMAGE,
+    run(["podman", "--remote=false", "build", "--http-proxy=false", "--tls-verify=true", "--pull=missing", "--tag", IMAGE,
       "--build-arg", f"WORKSPACE_UID={os.getuid()}", "--build-arg", f"WORKSPACE_GID={os.getgid()}", str(context)])
     return
   root = state_root(create=args.operation != "list")
@@ -470,7 +470,7 @@ def main():
       rootless()
       if exists("container", container):
         owned(inspect(container), data)
-        run(["podman", "stop", "--time", "10", container])
+        run(["podman", "--remote=false", "stop", "--time", "10", container])
       print("Stopped. Repository, home volume, SSH identity, and VS Code state were retained")
     elif args.operation == "doctor":
       rootless()

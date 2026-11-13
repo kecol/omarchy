@@ -14,6 +14,10 @@ The inventory/evidence-map review below remains historical to the named base che
 
 The [implementation outcome](../openspec/changes/extract-agent-catalog-reader/outcome.md) records two focused suite passes (27 guard, 26 launcher and 19 menu methods, no skips), actual reader transport with synthetic data and two detected semantic mutations in disposable copies. The broader Q1–Q18 map below is not a newly executed suite. These fixture results neither renew historical native evidence nor qualify live agents, credentials, engine enforcement, graphical clicks or a release. No activation, installation, commit/push or archive occurred.
 
+## Local-engine routing follow-up
+
+The separately approved [local-engine change](../openspec/changes/pin-managed-workflows-local-engine/proposal.md) now pins every Podman request in the legacy snapshot, audit-fix, task-stop and workspace manager explicitly local. This includes direct workspace listing and failed-audit cleanup. The inventory, task-workspace and workspace suites passed with synthetic remote defaults and an inert engine; disposable snapshot-query, audit-stop and workspace-listing omissions failed as intended. Ambient remote defaults no longer redirect these host-local workflows; direct user Podman and intentional workspace Remote SSH remain unchanged. The historical E1/O2/L5/C3 rows below retain their original source scope. Routing tests do not qualify actual Podman configuration precedence or repair the snapshot's empty-success limitation, name-based stops or engine-access authority.
+
 ## Interpretation
 
 - **Workflow check**: rejects a request through a particular Omarchy entrypoint. It is not an operating-system restriction on every process owned by the user.

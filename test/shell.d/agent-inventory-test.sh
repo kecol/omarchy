@@ -12,7 +12,13 @@ test_home="$test_tmp/home"
 snapshot_file="$test_tmp/snapshot.json"
 podman_log="$test_tmp/podman-log"
 state_log="$test_tmp/state-log"
-mkdir -p "$mock_bin" "$test_home"
+mkdir -p "$mock_bin" "$test_home" "$test_tmp/commands"
+
+# Keep the actual audit script, but never run its adjacent advisory doctor.
+audit_command="$test_tmp/commands/omarchy-agent-audit"
+cp "$ROOT/bin/omarchy-agent-audit" "$audit_command"
+printf '#!/bin/bash\nprintf '\''{"checks":[]}\\n'\''\n' >"$test_tmp/commands/omarchy-agent-openshell-doctor"
+chmod +x "$test_tmp/commands/omarchy-agent-openshell-doctor"
 
 cat >"$mock_bin/omarchy-agent-mode" <<'SH'
 #!/bin/bash
@@ -42,12 +48,18 @@ SH
 
 cat >"$mock_bin/podman" <<'SH'
 #!/bin/bash
-if [[ ${1:-} == "stop" ]]; then
-  printf 'stop %s\n' "${2:-}" >>"$OMARCHY_TEST_PODMAN_LOG"
-  exit 0
-fi
-echo "unexpected podman call: $*" >&2
-exit 1
+printf '%s\n' "$*" >>"$OMARCHY_TEST_PODMAN_LOG"
+[[ ${1:-} == "--remote=false" ]] || { echo "missing local engine selection" >&2; exit 92; }
+shift
+case ${1:-} in
+  info) [[ ${OMARCHY_TEST_ENGINE_FAIL:-false} != "true" ]] ;;
+  ps) printf 'routing-fixture\n' ;;
+  inspect)
+    printf '%s\n' '[{"Config":{"Labels":{"org.omarchy.instance":"routing-fixture"}},"Mounts":[],"HostConfig":{},"NetworkSettings":{},"State":{"Status":"running"}}]'
+    ;;
+  stop) exit 0 ;;
+  *) echo "unexpected podman call: $*" >&2; exit 1 ;;
+esac
 SH
 
 chmod +x "$mock_bin"/*
@@ -140,6 +152,17 @@ export OMARCHY_TEST_HISTORY="$history_file"
 export OMARCHY_TEST_PODMAN_LOG="$podman_log"
 export OMARCHY_TEST_STATE_LOG="$state_log"
 export PATH="$mock_bin:$ROOT/bin:/usr/bin"
+export CONTAINER_HOST=ssh://engine.example.invalid CONTAINER_CONNECTION=fixture-remote
+
+# Exercise the real producer, not the synthetic snapshot used by list/audit below.
+observed=$("$ROOT/bin/omarchy-agent-runtime-snapshot")
+[[ $(jq -r '.[0].instance' <<<"$observed") == "routing-fixture" ]] || fail "snapshot queries local engine under remote defaults" "$observed"
+for operation in info ps inspect; do
+  grep -Eq "^--remote=false $operation( |$)" "$podman_log" || fail "snapshot explicitly selects local $operation"
+done
+unavailable=$(OMARCHY_TEST_ENGINE_FAIL=true "$ROOT/bin/omarchy-agent-runtime-snapshot")
+[[ $unavailable == "[]" ]] || fail "snapshot retains its unavailable-engine empty result"
+pass "real snapshot requests local metadata under remote defaults without remote fallback"
 
 list_json=$("$ROOT/bin/omarchy-agent-list" --json)
 pi_json=$(jq -c '.[] | select(.agent == "pi")' <<<"$list_json")
@@ -160,7 +183,7 @@ ps_json=$("$ROOT/bin/omarchy-agent-ps" --json)
 [[ $(jq -r '.[0].workspace' <<<"$ps_json") == "/workspace/project123" ]] || fail "agent ps reports the runtime workspace"
 pass "agent ps reports observed active instances"
 
-audit_json=$("$ROOT/bin/omarchy-agent-audit" --json)
+audit_json=$("$audit_command" --json)
 [[ $(jq -r '.ok' <<<"$audit_json") == "true" ]] || fail "agent audit passes safe active instances" "$audit_json"
 [[ $(jq -r '.checks[] | select(.name == "source_unmounted") | .status' <<<"$audit_json") == "pass" ]] || fail "agent audit checks source mount policy" "$audit_json"
 [[ $(jq -r '.checks[] | select(.name == "resources") | .status' <<<"$audit_json") == "pass" ]] || fail "agent audit checks resource policy" "$audit_json"
@@ -171,12 +194,12 @@ data = json.load(open(path))
 data[0]["filesystem"]["source"] = "mounted"
 json.dump(data, open(path, "w"))
 PY
-if "$ROOT/bin/omarchy-agent-audit" >"$test_tmp/audit-fail" 2>&1; then
+if "$audit_command" >"$test_tmp/audit-fail" 2>&1; then
   fail "agent audit rejects runtime policy drift"
 fi
 grep -Fq 'source_unmounted' "$test_tmp/audit-fail" || fail "agent audit names source mount drift"
-"$ROOT/bin/omarchy-agent-audit" --fix >"$test_tmp/audit-fix"
-grep -Fxq 'stop omarchy-agent-pi-019abcde1111' "$podman_log" || fail "agent audit --fix stops drifted containers"
+"$audit_command" --fix >"$test_tmp/audit-fix"
+grep -Fxq -- '--remote=false stop omarchy-agent-pi-019abcde1111' "$podman_log" || fail "agent audit --fix stops drifted containers"
 grep -Fq $'assignment-status\tassignment123\tfailed' "$state_log" || fail "agent audit --fix marks managed assignments failed"
 grep -Fq 'fix: 019abcde-111 stopped omarchy-agent-pi-019abcde1111' "$test_tmp/audit-fix" || fail "agent audit --fix reports stopped containers"
 python - "$snapshot_file" <<'PY'

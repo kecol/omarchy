@@ -110,7 +110,7 @@ class PolicyTests(unittest.TestCase):
       image = {'Id': data['image_id'], 'Labels': {m.IMAGE_LABEL: '1', 'org.omarchy.workspace.uid': str(os.getuid()), 'org.omarchy.workspace.gid': str(os.getgid())}}
       with patch.object(m, 'rootless'), patch.object(m, 'exists', side_effect=lambda kind, _: kind == 'image'), patch.object(m, 'output', return_value=json.dumps([image])), patch.object(m, 'run', side_effect=execute), patch.object(m, 'inspect', return_value=config), patch.object(m, 'connect_files', return_value='alias'):
         m.start(directory, data)
-      launch = next(args for args in calls if args[:2] == ['podman', 'run'])
+      launch = next(args for args in calls if args[:3] == ['podman', '--remote=false', 'run'])
       self.assertIn('--pull=never', launch)
       for flag in ['--userns=keep-id', '--cap-drop=ALL', '--read-only', '--security-opt=no-new-privileges', '--http-proxy=false', '--env-host=false', '--memory=4g', '--memory-swap=4g', '--pids-limit=512', '--cpus=2']:
         self.assertIn(flag, launch)
@@ -137,7 +137,7 @@ class PolicyTests(unittest.TestCase):
       with patch.object(m, 'rootless'), patch.object(m, 'exists', side_effect=lambda kind, _: kind == 'image'), patch.object(m, 'output', return_value=json.dumps([image])), patch.object(m, 'run', return_value=completed()) as run, patch.object(m, 'inspect', return_value=config):
         with self.assertRaises(RuntimeError):
           m.start(directory, data)
-        self.assertTrue(any(call.args[0][:2] == ['podman', 'stop'] for call in run.call_args_list))
+        self.assertTrue(any(call.args[0][:3] == ['podman', '--remote=false', 'stop'] for call in run.call_args_list))
 
   def test_host_key_pinning_and_ssh_authentication(self):
     with tempfile.TemporaryDirectory(prefix='workspace space-') as temporary:
@@ -209,6 +209,83 @@ class StateTests(unittest.TestCase):
     self.assertEqual((Path(b['directory'])/'tracked.txt').read_text(), 'committed\n')
     self.assertEqual((self.source/'tracked.txt').read_text(), 'committed\n')
 
+  def test_engine_transport_is_local_under_remote_defaults(self):
+    self.command('create', 'one', str(self.source))
+    directory, data = m.load(self.root, 'one')
+    _, config = fixture(directory, data['id'])
+    engine = self.base/'engine'
+    engine.mkdir()
+    log = self.base/'engine.log'
+    inspect_file = self.base/'inspect.json'
+    inspect_file.write_text(json.dumps(config))
+    (self.base/'image.json').write_text(json.dumps([{'Id': config['Image'], 'Labels': {
+      m.IMAGE_LABEL: '1', 'org.omarchy.workspace.uid': str(os.getuid()), 'org.omarchy.workspace.gid': str(os.getgid())}}]))
+    (self.base/'volume.json').write_text(json.dumps([{'Labels': {m.LABEL: data['id']}}]))
+    (self.base/'list.json').write_text(json.dumps([{'Labels': {m.LABEL: data['id']}, 'Names': [m.identifiers(data)[0]], 'State': 'running'}]))
+    blob = base64.b64encode(b'\0\0\0\x0bssh-ed25519\0\0\0\x20'+b'A'*32).decode()
+    (self.base/'host-key').write_text('ssh-ed25519 '+blob+'\n')
+    (engine/'podman').write_text('''#!/bin/bash
+printf '%s\\n' "$*" >>"$ENGINE_FIXTURE/engine.log"
+[[ ${1:-} == "--remote=false" ]] || { echo "missing local engine selection" >&2; exit 92; }
+shift
+[[ ${ENGINE_FAIL:-} != "$1" ]] || exit 7
+case "$1 ${2:-}" in
+  'info '*) printf '%s\\n' '{"host":{"security":{"rootless":true},"cgroupVersion":"v2"}}' ;;
+  'ps '*) /usr/bin/cat "$ENGINE_FIXTURE/list.json" ;;
+  'container exists') [[ -f $ENGINE_FIXTURE/created ]] ;;
+  'image exists') exit 0 ;;
+  'image inspect') /usr/bin/cat "$ENGINE_FIXTURE/image.json" ;;
+  'volume exists') [[ ${ENGINE_VOLUME_EXISTS:-false} == "true" ]] ;;
+  'volume inspect') /usr/bin/cat "$ENGINE_FIXTURE/volume.json" ;;
+  'volume create') exit 0 ;;
+  'run '*) touch "$ENGINE_FIXTURE/created" ;;
+  'inspect '*) printf '['; /usr/bin/cat "$ENGINE_FIXTURE/inspect.json"; printf ']' ;;
+  'port '*) printf '127.0.0.1:41000\\n' ;;
+  'exec '*) /usr/bin/cat "$ENGINE_FIXTURE/host-key" ;;
+  'start '*|'stop '*|'build '*) exit 0 ;;
+  *) echo "unexpected engine request: $*" >&2; exit 93 ;;
+esac
+''')
+    (engine/'ssh').write_text('#!/bin/bash\nexit 0\n')
+    for executable in engine.iterdir():
+      executable.chmod(0o755)
+    with patch.dict(os.environ, PATH=str(engine)+':/usr/bin', ENGINE_FIXTURE=str(self.base),
+        CONTAINER_HOST='ssh://engine.example.invalid', CONTAINER_CONNECTION='fixture-remote'):
+      listing = m.list_workspaces(self.root, runtime=True)
+      self.assertTrue(listing['runtime_available'])
+      self.assertEqual(listing['workspaces'][0]['state'], 'running')
+      self.command('build')
+      self.command('start', 'one')
+      config['State']['Running'] = False
+      inspect_file.write_text(json.dumps(config))
+      self.command('start', 'one')
+      self.command('stop', 'one')
+      self.assertTrue((directory/'identity').exists())
+      self.assertTrue((directory/'repo').is_dir())
+      # Recreate using the existing-volume inspection branch.
+      (self.base/'created').unlink()
+      config['State']['Running'] = True
+      inspect_file.write_text(json.dumps(config))
+      with patch.dict(os.environ, ENGINE_VOLUME_EXISTS='true'):
+        self.command('start', 'one')
+      # A post-create policy failure must stop through the same local transport.
+      (self.base/'created').unlink()
+      config['HostConfig']['Privileged'] = True
+      inspect_file.write_text(json.dumps(config))
+      with self.assertRaisesRegex(RuntimeError, 'read-only and unprivileged'):
+        self.command('start', 'one')
+      self.assertEqual(log.read_text().splitlines()[-1], '--remote=false stop --time 10 '+m.identifiers(data)[0])
+      with patch.dict(os.environ, ENGINE_FAIL='ps'):
+        self.assertFalse(m.list_workspaces(self.root, runtime=True)['runtime_available'])
+      with patch.dict(os.environ, ENGINE_FAIL='info'):
+        with self.assertRaises(subprocess.CalledProcessError):
+          m.rootless()
+      calls = log.read_text().splitlines()
+      self.assertTrue(all(call.startswith('--remote=false ') for call in calls))
+      for operation in ['info', 'ps', 'build', 'run', 'start', 'stop', 'inspect', 'port', 'exec', 'image inspect', 'volume create', 'volume inspect']:
+        self.assertTrue(any(call == '--remote=false '+operation or call.startswith('--remote=false '+operation+' ') for call in calls), operation)
+      self.assertEqual(os.environ['CONTAINER_CONNECTION'], 'fixture-remote')
+
   def test_listing_missing_state_has_no_side_effects(self):
     with patch.dict(os.environ, XDG_DATA_HOME=str(self.base/'absent')):
       root = m.state_root(create=False)
@@ -228,7 +305,7 @@ class StateTests(unittest.TestCase):
     self.assertEqual([r['state'] for r in records['workspaces']], ['running', 'stopped'])
     self.assertEqual([r['mode'] for r in records['workspaces']], ['clone', 'mount'])
     self.assertTrue(records['runtime_available'])
-    self.assertEqual(run.call_args.args[0][:2], ['podman', 'ps'])
+    self.assertEqual(run.call_args.args[0][:3], ['podman', '--remote=false', 'ps'])
     self.assertEqual(run.call_args.kwargs['timeout'], 5)
     self.assertEqual(snapshot, {str(p): (p.stat().st_mtime_ns, p.stat().st_mode) for p in self.root.rglob('*')})
     with patch.object(m.subprocess, 'run', side_effect=subprocess.TimeoutExpired('podman', 5)):
@@ -345,7 +422,7 @@ class StateTests(unittest.TestCase):
     (directory/'identity.pub').unlink()
     with patch.object(m, 'rootless'), patch.object(m, 'exists', return_value=True), patch.object(m, 'inspect', return_value={'Config': {'Labels': {m.LABEL: data['id']}}}), patch.object(m, 'run', return_value=completed()) as run:
       self.command('stop', 'one')
-      self.assertEqual(run.call_args.args[0][:2], ['podman', 'stop'])
+      self.assertEqual(run.call_args.args[0][:3], ['podman', '--remote=false', 'stop'])
 
   def test_changed_remote_execution_settings_fail_closed(self):
     directory = self.root/'client'

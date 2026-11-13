@@ -18,6 +18,10 @@ Codex state and remote VS Code state live in the uniquely named Podman home volu
 
 ## Runtime
 
+Workspace Podman requests explicitly select the local engine with `--remote=false`, including bounded runtime listing, readiness/inspection, image and volume operations, explicit build, start/run, SSH endpoint/key discovery and stop/failed-audit cleanup. Ambient remote-engine defaults no longer redirect these workflows. This is an intentional compatibility change for users who previously relied on those defaults; no global engine configuration is rewritten, no remote retry is added, and direct user Podman commands remain unchanged. The editor's Remote SSH connection still targets the workspace's host-local loopback endpoint.
+
+Local routing is not a complete engine-configuration sanitizer, socket-access denial or stronger lifecycle identity check. Existing unknown-state reporting, image/mount/resource checks, ten-second stop grace and retained files/volumes/keys remain unchanged.
+
 The explicit build context is `containers/workspace/`. It supplies Node 24, Python, Git, basic Unix tools, and a non-root OpenSSH server. TLS verification and package verification remain enabled. The build and runtime disable automatic proxy-environment forwarding. The Pi harness image and account volumes are not reused.
 
 The container has a read-only root, private temporary filesystems, a unique persistent home volume, one project bind mount, and a read-only authorized-public-key bind mount. The runtime sets keep-id user namespaces, drops all capabilities, prohibits new privileges, and enables cgroup limits. SSH is the only published port and binds to host loopback. SSH allows key authentication and local forwarding for VS Code Server, but no root/password login, agent forwarding, remote forwarding, X11, or tunnels.
@@ -37,5 +41,7 @@ The running extension host still needs interactive verification through VS Code.
 ## Tests and deployment
 
 `test/shell.d/workspace-test.sh` runs Python regressions under fake user data directories. Real local Git repositories and disposable SSH client keys exercise cloning and filesystem separation. Container startup, SSH server readiness, and VS Code launches are mocked. Policy tests cover security drift, port exposure, resource limits, volume substitution, host-key changes, and distinct editor state.
+
+The local-engine regression additionally exercises actual Python subprocess transport against an inert Podman executable under synthetic remote defaults, with fake SSH readiness. It covers direct listing, build/start/restart, image/volume operations, key discovery, ordinary stop and failed-audit stop; engine failures retain existing handling. A disposable omission of locality from direct listing makes the regression fail. These checks do not run real Podman/SSH/editor services or establish native engine configuration precedence.
 
 The implementation also checked the exact launch arguments and full inspection policy against a stopped container on Podman 6.1.4, using an existing image for that API contract check. Its program was never started, and the temporary container and volume were removed. This is not a real workspace-image, SSH/server, or Codex integration test. Disposable-VM acceptance covers a real image build, two actual VS Code windows, the remote Codex extension host and app-server processes, separate client databases and home volumes, and stop/restart persistence. See [validation coverage](../plans/container-workspaces-validation.md) for the tested source, versions, evidence, and limits. Independent account authentication and live model requests remain separate approval steps; they are not covered by the unauthenticated acceptance run.

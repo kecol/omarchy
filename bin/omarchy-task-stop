@@ -39,7 +39,7 @@ fi
 omarchy-agent-state assignment-status "$assignment_id" stopping
 jq -r '.[].container' <<<"$active_instances" | while IFS= read -r container; do
   if [[ -n $container && $container != "null" ]]; then
-    podman stop "$container" >/dev/null
+    podman --remote=false stop "$container" >/dev/null
     printf 'Stopped %s\n' "$container"
   fi
 done
