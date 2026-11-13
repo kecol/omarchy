@@ -14,6 +14,16 @@ matching guide before starting:
 - [`agents/skills/visual-verification.md`](agents/skills/visual-verification.md) - verifying any change with a visual effect in the running UI
 - [`agents/skills/migrations.md`](agents/skills/migrations.md) - creating or changing migrations under `migrations/`
 
+# OpenSpec Work Tracking
+
+This fork's core purpose is making Omarchy safe in the presence of coding agents. Preserve that purpose when reducing upstream differences; it is not merely a branding fork.
+
+Use [`docs/openspec.md`](docs/openspec.md) and `openspec/config.yaml` for planned cross-cutting or agent-safety work. Shared workflows live in `.agents/skills/openspec-*/` for Pi and Codex. Keep focused fixes lightweight; do not create an infrastructure campaign or a new spec for a declarative edit.
+
+Read the partial history in `openspec/history/work-ledger.md` before repeating earlier work. Keep proposed, implemented, blocked, deferred and validated outcomes distinct. Do not import private evidence or fabricate completed/archived changes from old conversations.
+
+OpenSpec skills, task checkboxes and planning/archive status do not grant tool permission or approve runtime execution, publication, merge, provisioning, migration or activation. Existing safety rules and separately scoped approvals still apply.
+
 # Documentation Layout
 
 Three documentation trees, split by genre and audience:
