@@ -5,7 +5,7 @@ ARG PI_VERSION
 ENV MISE_DATA_DIR=/opt/mise
 ENV MISE_CACHE_DIR=/var/cache/mise
 
-RUN pacman -Sy --noconfirm --needed ca-certificates mise \
+RUN pacman -Syu --noconfirm --needed ca-certificates mise \
     && mise install "pi@$PI_VERSION" \
     && pi_dir=$(mise where "pi@$PI_VERSION") \
     && cp -a "$pi_dir/pi" /opt/pi
