@@ -1,8 +1,8 @@
 # Managed coding agents
 
-Omarchy managed agents run coding tasks through isolated Git workspaces and a
-container runtime. The design goal is to keep agent writes away from the source
-checkout until a human explicitly reviews and applies them.
+Omarchy managed task assignments run through independent Git clones and a container runtime. The design goal is to keep assignment writes away from the source checkout until a human explicitly reviews and applies them. This is a workflow boundary, not host-wide confinement: ordinary ad-hoc Container launches bind their selected current directory read-write, and Host execution remains supported.
+
+The [source boundary inventory](agent-safety-boundaries.md) records implemented checks, command/menu/widget contracts and known limits. The [first extraction design](../plans/agent-safety-first-extraction.md) now has an implemented source reader and scoped fixture results in the [implementation outcome](../openspec/changes/extract-agent-catalog-reader/outcome.md); it is not deployed or qualified as a new isolation boundary. The [Agent Control Plane](../plans/agent-control-plane.md) remains a stronger draft, not a description of current guarantees.
 
 ## Local status and managed inventory
 
@@ -14,13 +14,19 @@ checkout until a human explicitly reviews and applies them.
 
 ## Instance diagnostics and explicit closure
 
-`omarchy agent diagnose` uses bounded local rootless engine metadata, user-owned process identities, a prefix-limited Codex subcommand recognizer, and PID-owned callback-listener metadata. It reports shared-project launches and possible login evidence without inferring abandonment or authentication state. `omarchy agent close <instance>` selects one unique UUID/prefix, confirms by default, revalidates after confirmation, and sends graceful stop or explicit `--force` SIGKILL only to the full immutable container ID. It never deletes shared homes or uses findings as an automatic close policy. `default/agents/sessions.py` owns this separate controller boundary; the status/widget observation code does not gain close actions. See [`manual/59-agent-session-diagnostics.md`](../manual/59-agent-session-diagnostics.md).
+`omarchy agent diagnose` uses bounded local rootless engine metadata, user-owned process identities, a prefix-limited Codex subcommand recognizer, and PID-owned callback-listener metadata. It reports shared-project launches and possible login evidence without inferring abandonment or authentication state. `omarchy agent close <instance>` selects one unique UUID/prefix, confirms by default, revalidates after confirmation, and targets only the full immutable container ID. Normal close uses `stop --time=10`, which can escalate to KILL after ten seconds; `--force` requests KILL explicitly. The overview uses a different TERM-only controller with `--time=-1`; legacy task/workspace/audit stops have narrower identity checks. It never deletes shared homes or uses findings as an automatic close policy. `default/agents/sessions.py` owns this separate controller boundary; the status/widget observation code does not gain close actions. See [`manual/59-agent-session-diagnostics.md`](../manual/59-agent-session-diagnostics.md).
 
 ## Optional direct-command guards
 
 `omarchy agent guards` manages opt-in PATH-based launch friction, not containment. Separate user-owned scripts block direct host agent invocations when the saved launch mode is Container, without replacing installed tools or changing running agents. The generator reuses the default-agent menu catalog and container definitions; optional definition `guardCommands` and manual registrations support additional names. Explicit sync discovers newly installed commands and future catalog/definition additions without a product allowlist. Known infrastructure/runner commands cannot be registered. See [`manual/57-agent-command-guards.md`](../manual/57-agent-command-guards.md).
 
 `default/agents/command-guards.py` owns private metadata and unchanged managed scripts. Generation preflights conflicts; foreign or modified files are not overwritten. Runtime mode errors block rather than assume Host. Bash environment setup prefixes the opt-in directory, and a process-free Bash prompt hook restores it after mise. Status reports actual PATH precedence, not aliases/functions or universal coverage. Deliberate Host launches remove guard PATH entries in their child, including after a terminal service reconstructs PATH. Installed-only resolution looks past guards; explicit account sign-in retains its existing host flow. Absolute paths, IDE processes, other shells, and intentionally changed PATH remain bypasses. Enabling guards never means that every process is containerized.
+
+### Bundled catalog reader
+
+[`default/agents/catalog.js`](../default/agents/catalog.js) exports the pure CommonJS function `agentCatalog(raw)`. Guard discovery and the launch picker read the same bundled menu data through this agent-owned projection, not through the desktop menu model. The function preserves the limited comment/trailing-comma syntax, flat/wrapped rows, matching ID order and label fallback; it performs no I/O or execution. It does not read user overlays or maintain another product list.
+
+The callers retain distinct validation, environments and limits. Malformed menu text still produces an empty catalog: guards can continue through definitions/registrations, while the picker refuses it. Missing files/module and Node errors/timeouts propagate; there is no fallback to the UI model or Host execution. Source extraction changes no mode/default, menu/widget action, workspace sharing, guard registration or runtime policy. The two focused fixture suites passed; authentication, actual container/GUI behavior and activation were not tested or performed.
 
 ## Reviewed first-run container preparation
 
@@ -42,6 +48,22 @@ Automatic public release lookup requires Bubblewrap (`bubblewrap`) and mise. `ha
 
 The helper consumes the complete journal stream before returning: 0 means no matching warning, 1 means a matching warning, and 2 means the journal check is unverified. The checker supports the documented `journalctl(1)` JSON encodings: text, unsigned byte arrays and repeated field values. It scans every decoded MESSAGE value, including arbitrary non-UTF-8 bytes, rather than excluding those records. `--all` prevents the default null elision of fields larger than 4096 bytes; output projection excludes unrelated journal fields. Each JSON record is limited to 8 MiB. Oversized records are drained without unbounded allocation and make the check unverified. Journal command failures, malformed records and invalid field encodings block startup rather than pass as clean. The result describes only the accessible journal window, not disk health or recovery. Partial journal visibility and warnings outside the existing pattern/window are not a complete filesystem audit. No repair or guard bypass follows from this check.
 
+## Launch, menu and widget contracts
+
+`omarchy agent mode` reads the future launch default. An absent setting means Host; an invalid setting refuses rather than becoming Host. `omarchy agent mode host|container` saves directly and requests a best-effort label refresh. It does not migrate running agents, stop workspaces or enable PATH guards. The Default Execution menu adds a default-No terminal confirmation through `omarchy-menu-agent-mode`; the direct setter does not ask for that confirmation.
+
+The standalone Agent execution default widget shares one event-driven mode reader across monitors. Left-clicking either its icon or label opens Default Execution; right-clicking either opens/toggles the local on-demand overview. Its initial mode read does not scan agents or contact providers. The separate usage widget has different actions: left-click opens its account/usage panel, right-click starts the terminal agent picker, and middle-click refreshes usage. Its optional execution label opens Default Execution on left-click but has no overview right-click action. These widgets are not interchangeable even when both show the same saved mode.
+
+The terminal launch picker and Agents > Start Agent menu select an agent for one launch without saving defaults. Checks, managed/one-shot/session-recovery launches and explicit agent selections do not acquire the automatic terminal picker. Availability checks inspect installed Host commands or Container definitions, not login/image/model readiness. Cancellation never chooses an implicit fallback.
+
+Agents > Start Agent selects a project, agent, execution target and file access, then shows a default-No terminal review before creating a clone or launching. Host means desktop-user permissions, not a project sandbox. Container can use a new committed-HEAD clone or an explicit live host directory. Workspace Files reuses the existing workspace's exact project files in either mode: it does not create a second copy, attach to its editor container or share its home volume. A new approved clone remains available if image selection or launch later fails. Recent-project storage is private/bounded; a failure to remember a project warns without undoing the launch. The final launcher uses an explicit mode/agent/directory and installed-only Host resolution.
+
+Agents > Workspaces is the separate VS Code workflow. It requires an installed editor, supports create/reopen with clone/live warnings and default-No terminal review, and delegates to the workspace backend. Creation alone builds no image and starts no container. `workspace code` can start the container, install the local Remote SSH extension and download remote server/extensions; no workspace image is built/pulled automatically. Failed editor opening retains the newly created workspace. `workspace list --json` reads metadata and a bounded engine snapshot, reporting unknown runtime state on query failure. These are container project workspaces, not Hyprland display workspaces or managed task assignments. See [workspace internals](workspaces.md) and the [command/menu supplement](agent-safety-boundaries.md#implemented-entrypoint-contracts).
+
+`omarchy default agent NAME` is not a per-launch chooser: it saves a supported default and launches it. In Container mode it checks the recipe before saving and does not invoke the Host installer; later preparation/launch can still fail after the save. Host selection can install a CLI. Prompt/resume/continue reuse the launcher; resume/continue currently support Pi only. Explicit local-model overlays require Host and do not silently broaden Container mounts or change the saved mode. Crash diagnosis intentionally calls the launcher with a Host override. These maintenance/explicit-Host paths must not be removed on the assumption that the saved Container preference is mandatory containment.
+
+`omarchy agent container` is a routing prefix for `check`, `doctor` and the hidden overview `stop`, not another mode setter. `container check` can pull an image and runs an offline disposable probe with the current directory writable; it is not a read-only diagnostic or the ordinary harness policy. Doctor performs host write probes and engine operations even in quick mode. Audit observes selected active harnesses; `--fix` actively stops detected drift. None is permission to run the others automatically.
+
 ## Safety model
 
 A managed task has three important locations:
@@ -51,9 +73,7 @@ A managed task has three important locations:
 - **Assignment workspace**: a private clone under
   `$XDG_DATA_HOME/omarchy/agent-workspaces/<project>/<task>/<assignment>/repo`.
 
-Managed agents work in the assignment workspace only. They do not receive a Git
-remote for the canonical source repository, and task start verifies that the
-workspace is inside Omarchy's managed assignment directory.
+The managed task start path selects the assignment workspace and verifies that it is inside Omarchy's managed assignment directory. Assignment creation removes its origin remote. This does not prevent other processes with the desktop user's authority from accessing canonical source. Ad-hoc Container launches and explicit live editor workspaces have different bind rules.
 
 Moving changes back to the source checkout is explicit:
 
@@ -97,6 +117,8 @@ omarchy task diff <assignment>
 omarchy task patch <assignment> review.patch
 ```
 
+Patch export compares working state with the assignment workspace's current HEAD, not the recorded task base; already committed assignment changes are not necessarily included. Apply regenerates the patch. It checks source location, cleanliness and base compatibility, but does not verify a reviewer identity or approval tied to an immutable candidate digest.
+
 Apply after review:
 
 ```bash
@@ -124,10 +146,7 @@ omarchy task archive <task>
 2. `omarchy agent audit`
 3. the configured agent launch
 
-Preflight verifies the assignment, workspace, source checkout, runtime mode,
-harness image, base ancestry, workspace remote state, and active-instance
-state. Runtime audit verifies already-running managed agent containers before a
-new task agent starts.
+Preflight checks the assignment, workspace, source checkout, saved runtime mode, harness image, base ancestry, workspace remote state and observed active-instance state. Runtime audit rejects detected drift in its selected active harness snapshot. Required runtime observation failure stops preflight/audit/start; start also rechecks before marking the assignment launched. Preflight, audit and launch are separate operations: no atomic admission lease prevents concurrent starts or a later mode change. Audit visibility and label comparisons have the limitations below.
 
 ## Runtime policy
 
@@ -148,7 +167,7 @@ OpenShell:   optional (available or not-installed)
 Resources:   memory=4g, pids=1024
 ```
 
-Resource limits are enforced through Podman flags and labels. Configure them in:
+Podman flags request resource constraints; labels describe policy for comparison and are not enforcement. The displayed network/credential delegation does not activate OpenShell or prove its availability. The `source=unmounted` declaration is not proof of canonical-source absence in an ad-hoc bind. Configure resource values in:
 
 ```text
 ~/.config/omarchy/agents/policy.json
@@ -174,6 +193,16 @@ OMARCHY_AGENT_PIDS_LIMIT=2048
 OMARCHY_AGENT_CPUS_LIMIT=2
 ```
 
+## Runtime availability
+
+The legacy `omarchy-agent-runtime-snapshot` reports success with a JSON array only after local engine readiness and enumeration succeed and any required inspection/projection succeeds. A genuine empty enumeration returns `[]`. Missing Podman, query failure, malformed or incomplete inspection, mismatched container IDs and projection failure return status 2 with a fixed stage diagnostic on stderr and no snapshot stdout. Nontruncated IDs and complete response membership are checked before publication. This detects reported failures; it adds no production query deadline or retry and does not make observation/action atomic.
+
+`omarchy agent list --json` keeps configured definitions and mode information available on this explicit unavailability status. Each record then has `running_instances: null` and `runtime_available: false`; the text count is `unknown`. Successful observations give numeric counts, including real zeros, and `runtime_available: true`. Consumers must not coerce null to zero. Other producer failures and definition/mode errors still fail the list command.
+
+Runtime-dependent `agent ps`, `agent inspect` and `task status` fail rather than report zero activity when observation is unavailable. Inspect reaches its historical registry fallback only after a successful snapshot with no active match. Task status retains its earlier source reconciliation behavior; refusal of runtime reporting is not a promise of no prior registry writes. These interfaces are distinct from the newer `agent status` process observer and overview.
+
+These changes are implemented in the inactive candidate for [runtime availability](../openspec/changes/distinguish-runtime-snapshot-unavailability/proposal.md). Its [outcome](../openspec/changes/distinguish-runtime-snapshot-unavailability/outcome.md) records passing focused checks and named native N1–N6, including real rootless inventory/lifecycle cases and explicitly identified nested/readiness fault injection. Restoration and owned cleanup were confirmed under the separately reviewed resource policy, with max-boundary events retained rather than described as pressure-free. Required PR/CI remains unperformed and integration/activation needs separate approval; source existence or an OpenSpec checkbox does not establish deployment. This does not newly qualify workspace-manager native behavior, advisory audit-fix execution, providers, graphical behavior or all engine versions.
+
 ## Runtime audit
 
 Audit active managed agent containers:
@@ -183,11 +212,7 @@ omarchy agent audit
 omarchy agent audit --json
 ```
 
-The audit checks that active containers match the expected filesystem,
-security, and resource policy. In particular, it checks that the source checkout
-is labelled as unmounted, the workspace is read-write, host root is not mounted,
-host home is not bind-mounted as `/home/agent`, capabilities are dropped,
-`no-new-privileges` is set, and resource labels match `omarchy agent policy`.
+The audit compares selected managed-label containers against expected policy labels and selected mount/security fields. It checks the source-unmounted/workspace declarations, host-root and `/home/agent` bind exclusions, a nonempty capability-drop list, `no-new-privileges` and resource labels. It does not measure all effective resource flags or require the exact all-capabilities drop set. Unavailable runtime observation now makes audit fail before advisory doctor, stop or final state updates; a successful empty snapshot still does not prove no agent exists outside the selected label scope. The legacy snapshot, audit-fix and task-stop requests retain `--remote=false` and remove only `CONTAINER_HOST` and `CONTAINER_CONNECTION` from each local Podman child's environment. The option alone did not neutralize named-connection selection in the tested environment. The parent environment and global engine configuration remain unchanged. Their output, target and failure policies remain distinct from newer controllers; this is not a complete engine-configuration sanitizer or engine-access denial. Editor workspace operations use a fresh filtered environment at all 14 Podman boundaries, including direct bounded listing. Generic Git/SSH/editor subprocesses keep their environment, and workspace loopback Remote SSH remains intentional. This is an intentional compatibility change for implicit remote defaults, not a change to direct user Podman commands. See [the local-engine change](../openspec/changes/pin-managed-workflows-local-engine/proposal.md). See O2/E1 in the [inventory](agent-safety-boundaries.md).
 
 If audit detects drift, stop unsafe containers without deleting workspaces or
 volumes:
@@ -215,19 +240,15 @@ omarchy task reconcile <assignment>
 reconciliation state. A dirty assignment workspace can still be safe if the
 source state is `applied`.
 
-`task cleanup` removes only Omarchy's managed assignment directory and refuses
-unsafe states unless `--force` is used. `task archive` closes a task after its
-assignments are applied, empty, or cleaned.
+`task stop` refuses unavailable observation before dependent stop/state updates. `task cleanup` removes only Omarchy's managed assignment directory and refuses active instances or unavailable observation even with `--force`. Force can bypass source reconciliation policy, not uncertainty about runtime activity. The observation check also precedes marking an already missing workspace cleaned.
+
+`task archive` closes a task after its assignments are applied, empty, or cleaned and required cleanup succeeds. It refuses unavailable initial observation and stops on any nested cleanup failure, including with `--force`. The task remains unarchived; earlier assignment cleanup may already have completed and is not rolled back. Inspect the incomplete result before deciding whether to retry after the cause is resolved. This is sequential cleanup, not an atomic transaction.
 
 ## OpenShell boundary
 
 See [Agent OpenShell Architecture](agent-openshell-architecture.md) for the planned runtime, credential, workspace, and audit model.
 
-Omarchy declares network and credential policy but does not enforce those
-controls directly. OpenShell is expected to broker network access, credential
-access, secret prompts, and tool mediation. Omarchy's responsibility is the
-local Git/workspace lifecycle, container launch constraints, resource limits,
-and active-runtime audit.
+Ordinary managed-task/Podman dispatch does not route through the OpenShell prototypes. Omarchy declares delegated network and credential policy but does not enforce those controls directly. OpenShell brokering, secret prompts and tool mediation are intended integration goals, not current guarantees. Explicit provider import and sandbox commands are separate credential-bearing operations. The Pi path imports an unexpired access-token/account snapshot without its rotating refresh token; the Codex import has a separate gateway refresh path. Best-effort Landlock/workdir/network behavior remains unqualified here.
 
 Check OpenShell readiness with:
 

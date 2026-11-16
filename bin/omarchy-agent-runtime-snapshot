@@ -5,18 +5,78 @@
 
 set -euo pipefail
 
-if omarchy-cmd-missing podman || ! podman info >/dev/null 2>&1; then
+unavailable() {
+  printf 'Managed runtime observation unavailable: %s\n' "$1" >&2
+  exit 2
+}
+
+# Podman can resolve a named remote connection even with --remote=false.
+if omarchy-cmd-missing podman; then
+  unavailable "engine missing"
+elif ! env -u CONTAINER_HOST -u CONTAINER_CONNECTION podman --remote=false info >/dev/null 2>&1; then
+  unavailable "readiness"
+fi
+
+# Parse bytes before Bash capture can discard NULs. pipefail retains engine failures.
+if ! ids_json=$(env -u CONTAINER_HOST -u CONTAINER_CONNECTION podman --remote=false ps --no-trunc --filter label=org.omarchy.managed=agent --format '{{.ID}}' 2>/dev/null |
+  jq -Rsec '
+    split("\n") | until(length == 0 or .[-1] != ""; .[:-1]) | . as $ids
+    | if all($ids[]; test("^[a-f0-9]{64}$")) and ($ids | unique | length) == ($ids | length)
+      then $ids else error("invalid container IDs") end
+  ' 2>/dev/null); then
+  unavailable "enumeration"
+fi
+if [[ $ids_json == "[]" ]]; then
   printf '[]\n'
   exit 0
 fi
-
-mapfile -t container_ids < <(podman ps --filter label=org.omarchy.managed=agent --format '{{.ID}}')
-if (( ${#container_ids[@]} == 0 )); then
-  printf '[]\n'
-  exit 0
+if ! container_list=$(jq -r '.[]' <<<"$ids_json" 2>/dev/null); then
+  unavailable "enumeration"
+fi
+mapfile -t container_ids <<<"$container_list"
+if ! inspection=$(env -u CONTAINER_HOST -u CONTAINER_CONNECTION podman --remote=false inspect "${container_ids[@]}" 2>/dev/null | jq -cs '.' 2>/dev/null); then
+  unavailable "inspection"
 fi
 
-podman inspect "${container_ids[@]}" | jq '[.[] | {
+# Validate completeness before projecting; a disappeared container is unknown, not absent.
+if ! jq -e --argjson ids "$ids_json" '
+  def strings: type == "array" and all(.[]; type == "string");
+  length == 1 and (.[0] |
+    type == "array"
+    and (map(.Id) | sort) == ($ids | sort)
+    and all(.[];
+      type == "object"
+      and (.Name | type == "string")
+      and (.Config | type == "object")
+      and (.Config.User | type == "string")
+      and (.ImageName | type == "string")
+      and (.ImageDigest | . == null or type == "string")
+      and ((.Config.Labels // {}) | type == "object" and all(.[]; type == "string"))
+      and (.State | type == "object")
+      and (.State.Status | type == "string")
+      and (.State.Pid | type == "number")
+      and (.State.StartedAt | type == "string")
+      and (.Mounts | type == "array" and all(.[];
+        type == "object"
+        and (.Type | type == "string")
+        and (.Source | type == "string")
+        and (.Destination | type == "string")
+        and (.RW | type == "boolean")
+        and (.Options | . == null or strings)))
+      and (.HostConfig | type == "object")
+      and (.HostConfig.NetworkMode | type == "string")
+      and (.HostConfig.UsernsMode | type == "string")
+      and (.HostConfig.CapAdd | . == null or strings)
+      and (.HostConfig.CapDrop | . == null or strings)
+      and (.HostConfig.SecurityOpt | . == null or strings)
+      and (.NetworkSettings | type == "object")
+      and ((.NetworkSettings.Ports // {}) | type == "object")
+      and ((.NetworkSettings.Networks // {}) | type == "object")))
+' <<<"$inspection" >/dev/null 2>&1; then
+  unavailable "inspection validation"
+fi
+
+if ! snapshot=$(jq '.[0] | [.[] | {
   instance: .Config.Labels["org.omarchy.instance"],
   agent: .Config.Labels["org.omarchy.agent"],
   harness: .Config.Labels["org.omarchy.harness"],
@@ -62,4 +122,7 @@ podman inspect "${container_ids[@]}" | jq '[.[] | {
     capabilities_drop: (.HostConfig.CapDrop // []),
     security_options: (.HostConfig.SecurityOpt // [])
   }
-}]'
+}]' <<<"$inspection" 2>/dev/null); then
+  unavailable "projection"
+fi
+printf '%s\n' "$snapshot"

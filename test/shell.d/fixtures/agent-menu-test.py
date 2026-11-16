@@ -2,6 +2,7 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -16,6 +17,14 @@ spec.loader.exec_module(m)
 
 
 class MenuTests(unittest.TestCase):
+  @classmethod
+  def setUpClass(cls):
+    # Reuse the existing metadata-only Node resolver; never execute a lazy shim.
+    spec = importlib.util.spec_from_file_location('guard_test_helpers', ROOT/'test/shell.d/fixtures/agent-command-guards-test.py')
+    helpers = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helpers)
+    cls.node = helpers.installed_node()
+
   def setUp(self):
     self.temp = tempfile.TemporaryDirectory()
     self.addCleanup(self.temp.cleanup)
@@ -24,7 +33,10 @@ class MenuTests(unittest.TestCase):
     self.home.mkdir()
     self.source = self.home/'project $(touch INJECTED); "quoted"'
     self.source.mkdir()
-    env = patch.dict(os.environ, HOME=str(self.home), XDG_STATE_HOME=str(self.base/'state'), XDG_DATA_HOME=str(self.base/'data'), OMARCHY_PATH=str(ROOT))
+    self.bin = self.base/'tools'
+    self.bin.mkdir()
+    (self.bin/'node').symlink_to(self.node)
+    env = patch.dict(os.environ, HOME=str(self.home), PATH=str(self.bin)+':'+os.environ['PATH'], XDG_STATE_HOME=str(self.base/'state'), XDG_DATA_HOME=str(self.base/'data'), OMARCHY_PATH=str(ROOT))
     env.start()
     self.addCleanup(env.stop)
 
@@ -73,6 +85,62 @@ class MenuTests(unittest.TestCase):
       self.assertEqual(execute.call_args.kwargs['cwd'],ROOT)
       self.assertNotIn('NODE_OPTIONS',execute.call_args.kwargs['env'])
       self.assertNotIn('ANTHROPIC_API_KEY',execute.call_args.kwargs['env'])
+
+  def test_catalog_projection_matches_existing_menu_parser(self):
+    cases = [
+      '', '// empty\n', '{', '[]', 'null', '42', '{}',
+      '// catalog\n{"setup.default.agent.future-agent":{"label":"Future"},"setup.default.agent.alpha":{},}',
+      json.dumps({'items': {'setup.default.agent.zeta': {'label': ''}, 'setup.default.agent.alpha': {'label': False}}}),
+      json.dumps({'items': [], 'setup.default.agent.future-agent': {'label': 'Future'}}),
+      json.dumps({'items': None, 'setup.default.agent.future-agent': {}}),
+      json.dumps({'items': {}, 'setup.default.agent.ignored': {}}),
+      json.dumps({'setup.default.agent.a': None, 'setup.default.agent.b': [], 'setup.default.agent.c': 42,
+        'setup.default.agent.d': True, 'setup.default.agent.UPPER': {}, 'setup.default.agent.under_score': {},
+        'other.agent.pi': {}, 'setup.default.agent.z-last': {'label': 'Last'}}),
+      *[json.dumps({'setup.default.agent.future-agent': {'label': label}}) for label in
+        (None, 0, True, 42, {}, [], 'literal,} text', 'literal,] text', 'line\n// comment\nend', 'bad\x1b[31m')],
+      '{"setup.default.agent.pi":{}} // inline comments remain unsupported',
+    ]
+    script = r'''
+const fs = require('fs'), assert = require('assert');
+const catalog = require(process.argv[1]), menu = require(process.argv[2]);
+for (const raw of JSON.parse(fs.readFileSync(0, 'utf8'))) {
+  const expected = menu.parseMenuJsonc(raw)
+    .filter(e => /^setup\.default\.agent\.[a-z0-9-]+$/.test(e.id))
+    .map(e => ({name:e.id.split('.').pop(), label:e.label}));
+  assert.deepStrictEqual(catalog.agentCatalog(raw), expected, raw);
+}
+'''
+    subprocess.run([str(self.node), '-e', script, str(ROOT/'default/agents/catalog.js'), str(ROOT/'shell/plugins/menu/MenuModel.js')],
+      input=json.dumps(cases), text=True, capture_output=True, check=True, timeout=5,
+      cwd=self.base, env={'HOME':str(self.home), 'PATH':str(self.bin)+':/usr/bin:/bin'})
+
+  def test_real_catalog_transport_preserves_projection_validation_and_missing_file_errors(self):
+    checkout = self.base/'catalog checkout'
+    (checkout/'default/agents').mkdir(parents=True)
+    (checkout/'default/omarchy').mkdir(parents=True)
+    module = checkout/'default/agents/catalog.js'
+    shutil.copy2(ROOT/'default/agents/catalog.js', module)
+    menu = checkout/'default/omarchy/omarchy-menu.jsonc'
+    with patch.object(m, 'ROOT', checkout), patch.dict(os.environ, OMARCHY_PATH=str(checkout)):
+      menu.write_text('// catalog\n{"items":{"setup.default.agent.future-agent":{"label":"Future"},"setup.default.agent.alpha":{}},}')
+      self.assertEqual(m.agent_catalog(), [dict(name='future-agent',label='Future'),dict(name='alpha',label='setup.default.agent.alpha')])
+      for raw in ('', '{', '{}', '[]', json.dumps({'setup.default.agent.pi': {'label': 42}}),
+          json.dumps({'setup.default.agent.pi': {'label': 'bad\x1b[31m'}}),
+          json.dumps({f'setup.default.agent.agent-{i}': {} for i in range(129)})):
+        menu.write_text(raw)
+        with self.subTest(raw_length=len(raw)), self.assertRaises(RuntimeError):m.agent_catalog()
+      menu.unlink()
+      with self.assertRaises(subprocess.CalledProcessError):m.agent_catalog()
+      menu.write_text('{}')
+      module.unlink()
+      with self.assertRaises(subprocess.CalledProcessError):m.agent_catalog()
+
+  def test_catalog_subprocess_failures_propagate_without_picker_fallback(self):
+    for error in (subprocess.CalledProcessError(17,['node']),subprocess.TimeoutExpired(['node'],5)):
+      with self.subTest(error=type(error).__name__),patch.object(m,'execute',side_effect=error),patch.object(m,'ready') as ready:
+        with self.assertRaises(type(error)):m.terminal_agent('container','pi','saved')
+        ready.assert_not_called()
 
   def test_recent_state_is_private_bounded_and_does_not_modify_defaults(self):
     self.assertEqual(m.recent_projects(), [])
@@ -203,7 +271,7 @@ class MenuTests(unittest.TestCase):
       if args[0] == 'gum':
         return subprocess.CompletedProcess(args, 0)
       if args[0] == 'podman':
-        self.assertEqual(args[1], 'ps')
+        self.assertEqual(args[:3], ['podman', '--remote=false', 'ps'])
         return subprocess.CompletedProcess(args, 0, stdout='[]')
       return actual_run(args, **kwargs)
     def backend(args, capture=False, **kwargs):

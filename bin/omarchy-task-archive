@@ -82,10 +82,16 @@ while IFS= read -r assignment; do
   assignment_id=$(jq -r '.id' <<<"$assignment")
   assignment_status=$(jq -r '.status' <<<"$assignment")
   [[ $assignment_status == "cleaned" ]] && continue
+  cleanup_args=("$assignment_id")
   if [[ $force == "true" ]]; then
-    omarchy-task-cleanup "$assignment_id" --force >/dev/null || true
+    cleanup_args+=(--force)
+  fi
+  if omarchy-task-cleanup "${cleanup_args[@]}" >/dev/null; then
+    continue
   else
-    omarchy-task-cleanup "$assignment_id" >/dev/null || true
+    status=$?
+    printf 'Task archive incomplete: cleanup failed for %s. Earlier cleanup may have completed; task not archived.\n' "$assignment_id" >&2
+    exit "$status"
   fi
 done < <(jq -c '.[]' <<<"$assignments")
 

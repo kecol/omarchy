@@ -1,6 +1,19 @@
 # Agent Control Plane
 
-Status: Draft
+Status: Draft — proposed target architecture, not an implemented contract or execution approval.
+
+## Current implementation reconciliation
+
+The task 2.3 source review for `separate-agent-safety-layer` is recorded in the [boundary inventory](../docs/agent-safety-boundaries.md) and its [review record](../openspec/changes/separate-agent-safety-layer/review.md). Use [Managed coding agents](../docs/managed-agents.md) for current entrypoint contracts. Requirements, stages and command examples below remain proposed; existing commands with similar names do not establish completion of a stage.
+
+- Managed assignments use independent clones, but ad-hoc Container launches and explicit live editor workspaces can bind canonical source read-write. Editor workspaces and the Start Agent menu's reused project files are not assignment leases.
+- Current patch/apply exports working state against workspace HEAD and regenerates the patch. It does not seal an immutable reviewed candidate, require a digest-bound approval or establish a separately trusted promoter identity.
+- Host is the absent-setting launch default. Per-launch Host/Container choices, Host account sign-in and intentional Host crash diagnosis remain implemented paths. Opt-in PATH guards are not host-wide executable denial.
+- Assignment-derived homes, per-agent ad-hoc harness homes and per-editor-workspace homes have different persistence. Host subscription accounts deliberately share history/settings. Definition-selected `none`/`task`/`agent` session scopes below are not a current universal interface.
+- Newer observation/lifecycle controllers use local-engine and identity checks that legacy snapshot/task/workspace paths do not uniformly share. Status metadata, labels and a no-socket mount array do not prove universal reachability denial.
+- Ordinary Podman dispatch does not activate OpenShell mediation. Explicit sandbox/import prototypes, bundled harness recipes and current list/inspect commands do not establish the runtime/harness interfaces, durable conversation model or attestations proposed below.
+
+The [first extraction design](agent-safety-first-extraction.md) now has an implemented source catalog reader with scoped fixture results in its [outcome](../openspec/changes/extract-agent-catalog-reader/outcome.md). It separates only bundled catalog projection from desktop menu code and changes none of these runtime contracts; it was not activated or qualified as a new isolation boundary. Reconciliation preserves the stronger target requirements rather than marking them implemented or weakening them to match current limitations.
 
 ## Purpose
 

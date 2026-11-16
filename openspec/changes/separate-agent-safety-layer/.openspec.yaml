@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-11-12
+# First deliverable is an architecture inventory and extraction proposal only.
+# It does not change runtime behavior or claim new implemented capabilities.
+skip_specs: true

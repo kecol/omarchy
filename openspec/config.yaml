@@ -1,0 +1,43 @@
+schema: spec-driven
+
+context: |
+  Language: English. Use controlled English and keep structural headings and SHALL/MUST keywords in English.
+  This is kecol/omarchy, an Omarchy fork whose core purpose is making the desktop safe in the presence of coding agents.
+  Agent safety is the product purpose, not an optional branding difference. Faster upstream integration must not weaken it.
+  Existing boundaries include managed assignment workspaces, rootless containers, reviewed task apply, identity-bound lifecycle operations, credential/session separation, and opt-in launch friction.
+  PATH guards, UI labels, status observations, containers, and offline prototypes have different limits; none alone proves universal containment.
+  Read AGENTS.md, the applicable agents/skills guide, docs/managed-agents.md, and relevant existing plans before proposing changes.
+  Bash/Python own much of the command and policy logic; Qt/Quickshell QML owns desktop integration; Arch packaging/migrations and mise manage installation.
+  The preferred maintenance direction is a minimally modified upstream desktop base plus explicit agent-safety enforcement and narrow integration points.
+  That separation is a proposal, not an implemented architecture. Inventory enforcement points before choosing an extraction.
+  OpenSpec records intent and work status; it grants no execution, privilege, merge, deployment, or archive approval.
+  Preserve published migrations and unrelated edits. Keep publication, merge completion, package/migration execution, and activation separately approved.
+  Never import credentials, account settings, transcripts, real session identifiers, raw media, or developer-specific home paths into tracked artifacts.
+  Historical source/console/simulated checks are not full CI, native/graphical, hardware, runtime permission, or release qualification.
+  openspec/history/work-ledger.md is a partial curated starting record, not an exhaustive audit or a new test run.
+
+rules:
+  proposal:
+    - State the agent-safety effect, upstream integration benefit, and non-goals.
+    - Distinguish observed behavior, agreed direction, and unverified assumptions.
+    - Keep the first deliverable small; do not create a generic validation framework by default.
+  specs:
+    - Give each requirement a concrete scenario and identify the relevant trust boundary.
+    - Do not describe a proposed or simulated enforcement mechanism as implemented containment.
+  design:
+    - Identify enforcement ownership, upstream coupling, compatibility limits, and rollback.
+    - Prefer existing focused tests and narrow compatibility checks over a new infrastructure campaign.
+  tasks:
+    - Use checkboxes for actionable deliverables, not for unapproved execution stages.
+    - Leave implementation unchecked until it actually exists and its stated validation is complete.
+    - Record blocked, deferred, simulated, and not-run coverage explicitly; a passing substitute does not close the original gap.
+
+operations:
+  apply:
+    guidance:
+      - Apply only the explicitly approved change scope; stop at independent permission, publication, merge, provisioning, migration, or activation gates.
+      - Do not start a VM, GUI, backend, account/session action, or broad test campaign merely because a task mentions it.
+  archive:
+    guidance:
+      - Require explicit archival approval and preserve unresolved failures and evidence limits in the outcome.
+      - Archiving planning files does not certify a release or authorize activation.

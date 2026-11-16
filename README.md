@@ -4,6 +4,12 @@ Omarchy is a beautiful, fun & agentic Linux distribution by DHH.
 
 Read more at [omarchy.org](https://omarchy.org).
 
+## Fork purpose and development
+
+This fork focuses on making Omarchy safe in the presence of coding agents. Workspace isolation, reviewed actions and explicit enforcement boundaries are central goals; branding is additional policy, not the purpose of the fork. Current guarantees and limitations are described in [Managed coding agents](docs/managed-agents.md).
+
+Development uses [OpenSpec](docs/openspec.md) to track proposals and work status. Start with the [work ledger](openspec/history/work-ledger.md) and the planned [agent-safety layer separation](openspec/changes/separate-agent-safety-layer/proposal.md). Tracking a proposal does not mean it is implemented or runtime-qualified.
+
 ## Fork branding
 
 This fork includes an optional **sandboxed agents** boot/login logo and screensaver. Linking the checkout does not install these assets or rebuild boot images. After linking and rebooting, run `omarchy branding apply` to opt in, or `omarchy branding apply --screensaver-only` to leave boot files unchanged. Run `omarchy branding restore` before unlinking to restore stock branding. See [Fork branding](manual/41-branding.md#fork-branding-sandboxed-agents) for installation steps, backup limits, and recovery instructions.

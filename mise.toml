@@ -1,0 +1,6 @@
+# Repository development tool only; not an Omarchy desktop default.
+[tools]
+"npm:@fission-ai/openspec" = "2.0.0"
+
+[env]
+OPENSPEC_TELEMETRY = "0"

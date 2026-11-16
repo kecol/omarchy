@@ -4,7 +4,7 @@ ARG CODEX_VERSION
 ENV MISE_DATA_DIR=/opt/mise
 ENV MISE_CACHE_DIR=/var/cache/mise
 
-RUN pacman -Sy --noconfirm --needed ca-certificates mise \
+RUN pacman -Syu --noconfirm --needed ca-certificates mise \
     && mise install "codex@$CODEX_VERSION" \
     && codex_dir=$(mise where "codex@$CODEX_VERSION") \
     && cp -a "$codex_dir" /opt/codex
