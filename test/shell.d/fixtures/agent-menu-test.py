@@ -271,7 +271,7 @@ for (const raw of JSON.parse(fs.readFileSync(0, 'utf8'))) {
       if args[0] == 'gum':
         return subprocess.CompletedProcess(args, 0)
       if args[0] == 'podman':
-        self.assertEqual(args[1], 'ps')
+        self.assertEqual(args[:3], ['podman', '--remote=false', 'ps'])
         return subprocess.CompletedProcess(args, 0, stdout='[]')
       return actual_run(args, **kwargs)
     def backend(args, capture=False, **kwargs):

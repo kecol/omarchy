@@ -141,6 +141,8 @@ set +e
     exit 1
   fi
   export OMARCHY_TEST_NODE_BINARY
+  # All suites need installed Node, not a mise shim reading untrusted project config.
+  export PATH="$OMARCHY_PATH/bin:${OMARCHY_TEST_NODE_BINARY%/*}:$PATH"
   printf 'test/ci-vm: prepared Node executable: %s\n' "$OMARCHY_TEST_NODE_BINARY"
   cd ~/src/omarchy
   ./test/all
