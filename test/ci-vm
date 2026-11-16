@@ -151,7 +151,8 @@ rc=$?
 printf '%s\n' "$rc" >~/rc.next && mv ~/rc.next ~/rc
 GUEST_TESTS
 )
-ssh_vm "systemd-run --user --quiet --collect --same-dir \
+# Bash owns payload expansion; systemd must not consume its parameter expressions.
+ssh_vm "systemd-run --user --quiet --collect --same-dir --expand-environment=no \
   -E OMARCHY_PKGS_PATH=\$HOME/src/omarchy-pkgs bash -c $(printf %q "$command")"
 last_report="" next_report=0
 until ssh_vm '[[ -s ~/rc ]]' 2>/dev/null; do
