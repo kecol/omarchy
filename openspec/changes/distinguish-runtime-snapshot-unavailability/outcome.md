@@ -2,9 +2,9 @@
 
 ## Status and scope
 
-IMPLEMENTED SOURCE IN AN INACTIVE CANDIDATE; FOCUSED CHECKS AND NAMED NATIVE N1–N6 PASSED. Native attempt 06 passed under the separately reviewed reclaim-aware resource policy, with guest provisioning/configuration restoration and owned cleanup confirmed. Required PR/CI remains NOT RUN, so task 3.1 stays incomplete. No commit, push, PR publication, integration, host installation, activation, new ISO/image build, reboot or archive occurred. The approved add-only prerequisite installation was confined to the disposable guest.
+IMPLEMENTED AND PUBLISHED IN AN INACTIVE CANDIDATE; FOCUSED CHECKS, NAMED NATIVE N1–N6 AND REQUIRED PR/CI PASSED. Native attempt 06 retains its separately reviewed reclaim-aware resource result, confirmed guest restoration and owned cleanup. [PR17](https://github.com/kecol/omarchy/pull/17) is open at `4f3913c31d051df036b72e2b847b8613a632ce62`; the reviewed Tests and translation workflows passed. Earlier failures remain failed under their original contents and contracts. Merge, integration/activation, host installation, image builds, reboot and archive are not performed or approved by this record. The add-only prerequisite installation was confined to the disposable native guest.
 
-The candidate is `$HOME/Projects/omarchy-runtime-availability`, branch `fix/runtime-snapshot-unavailability`, based on `65c3a23eb0fb1cbd2d88d5a51470a8f23202bc4d`. It includes copies of the previously approved planning artifacts and OpenSpec process documentation; implementation exists only in this separate worktree. The original dev-linked checkout, its planning files and its command resolution remain unchanged. Updating that checkout later would be activation for subsequent invocations without a reboot.
+The candidate is `$HOME/Projects/omarchy-runtime-availability`, branch `fix/runtime-snapshot-unavailability`, with implementation base `65c3a23eb0fb1cbd2d88d5a51470a8f23202bc4d`. This final reconciliation changes only this outcome, the work ledger and task record; these documentation edits are not yet committed or published and are not the exact CI-tested tree. Runtime/test bytes remain those of the published head and retain the recorded native bindings. Earlier proposal/design and private receipt statements about unperformed publication/CI describe their prepublication checkpoints; the publication and handoff sections below supersede that status, not their behavioral contracts or historical evidence. The original dev-linked checkout, including its existing modified and untracked planning files, remains unchanged. Updating its runtime files would activate subsequent invocations without a reboot.
 
 The initial availability repair changed these three runtime owners:
 
@@ -91,13 +91,77 @@ Attempt 06 retained 5,070 max-boundary events and `limit_events: true`, with zer
 
 Private evidence is under `$HOME/Work/omarchy-runtime-availability-native-06/REVIEW.md`, `RESULT.json`, original guest/provisioning archives and summaries, resource/control observations, approval/readiness/consumption copies and postflight receipts. Policy rationale is under `$HOME/Work/omarchy-runtime-availability-resource-policy-review-01/REVIEW.md`; frozen programs remain under `$HOME/Work/omarchy-runtime-availability-vm-procedure-08/`. These are portable local locators, not public artifact publication or independent third-party verification.
 
-The native component now has passing evidence for the named staged integrations. Workspace manager remains focused-tested, not newly native-qualified; all ten callers' broad unavailable-control-flow coverage remains in fixtures. PR/CI evidence is still absent. Task 3.1 stays incomplete. Documentation reconciliation changes no runtime/test content and does not renew or expand the recorded qualification.
+The native component supplies passing evidence only for the named staged integrations. Workspace manager remains focused-tested, not newly native-qualified; all ten callers' broad unavailable-control-flow coverage remains in fixtures. The subsequent PR/CI review below supplies the separate broader regression result. This reconciliation neither reruns nor expands native qualification.
 
-## Open integration gates
+## Publication and CI review
 
-- Candidate source/evidence review found no blocking runtime issue; user acceptance and runtime integration permission remain separate.
-- Review the combined availability/routing diff and the passing named native evidence under its exact source and policy bindings. The approved invocation is consumed; do not automatically repeat it. Native success does not replace required PR/CI or qualify unrelated workspace/provider/UI behavior.
-- Obtain separate commit/publication approval, publish a candidate PR and review the existing CI workflow's `./test/all` result, failures/skips and exact tested revision/content. No PR or CI run exists for this candidate yet.
-- Integrate only the reviewed/tested content into the active checkout after separate activation approval. Retain the known pre-change weaknesses in any rollback assessment. Do not resume the paused merge/VM/tracer campaign.
+Publication approvals first covered five retained prerequisites plus two new commits. Two separately approved CI corrections then extended PR17 to nine commits and 60 paths against public `quattro` at `68d22643e4bd4df623977d125da7ce3b06f3a30f`. The prerequisites are catalog extraction (`d2471ba1d`), OpenSpec workflows (`749b87c50`), safety documentation (`c3d459ae7`), harness installer-stage full upgrades (`0603b244e`) and initial local-engine routing (`65c3a23eb`). The four later commits are validation guidance (`756828764`), runtime availability and routing follow-up (`8cf8d07d7`), initial CI/fixture repair (`88462ef51`) and unit-manager expansion correction (`4f3913c31`). No existing commit was rewritten. The two Containerfile edits were source-reviewed and exercised by build fixtures, not qualified by actual image builds.
 
-The source is ready for review, not yet qualified for active integration. No provider, graphical, hardware, full containment or release qualification is claimed.
+| Tests run, attempt 1 | PR head and actual merge checkout | Recorded outcome |
+| --- | --- | --- |
+| [43783778084](https://github.com/kecol/omarchy/actions/runs/43783778084) | `8cf8d07d7755ef57b7464d446fd3352f22f4e359`; `cec130f507939a54d3933df7274acbc164368ffe` | Failed: 68 of 454 shell files. 67 reported untrusted project mise configuration; the menu clone fixture also expected the old Podman argv. CLI and translation checks passed; seven files contained skip markers. |
+| [43802742180](https://github.com/kecol/omarchy/actions/runs/43802742180) | `88462ef51d2bbaa9fc1c07fda9b7f0419bb3de01`; `fc27c15c8a68bd8a0cad95a44fdb20e5d715e580` | Failed: 67 of 454 shell files still reported the trust diagnostic. The menu fixture passed. CLI and translation checks passed; seven files contained skip markers. The direct-Bash PATH control missed the unit-manager boundary. |
+| [43874285028](https://github.com/kecol/omarchy/actions/runs/43874285028) | `4f3913c31d051df036b72e2b847b8613a632ce62`; `69d9b66992b94171b9ca8dcc13705935c520ea40` | Passed: CLI and all 454 shell files completed without failures; eight files contained skip markers. No untrusted-checkout mise diagnostic remained. |
+
+Each actual checkout had the same tree as its corresponding PR head. The passing checkout tree is `21987d1323db63bd9757eb7e9dd64541045acf59`; CI reported zero changed source files after execution and `rc=0`. The Tests VM stage finished after 375 seconds. [Translation workflow 43874285022](https://github.com/kecol/omarchy/actions/runs/43874285022) passed with structural i18n, sync-workflow and extraction checks executed. The main shell census excludes nested runner self-test directories. The initial passing-run reader assumed the previous seven skip-bearing files; its corrected census records the eighth marker without rerunning CI or downloading the artifact again.
+
+The first repair exposed the already resolved installed Node directory in the guest test PATH and updated the existing menu fixture to assert `podman --remote=false ps`. It did not resolve the trust failures. The second repair delegates inline payload expansion to Bash with `systemd-run --expand-environment=no`; default manager expansion had consumed `${OMARCHY_TEST_NODE_BINARY%/*}` before Bash ran. A bounded source-bound real-manager check failed installed Node selection with previous source and passed with corrected source before publication. No unexpected shim, trust bypass or project-tool installation was used in that check. The first catalog-only evidence binding had missed the changed transitive workspace dependency; the failed menu fixture remains evidence of that coverage gap.
+
+| File containing skipped checks | Reviewed limit |
+| --- | --- |
+| `agent-model-recovery-native-test.sh` | Installed Pi absent. |
+| `agent-openshell-native-tools-test.sh` | Installed Pi absent. |
+| `brightness-display-apple-cache-test.sh` | No hiddev character device for the valid-cache case. |
+| `fontconfig-cjk-test.sh` | Chinese locale absent. |
+| `hw-match-device-tree-test.sh` | Turkish locale absent. |
+| `i18n-test.sh` | No pending translations in structural mode. Structural, plural, locale, keybinding and extraction checks executed and passed; this marker was previously hidden by the Node failure. |
+| `kitty-config-test.sh` | Kitty absent. |
+| `panel-open-budgets-test.sh` | No-battery power-panel case. |
+
+These limits are not passes for omitted native/tool/hardware cases. No required availability case was waived. VM-backed CI still includes fake engine, provider and action endpoints; it does not turn those tests into native Podman, workspace-manager, provider, hardware, containment or release qualification. Both earlier failed Tests runs remain failed, not retrospective passes or unchanged-content retries.
+
+Raw publication and first-failure evidence remains under `$HOME/Work/omarchy-runtime-availability-publication-01/` and `$HOME/Work/omarchy-runtime-availability-ci-review-01/`. The first CI repair and its failed result remain under `$HOME/Work/omarchy-runtime-availability-ci-fix-01/`. The passing result, source-bound boundary control, actual checkout/tree receipts, original ZIP and all per-file logs remain under `$HOME/Work/omarchy-runtime-availability-ci-fix-02/`. Its retained manifest is `84eeb4709923d6f08fe3d5146a73c5b21f51bce35d113e046d12cda001d9a8b9`; artifact ZIP SHA-256 is `d03a2c9ed395676e79703bb3b55c75ab372a4b52c1a9c2b450a82de0590f565d`. These are portable private evidence locators and content bindings, not public copies of raw evidence.
+
+## Final contract review
+
+Static review of the six-owner combined diff and retained focused/native/CI evidence found no blocking runtime-code issue. All 648 staged source hashes/modes and 15 tested-source bindings remain matched. Successful application/native suites were not rerun to record this result. The ten direct callers retain these contracts:
+
+| Caller | Reviewed failure handling |
+| --- | --- |
+| `omarchy-agent-list` | Only producer status 2 yields a successful partial configured view, with null/unknown counts and false availability; other errors propagate. |
+| `omarchy-agent-audit` | Checked snapshot capture fails before audit success, advisory doctor or fix actions. Its extra source edit filters only Podman child selectors. |
+| `omarchy-agent-ps` | Checked capture refuses unavailable observation rather than a successful empty report. |
+| `omarchy-agent-inspect` | Checked capture precedes active matching and historical fallback; failure does not authorize history as evidence of inactivity. |
+| `omarchy-task-preflight` | Checked snapshot pipeline refuses admission when observation is unavailable. |
+| `omarchy-task-start` | Its later checked snapshot recheck refuses launch/finalization after earlier preflight/audit success. |
+| `omarchy-task-stop` | Checked discovery fails before dependent stop/state changes. Its extra edit filters only Podman child selectors. |
+| `omarchy-task-cleanup` | Checked observation precedes assignment deletion/finalization, including force. |
+| `omarchy-task-archive` | Checked initial observation and nested cleanup results precede final archive status, including force. Earlier successful cleanup is not rolled back. |
+| `omarchy-task-status` | Checked runtime observation refuses an unavailable report. Earlier reconciliation writes remain possible. |
+
+The six unchanged caller files are ps, inspect, preflight, start, cleanup and status. Snapshot validation remains the shared producer boundary. All 14 workspace-manager Podman calls retain explicit local selection and fresh child-only selector removal; generic subprocesses and intentional Remote SSH remain unchanged. Same-user authority, labels/visibility, name-based legacy stops, observation/action races and missing producer deadlines remain documented limitations.
+
+## Reviewed integration and rollback handoff
+
+Warning: merge, publication and activation remain separately approved operations. This is a reviewed plan, not an executable authorization. Public PR17 remains open; the documentation reconciliation is local and unpublished. A future documentation commit would have a different full tree from the recorded CI checkout even when its runtime/test bytes match. Review its exact delta and any automatically triggered checks before delivery; do not relabel that later tree as the existing CI-tested tree.
+
+The active `quattro` checkout is at `65c3a23eb0fb1cbd2d88d5a51470a8f23202bc4d`, already containing the five prerequisites. Its `OMARCHY_PATH` and command resolution select `$HOME/Projects/omarchy`. Relative to that active HEAD, the published candidate adds four commits and 23 paths: six runtime owners, five reference/manual documents, seven change/history files and five test/CI files. The public PR's full scope remains nine commits and 60 paths because public `quattro` is still at the earlier base. Do not hide that ancestry by rebasing, squashing or force-pushing.
+
+Integration is not immediately executable against the active worktree. `docs/openspec.md` is locally modified but matches the published candidate. The active change directory is untracked: its metadata/spec match, proposal/design/tasks differ, and outcome is absent. These are existing user work, not disposable conflicts. Their content hashes/modes and the tracked-diff hash are retained in the final-review receipt. These receipts are not backup copies. No reset, stash, deletion, overwrite or deduplication is authorized. Preserve and review these overlaps under a separately approved plan before an update can proceed.
+
+The separately approved future sequence must:
+
+1. Confirm the exact delivery head, public base, PR checks, runtime/test bindings and remaining documentation-only delta.
+2. Preserve the active tracked/untracked overlaps and obtain an explicit resolution decision for differing planning content.
+3. Review and authorize publication of the final documentation if it is part of delivery.
+4. Obtain separate approval for a normal history-preserving PR merge; stop if the public base or merge tree introduces unreviewed source.
+5. Obtain separate approval to update the active checkout to the reviewed result; recheck the active baseline and overlap preservation first.
+6. Verify resulting file hashes/modes and command resolution by metadata, without starting managed agents or changing task/workspace state.
+
+Changing the already selected runtime source affects subsequent CLI/workspace invocations without a reboot. Existing agent/container processes are not restarted. No dev-link switch, user-config refresh, service restart, package transaction, migration or image build belongs to this handoff. In particular, the existing harness installer-stage changes do not authorize rebuilding or replacing running images.
+
+Warning: rollback to the active baseline restores successful false-empty readiness reports, ignored nested cleanup failure and ambient named-connection selection. Prefer a reviewed forward correction when feasible; do not assume the older source is safer. A rollback needs its own approval, exact affected-path review and preservation receipts. Use a new coherent change for affected runtime/tests/references while retaining historical outcomes and publication evidence; do not reset published history or unrelated active work. Keep the baseline's explicit `--remote=false` option, while acknowledging its selector gap. CI-only corrections may be assessed separately without unnecessarily removing the availability repair. Source rollback does not recreate deleted assignment directories, reverse earlier cleanup or restore registry/container state; never claim transactional rollback or automatically mutate user data.
+
+## Delivery status
+
+The required focused, named native and PR/CI evidence is reviewed with its limits. Task 3.1 is complete: the contract/evidence reconciliation and integration/rollback handoff review are delivered, all 16 local document links/headings pass, strict OpenSpec validation passes, and protected/current/staged source bindings match. These are documentation/content checks, not new application or native runs. Merge/activation remain blocked by independent approval and preservation/resolution of active worktree overlaps. This three-file reconciliation changes no runtime/test content and does not renew the consumed native invocation. No provider, graphical, hardware, full containment or release qualification is claimed.
