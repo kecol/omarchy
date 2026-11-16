@@ -31,11 +31,30 @@ SH
 
 cat >"$mock_bin/omarchy-agent-runtime-snapshot" <<'SH'
 #!/bin/bash
+count=0
+if [[ -n ${OMARCHY_TEST_SNAPSHOT_COUNTER:-} ]]; then
+  [[ ! -f $OMARCHY_TEST_SNAPSHOT_COUNTER ]] || read -r count <"$OMARCHY_TEST_SNAPSHOT_COUNTER"
+  count=$((count + 1))
+  printf '%s\n' "$count" >"$OMARCHY_TEST_SNAPSHOT_COUNTER"
+fi
+if [[ ${OMARCHY_TEST_SNAPSHOT_FAIL:-false} == "true" ]] || (( count > ${OMARCHY_TEST_SNAPSHOT_FAIL_AFTER:-999} )); then
+  echo "Managed runtime observation unavailable: fixture" >&2
+  exit 2
+fi
 if [[ -n ${OMARCHY_TEST_RUNTIME_SNAPSHOT:-} && -f $OMARCHY_TEST_RUNTIME_SNAPSHOT ]]; then
   cat "$OMARCHY_TEST_RUNTIME_SNAPSHOT"
 else
   printf '[]\n'
 fi
+SH
+
+cat >"$mock_bin/omarchy-task-cleanup" <<'SH'
+#!/bin/bash
+if [[ ${OMARCHY_TEST_CLEANUP_FAIL:-false} == "true" ]]; then
+  echo "fixture cleanup failure" >&2
+  exit 23
+fi
+exec "$OMARCHY_PATH/bin/omarchy-task-cleanup" "$@"
 SH
 
 cat >"$mock_bin/omarchy-agent-audit" <<'SH'
@@ -60,6 +79,10 @@ if [[ ${1:-} == "image" && ${2:-} == "exists" ]]; then
   exit 0
 fi
 if [[ ${1:-} == "stop" ]]; then
+  if [[ -v CONTAINER_HOST || -v CONTAINER_CONNECTION ]]; then
+    echo "remote selector reached local stop child" >&2
+    exit 125
+  fi
   printf '%s\n' "${2:-}"
 fi
 SH
@@ -151,6 +174,43 @@ COMP_CWORD=3
 _omarchy_complete
 [[ ${COMPREPLY[*]} == "$task_id" ]] || fail "task completion prefers tasks from the current project" "${COMPREPLY[*]}"
 pass "task inventory reports private assignments"
+
+expect_refusal() {
+  local name=$1
+  shift
+  if "$@" >"$test_tmp/refusal.stdout" 2>"$test_tmp/refusal.stderr"; then
+    fail "$name refuses unavailable runtime observation"
+  fi
+  grep -Fq 'Managed runtime observation unavailable' "$test_tmp/refusal.stderr" || fail "$name retains the availability diagnostic"
+}
+
+# Reconcile first: task status intentionally retains its existing earlier reconciliation write.
+"$ROOT/bin/omarchy-task-reconcile" "$assignment_id" --json >/dev/null
+before_status=$(omarchy-agent-state assignment-get "$assignment_id" | jq -r '.[0].status')
+for command in preflight start stop cleanup status archive; do
+  selector=$assignment_id
+  [[ $command != "archive" ]] || selector=$task_id
+  OMARCHY_TEST_SNAPSHOT_FAIL=true expect_refusal "$command" "$ROOT/bin/omarchy-task-$command" "$selector"
+  [[ -d $workspace/.git && -d $second_workspace/.git ]] || fail "$command preserves assignment workspaces on unknown runtime"
+  [[ $(omarchy-agent-state assignment-get "$assignment_id" | jq -r '.[0].status') == "$before_status" ]] || fail "$command does not finalize or launch an unobserved assignment"
+  [[ $(omarchy-agent-state task-get "$task_id" | jq -r '.[0].status') != "archived" ]] || fail "$command does not archive an unobserved task"
+done
+for command in cleanup archive; do
+  selector=$assignment_id
+  [[ $command != "archive" ]] || selector=$task_id
+  OMARCHY_TEST_SNAPSHOT_FAIL=true expect_refusal "$command --force" "$ROOT/bin/omarchy-task-$command" "$selector" --force
+  [[ -d $workspace/.git ]] || fail "force cannot delete a workspace when observation is unavailable"
+done
+[[ ! -s $launch_log ]] || fail "unavailable start must not invoke the agent"
+if [[ -f $podman_log ]] && grep -q 'stop ' "$podman_log"; then fail "unavailable stop must not call the engine stop action"; fi
+pass "task gates and status refuse unknown runtime, including forced cleanup/archive"
+
+# First observation passes preflight; the later start recheck must still refuse.
+OMARCHY_TEST_SNAPSHOT_COUNTER="$test_tmp/start-counter" OMARCHY_TEST_SNAPSHOT_FAIL_AFTER=1 \
+  expect_refusal "start recheck" "$ROOT/bin/omarchy-task-start" "$assignment_id" --inline
+[[ ! -s $launch_log ]] || fail "failed late recheck must not launch an agent"
+[[ $(omarchy-agent-state assignment-get "$assignment_id" | jq -r '.[0].status') == "$before_status" ]] || fail "failed late recheck must not mark launched"
+pass "task start checks observation again after preflight and audit"
 
 "$ROOT/bin/omarchy-task-start" "${assignment_id:0:12}" --inline --continue
 [[ $(jq -r '.cwd' "$launch_log") == "$workspace" ]] || fail "task start enters the private workspace"
@@ -273,6 +333,7 @@ jq -n --arg assignment "$assignment_id" '[{assignment_id: $assignment, runtime: 
 "$ROOT/bin/omarchy-task-stop" "$assignment_id" >"$test_tmp/stop-output"
 grep -Fq 'Stopped omarchy-agent-pi-test' "$test_tmp/stop-output" || fail "task stop reports stopped containers"
 grep -Fxq -- '--remote=false stop omarchy-agent-pi-test' "$podman_log" || fail "task stop asks Podman to stop the active container"
+[[ $CONTAINER_HOST == "ssh://engine.example.invalid" && $CONTAINER_CONNECTION == "fixture-remote" ]] || fail "task stop preserves parent remote defaults"
 [[ $(omarchy-agent-state assignment-get "$assignment_id" | jq -r '.[0].status') == "stopped" ]] || fail "task stop records stopped assignment status"
 printf '[]\n' >"$runtime_snapshot"
 pass "task stop stops active assignment containers"
@@ -309,3 +370,48 @@ grep -Fq "Archived task: $task_id" "$test_tmp/archive-output" || fail "task arch
 [[ $(omarchy-agent-state assignment-get "$assignment_id" | jq -r '.[0].status') == "cleaned" ]] || fail "task archive cleans safe assignment workspaces"
 [[ ! -e $workspace ]] || fail "task archive removes safe assignment workspaces"
 pass "task archive closes tasks with safe assignments"
+
+# The actual archive and nested cleanup run against disposable Git/SQLite state.
+# Initial snapshot succeeds; one or more later cleanup snapshots fail.
+for force in false true; do
+  for completed in 0 1; do
+    case_task=$(cd "$source_repo" && "$ROOT/bin/omarchy-task-create" --json "Archive availability fixture" | jq -r '.task')
+    "$ROOT/bin/omarchy-task-assign" --json "$case_task" pi first >/dev/null
+    if (( completed == 1 )); then
+      "$ROOT/bin/omarchy-task-assign" --json "$case_task" pi second >/dev/null
+    fi
+    ordered=$(omarchy-agent-state task-assignments "$case_task")
+    protected_id=$(jq -r --argjson index "$completed" '.[$index].id' <<<"$ordered")
+    protected_workspace=$(jq -r --argjson index "$completed" '.[$index].workspace_path' <<<"$ordered")
+    force_args=()
+    [[ $force != "true" ]] || force_args+=(--force)
+    counter="$test_tmp/archive-counter-$force-$completed"
+    OMARCHY_TEST_SNAPSHOT_COUNTER="$counter" OMARCHY_TEST_SNAPSHOT_FAIL_AFTER=$((completed + 1)) \
+      expect_refusal "archive nested cleanup" "$ROOT/bin/omarchy-task-archive" "$case_task" "${force_args[@]}"
+    [[ -d $protected_workspace/.git ]] || fail "archive preserves the workspace whose cleanup lost observation"
+    [[ $(omarchy-agent-state assignment-get "$protected_id" | jq -r '.[0].status') != "cleaned" ]] || fail "failed nested cleanup cannot finalize its assignment"
+    [[ $(omarchy-agent-state task-get "$case_task" | jq -r '.[0].status') != "archived" ]] || fail "archive cannot finalize after nested observation failure"
+    grep -Fq 'Task archive incomplete' "$test_tmp/refusal.stderr" || fail "archive reports incomplete cleanup"
+    if (( completed == 1 )); then
+      first_id=$(jq -r '.[0].id' <<<"$ordered")
+      first_workspace=$(jq -r '.[0].workspace_path' <<<"$ordered")
+      [[ ! -e $first_workspace ]] || fail "earlier completed cleanup is not rolled back"
+      [[ $(omarchy-agent-state assignment-get "$first_id" | jq -r '.[0].status') == "cleaned" ]] || fail "partial cleanup keeps truthful earlier registry state"
+    fi
+    # Recovery with known-empty observation should still complete normally.
+    "$ROOT/bin/omarchy-task-archive" "$case_task" "${force_args[@]}" >/dev/null
+    [[ $(omarchy-agent-state task-get "$case_task" | jq -r '.[0].status') == "archived" ]] || fail "archive can finish after observation recovers"
+  done
+  case_task=$(cd "$source_repo" && "$ROOT/bin/omarchy-task-create" --json "Cleanup failure fixture" | jq -r '.task')
+  case_assignment=$("$ROOT/bin/omarchy-task-assign" --json "$case_task" pi tester)
+  if OMARCHY_TEST_CLEANUP_FAIL=true "$ROOT/bin/omarchy-task-archive" "$case_task" "${force_args[@]}" >"$test_tmp/cleanup-failure.stdout" 2>"$test_tmp/cleanup-failure.stderr"; then
+    fail "archive refuses unrelated nested cleanup failure"
+  else
+    status=$?
+    (( status == 23 )) || fail "archive retains the nested cleanup failure status"
+  fi
+  [[ -d $(jq -r '.workspace' <<<"$case_assignment")/.git ]] || fail "failed cleanup leaves its workspace intact"
+  [[ $(omarchy-agent-state task-get "$case_task" | jq -r '.[0].status') != "archived" ]] || fail "force cannot bypass a nested cleanup failure"
+  "$ROOT/bin/omarchy-task-archive" "$case_task" "${force_args[@]}" >/dev/null
+  pass "archive propagates nested cleanup failure and partial progress (force=$force)"
+done

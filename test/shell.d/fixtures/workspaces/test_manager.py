@@ -227,6 +227,10 @@ class StateTests(unittest.TestCase):
     (engine/'podman').write_text('''#!/bin/bash
 printf '%s\\n' "$*" >>"$ENGINE_FIXTURE/engine.log"
 [[ ${1:-} == "--remote=false" ]] || { echo "missing local engine selection" >&2; exit 92; }
+if [[ -v CONTAINER_HOST || -v CONTAINER_CONNECTION ]]; then
+  echo "remote selector reached local engine child" >&2
+  exit 125
+fi
 shift
 [[ ${ENGINE_FAIL:-} != "$1" ]] || exit 7
 case "$1 ${2:-}" in
@@ -285,6 +289,7 @@ esac
       for operation in ['info', 'ps', 'build', 'run', 'start', 'stop', 'inspect', 'port', 'exec', 'image inspect', 'volume create', 'volume inspect']:
         self.assertTrue(any(call == '--remote=false '+operation or call.startswith('--remote=false '+operation+' ') for call in calls), operation)
       self.assertEqual(os.environ['CONTAINER_CONNECTION'], 'fixture-remote')
+      self.assertEqual(os.environ['CONTAINER_HOST'], 'ssh://engine.example.invalid')
 
   def test_listing_missing_state_has_no_side_effects(self):
     with patch.dict(os.environ, XDG_DATA_HOME=str(self.base/'absent')):

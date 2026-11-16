@@ -146,7 +146,7 @@ omarchy task archive <task>
 2. `omarchy agent audit`
 3. the configured agent launch
 
-Preflight checks the assignment, workspace, source checkout, saved runtime mode, harness image, base ancestry, workspace remote state and observed active-instance state. Runtime audit rejects detected drift in its selected active harness snapshot. Preflight, audit and launch are separate operations: no atomic admission lease prevents concurrent starts or a later mode change. Audit visibility and label comparisons have the limitations below.
+Preflight checks the assignment, workspace, source checkout, saved runtime mode, harness image, base ancestry, workspace remote state and observed active-instance state. Runtime audit rejects detected drift in its selected active harness snapshot. Required runtime observation failure stops preflight/audit/start; start also rechecks before marking the assignment launched. Preflight, audit and launch are separate operations: no atomic admission lease prevents concurrent starts or a later mode change. Audit visibility and label comparisons have the limitations below.
 
 ## Runtime policy
 
@@ -193,6 +193,16 @@ OMARCHY_AGENT_PIDS_LIMIT=2048
 OMARCHY_AGENT_CPUS_LIMIT=2
 ```
 
+## Runtime availability
+
+The legacy `omarchy-agent-runtime-snapshot` reports success with a JSON array only after local engine readiness and enumeration succeed and any required inspection/projection succeeds. A genuine empty enumeration returns `[]`. Missing Podman, query failure, malformed or incomplete inspection, mismatched container IDs and projection failure return status 2 with a fixed stage diagnostic on stderr and no snapshot stdout. Nontruncated IDs and complete response membership are checked before publication. This detects reported failures; it adds no production query deadline or retry and does not make observation/action atomic.
+
+`omarchy agent list --json` keeps configured definitions and mode information available on this explicit unavailability status. Each record then has `running_instances: null` and `runtime_available: false`; the text count is `unknown`. Successful observations give numeric counts, including real zeros, and `runtime_available: true`. Consumers must not coerce null to zero. Other producer failures and definition/mode errors still fail the list command.
+
+Runtime-dependent `agent ps`, `agent inspect` and `task status` fail rather than report zero activity when observation is unavailable. Inspect reaches its historical registry fallback only after a successful snapshot with no active match. Task status retains its earlier source reconciliation behavior; refusal of runtime reporting is not a promise of no prior registry writes. These interfaces are distinct from the newer `agent status` process observer and overview.
+
+These changes are implemented in the inactive candidate for [runtime availability](../openspec/changes/distinguish-runtime-snapshot-unavailability/proposal.md). Its [outcome](../openspec/changes/distinguish-runtime-snapshot-unavailability/outcome.md) records passing focused checks and named native N1–N6, including real rootless inventory/lifecycle cases and explicitly identified nested/readiness fault injection. Restoration and owned cleanup were confirmed under the separately reviewed resource policy, with max-boundary events retained rather than described as pressure-free. Required PR/CI remains unperformed and integration/activation needs separate approval; source existence or an OpenSpec checkbox does not establish deployment. This does not newly qualify workspace-manager native behavior, advisory audit-fix execution, providers, graphical behavior or all engine versions.
+
 ## Runtime audit
 
 Audit active managed agent containers:
@@ -202,7 +212,7 @@ omarchy agent audit
 omarchy agent audit --json
 ```
 
-The audit compares selected managed-label containers against expected policy labels and selected mount/security fields. It checks the source-unmounted/workspace declarations, host-root and `/home/agent` bind exclusions, a nonempty capability-drop list, `no-new-privileges` and resource labels. It does not measure all effective resource flags or require the exact all-capabilities drop set. The legacy runtime snapshot can return an empty successful result when Podman is unavailable; that is not independent evidence that no agent is active. The legacy snapshot, audit-fix and task-stop requests explicitly select the local engine, ignoring ambient remote-engine defaults without changing the user's configuration. Their output, target and failure policies remain distinct from newer controllers; local routing is not complete engine-access denial. Editor workspace operations, including bounded listing, also select the local engine; their loopback Remote SSH connection remains intentional. This is an intentional compatibility change for implicit remote defaults, not a change to direct user Podman commands. See [the local-engine change](../openspec/changes/pin-managed-workflows-local-engine/proposal.md). See O2/E1 in the [inventory](agent-safety-boundaries.md).
+The audit compares selected managed-label containers against expected policy labels and selected mount/security fields. It checks the source-unmounted/workspace declarations, host-root and `/home/agent` bind exclusions, a nonempty capability-drop list, `no-new-privileges` and resource labels. It does not measure all effective resource flags or require the exact all-capabilities drop set. Unavailable runtime observation now makes audit fail before advisory doctor, stop or final state updates; a successful empty snapshot still does not prove no agent exists outside the selected label scope. The legacy snapshot, audit-fix and task-stop requests retain `--remote=false` and remove only `CONTAINER_HOST` and `CONTAINER_CONNECTION` from each local Podman child's environment. The option alone did not neutralize named-connection selection in the tested environment. The parent environment and global engine configuration remain unchanged. Their output, target and failure policies remain distinct from newer controllers; this is not a complete engine-configuration sanitizer or engine-access denial. Editor workspace operations use a fresh filtered environment at all 14 Podman boundaries, including direct bounded listing. Generic Git/SSH/editor subprocesses keep their environment, and workspace loopback Remote SSH remains intentional. This is an intentional compatibility change for implicit remote defaults, not a change to direct user Podman commands. See [the local-engine change](../openspec/changes/pin-managed-workflows-local-engine/proposal.md). See O2/E1 in the [inventory](agent-safety-boundaries.md).
 
 If audit detects drift, stop unsafe containers without deleting workspaces or
 volumes:
@@ -230,9 +240,9 @@ omarchy task reconcile <assignment>
 reconciliation state. A dirty assignment workspace can still be safe if the
 source state is `applied`.
 
-`task cleanup` removes only Omarchy's managed assignment directory and refuses
-unsafe states unless `--force` is used. `task archive` closes a task after its
-assignments are applied, empty, or cleaned.
+`task stop` refuses unavailable observation before dependent stop/state updates. `task cleanup` removes only Omarchy's managed assignment directory and refuses active instances or unavailable observation even with `--force`. Force can bypass source reconciliation policy, not uncertainty about runtime activity. The observation check also precedes marking an already missing workspace cleaned.
+
+`task archive` closes a task after its assignments are applied, empty, or cleaned and required cleanup succeeds. It refuses unavailable initial observation and stops on any nested cleanup failure, including with `--force`. The task remains unarchived; earlier assignment cleanup may already have completed and is not rolled back. Inspect the incomplete result before deciding whether to retry after the cause is resolved. This is sequential cleanup, not an atomic transaction.
 
 ## OpenShell boundary
 

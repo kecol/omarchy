@@ -135,7 +135,7 @@ if [[ $fix == "true" && $failed == "1" ]]; then
     [[ -n $instance && $(jq -r --arg instance "$instance" '.[$instance] // false' <<<"$unsafe_instances") == "true" ]] || continue
     container=$(jq -r '.container // ""' <<<"$instance_json")
     assignment_id=$(jq -r '.assignment_id // ""' <<<"$instance_json")
-    if [[ -n $container ]] && podman --remote=false stop "$container" >/dev/null; then
+    if [[ -n $container ]] && env -u CONTAINER_HOST -u CONTAINER_CONNECTION podman --remote=false stop "$container" >/dev/null; then
       omarchy-agent-state finish "$instance" failed 1 >/dev/null 2>&1 || true
       if [[ -n $assignment_id ]]; then
         omarchy-agent-state assignment-status "$assignment_id" failed >/dev/null 2>&1 || true

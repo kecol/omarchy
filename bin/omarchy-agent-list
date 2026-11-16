@@ -23,7 +23,16 @@ for path in "$HOME"/.config/omarchy/agents/*.json; do
   definitions["$(basename "$path" .json)"]=$path
 done
 
-snapshot=$(omarchy-agent-runtime-snapshot)
+if snapshot=$(omarchy-agent-runtime-snapshot); then
+  runtime_available=true
+else
+  status=$?
+  if (( status == 2 )); then
+    runtime_available=false
+  else
+    exit "$status"
+  fi
+fi
 mode=$(omarchy-agent-mode)
 records='[]'
 for agent in "${!definitions[@]}"; do
@@ -41,7 +50,11 @@ for agent in "${!definitions[@]}"; do
   else
     runtime=$configured_runtime
   fi
-  running=$(jq --arg agent "$agent" '[.[] | select(.agent == $agent)] | length' <<<"$snapshot")
+  if [[ $runtime_available == "true" ]]; then
+    running=$(jq --arg agent "$agent" '[.[] | select(.agent == $agent)] | length' <<<"$snapshot")
+  else
+    running=null
+  fi
   if [[ $definition == "$HOME/.config/omarchy/agents/"* ]]; then
     source=user
   else
@@ -54,7 +67,8 @@ for agent in "${!definitions[@]}"; do
     --arg configured_runtime "$configured_runtime" \
     --arg source "$source" \
     --argjson running "$running" \
-    '. + [{agent: $agent, harness: $harness, runtime: $runtime, configured_runtime: $configured_runtime, source: $source, running_instances: $running}]' \
+    --argjson runtime_available "$runtime_available" \
+    '. + [{agent: $agent, harness: $harness, runtime: $runtime, configured_runtime: $configured_runtime, source: $source, running_instances: $running, runtime_available: $runtime_available}]' \
     <<<"$records")
 done
 records=$(jq 'sort_by(.agent)' <<<"$records")
@@ -63,7 +77,7 @@ if [[ $json == "true" ]]; then
   jq . <<<"$records"
 else
   printf '%-20s %-14s %-12s %-8s %s\n' AGENT HARNESS RUNTIME RUNNING SOURCE
-  jq -r '.[] | [.agent, .harness, .runtime, (.running_instances | tostring), .source] | @tsv' <<<"$records" |
+  jq -r '.[] | [.agent, .harness, .runtime, (if .runtime_available then (.running_instances | tostring) else "unknown" end), .source] | @tsv' <<<"$records" |
     while IFS=$'\t' read -r agent harness runtime running source; do
       printf '%-20s %-14s %-12s %-8s %s\n' "$agent" "$harness" "$runtime" "$running" "$source"
     done

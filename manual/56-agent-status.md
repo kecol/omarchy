@@ -20,6 +20,14 @@ Host processes appear first, followed by processes with unknown execution bounda
 
 Unverified Herdr observations appear separately. An idle shell, SSH launcher, stale agent hint, or remote record is not promoted into a confirmed host process. A running editor workspace alone is not counted as an agent.
 
+## Configured agents and container runtime reports
+
+`omarchy agent list` lists configured agents, not every host process. If runtime observation is unavailable, its running count shows `unknown`. In `omarchy agent list --json`, `running_instances` is then null and `runtime_available` is false. Successful observation supplies a numeric count and true availability. Do not interpret null as zero.
+
+`omarchy agent ps`, `omarchy agent inspect` and `omarchy task status` fail with a diagnostic when their required container observation is unavailable. Inspect does not silently substitute history for a failed observation. After a successful observation with no active match, its historical fallback remains available. These commands are separate from the process report described above.
+
+Managed task start, stop, cleanup and archive also refuse unavailable runtime observation. `--force` does not override this refusal. If archive reports a nested cleanup failure, the task is not archived, but earlier assignment cleanup may already have completed. There is no automatic rollback of those earlier removals.
+
 ## Local Herdr sessions
 
 A grouped section lists each local session returned by Herdr and its reported agent panes:
