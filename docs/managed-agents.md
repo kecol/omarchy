@@ -221,8 +221,9 @@ volumes:
 omarchy agent audit --fix
 ```
 
-This marks affected registry instances and managed assignments as failed when
-labels are available.
+Repair associates failed checks with the observed full container ID, not an instance-label failure map. It validates full, unique IDs across the captured snapshot and the complete repair plan before stopping anything or finalizing lifecycle state. A failed row without a nonempty string instance label, a failed instance label shared by another observed container, or an unsupported repair runtime causes refusal of the entire plan. Passing rows are not selected through another row's label. Container names remain display metadata only; a vanished ID produces `stop-failed` without name fallback.
+
+After a successful stop request, repair makes best-effort updates marking the associated registry instance and managed assignment failed. Failed stop requests receive no dependent finalization and make the command return nonzero; earlier successful repairs remain. Default stop behavior can escalate to KILL. These checks do not authenticate labels, bind process incarnations, prevent concurrent launches or make engine actions and registry writes transactional. Audit still invokes its advisory quick doctor; it is not a read-only operation.
 
 ## Inspecting and recovering tasks
 
@@ -240,7 +241,9 @@ omarchy task reconcile <assignment>
 reconciliation state. A dirty assignment workspace can still be safe if the
 source state is `applied`.
 
-`task stop` refuses unavailable observation before dependent stop/state updates. `task cleanup` removes only Omarchy's managed assignment directory and refuses active instances or unavailable observation even with `--force`. Force can bypass source reconciliation policy, not uncertainty about runtime activity. The observation check also precedes marking an already missing workspace cleaned.
+`task stop` refuses unavailable observation and validates full, unique container IDs for all selected assignment rows before stopping any target or writing `stopping`. It stops only those observed IDs; names are display metadata, not fallback selectors. A renamed original remains the target, and a vanished ID fails instead of selecting a replacement with the old name. It writes `stopped` only after all requests succeed. Earlier stops and intermediate `stopping` state can remain after failure. The engine-default stop policy can escalate to KILL; this is not the overview's TERM-only or process-fingerprint contract.
+
+`task cleanup` removes only Omarchy's managed assignment directory and refuses active instances or unavailable observation even with `--force`. Force can bypass source reconciliation policy, not uncertainty about runtime activity. The observation check also precedes marking an already missing workspace cleaned.
 
 `task archive` closes a task after its assignments are applied, empty, or cleaned and required cleanup succeeds. It refuses unavailable initial observation and stops on any nested cleanup failure, including with `--force`. The task remains unarchived; earlier assignment cleanup may already have completed and is not rolled back. Inspect the incomplete result before deciding whether to retry after the cause is resolved. This is sequential cleanup, not an atomic transaction.
 

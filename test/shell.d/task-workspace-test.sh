@@ -83,6 +83,12 @@ if [[ ${1:-} == "stop" ]]; then
     echo "remote selector reached local stop child" >&2
     exit 125
   fi
+  if [[ -n ${OMARCHY_TEST_ENGINE_STATE:-} ]]; then
+    id=$(jq -r --arg target "${2:-}" '.[] | select(.id == $target or .name == $target) | .id' "$OMARCHY_TEST_ENGINE_STATE")
+    [[ -n $id ]] || { echo "fixture target missing" >&2; exit 125; }
+    [[ $id != "${OMARCHY_TEST_FAIL_ID:-}" ]] || { echo "fixture stop failed" >&2; exit 42; }
+    printf '%s\n' "$id" >>"$OMARCHY_TEST_STOPPED"
+  fi
   printf '%s\n' "${2:-}"
 fi
 SH
@@ -329,14 +335,63 @@ git -C "$source_repo" clean -fd --quiet
 workspace=$(jq -r '.workspace' <<<"$second_json")
 assignment_id=$(jq -r '.assignment' <<<"$second_json")
 
-jq -n --arg assignment "$assignment_id" '[{assignment_id: $assignment, runtime: "podman", container: "omarchy-agent-pi-test", status: "running"}]' >"$runtime_snapshot"
+first_id=$(printf '%064d' 1)
+second_id=$(printf '%064d' 2)
+export OMARCHY_TEST_ENGINE_STATE="$test_tmp/engine-state.json"
+export OMARCHY_TEST_STOPPED="$test_tmp/stopped-ids"
+# The snapshot names A; the engine now has renamed A and replacement B at its old name.
+jq -n --arg a "$first_id" --arg b "$second_id" '[{id: $a, name: "renamed-original"}, {id: $b, name: "omarchy-agent-pi-test"}]' >"$OMARCHY_TEST_ENGINE_STATE"
+jq -n --arg assignment "$assignment_id" --arg id "$first_id" '[{assignment_id: $assignment, runtime: "podman", container: "omarchy-agent-pi-test", container_id: $id, status: "running"}]' >"$runtime_snapshot"
+cp "$runtime_snapshot" "$test_tmp/valid-stop.json"
+: >"$OMARCHY_TEST_STOPPED"
 "$ROOT/bin/omarchy-task-stop" "$assignment_id" >"$test_tmp/stop-output"
 grep -Fq 'Stopped omarchy-agent-pi-test' "$test_tmp/stop-output" || fail "task stop reports stopped containers"
-grep -Fxq -- '--remote=false stop omarchy-agent-pi-test' "$podman_log" || fail "task stop asks Podman to stop the active container"
+[[ $(<"$OMARCHY_TEST_STOPPED") == "$first_id" ]] || fail "task stop targets renamed original, not replacement at the observed name"
 [[ $CONTAINER_HOST == "ssh://engine.example.invalid" && $CONTAINER_CONNECTION == "fixture-remote" ]] || fail "task stop preserves parent remote defaults"
 [[ $(omarchy-agent-state assignment-get "$assignment_id" | jq -r '.[0].status') == "stopped" ]] || fail "task stop records stopped assignment status"
+pass "task stop binds a reused name to the originally observed container ID"
+
+for invalid in 'null' '123' '[]' '""' '"--all"' '("a" * 63)' '("A" * 64)' '("a" * 64 + "\n")'; do
+  jq "[.[0], (.[0] | .container_id = $invalid)]" "$test_tmp/valid-stop.json" >"$runtime_snapshot"
+  omarchy-agent-state assignment-status "$assignment_id" running
+  : >"$podman_log"
+  if "$ROOT/bin/omarchy-task-stop" "$assignment_id" >"$test_tmp/invalid-stop" 2>&1; then fail "invalid later task target must refuse"; fi
+  grep -Fq 'invalid or duplicate container ID' "$test_tmp/invalid-stop" || fail "invalid task ID has a diagnostic"
+  [[ ! -s $podman_log ]] || fail "task validates every ID before the first stop"
+  [[ $(omarchy-agent-state assignment-get "$assignment_id" | jq -r '.[0].status') == "running" ]] || fail "invalid task plan must not write stopping or stopped"
+done
+for mutation in '. + .' '.[0].runtime = "other"' '.[0].runtime = ""' '.[0].runtime = null' '.[0].runtime = 0' '.[0].runtime = []'; do
+  jq "$mutation" "$test_tmp/valid-stop.json" >"$runtime_snapshot"
+  : >"$podman_log"
+  if "$ROOT/bin/omarchy-task-stop" "$assignment_id" >"$test_tmp/invalid-stop" 2>&1; then fail "duplicate or unsupported task target must refuse"; fi
+  [[ ! -s $podman_log ]] || fail "invalid task plan must not call stop"
+  [[ $(omarchy-agent-state assignment-get "$assignment_id" | jq -r '.[0].status') == "running" ]] || fail "invalid plan must preserve lifecycle state"
+done
+pass "task stop validates full unique IDs and supported runtimes before any lifecycle mutation"
+
+cp "$test_tmp/valid-stop.json" "$runtime_snapshot"
+jq -n --arg b "$second_id" '[{id: $b, name: "omarchy-agent-pi-test"}]' >"$OMARCHY_TEST_ENGINE_STATE"
+: >"$OMARCHY_TEST_STOPPED"
+: >"$podman_log"
+if "$ROOT/bin/omarchy-task-stop" "$assignment_id" >"$test_tmp/missing-stop" 2>&1; then fail "vanished task target must fail without retargeting"; fi
+[[ ! -s $OMARCHY_TEST_STOPPED && $(wc -l <"$podman_log") == 1 ]] || fail "vanished task target must not stop replacement or retry"
+[[ $(omarchy-agent-state assignment-get "$assignment_id" | jq -r '.[0].status') == "stopping" ]] || fail "failed task stop must not finalize stopped"
+pass "task stop refuses a vanished ID without falling back to its reused name"
+
+jq -n --arg a "$first_id" --arg b "$second_id" '[{id: $a, name: "renamed-original"}, {id: $b, name: "omarchy-agent-pi-test"}]' >"$OMARCHY_TEST_ENGINE_STATE"
+jq --arg b "$second_id" '. + [.[0] | .container_id = $b | .container = "second"]' "$test_tmp/valid-stop.json" >"$runtime_snapshot"
+: >"$OMARCHY_TEST_STOPPED"
+if OMARCHY_TEST_FAIL_ID="$second_id" "$ROOT/bin/omarchy-task-stop" "$assignment_id" >"$test_tmp/partial-stop" 2>&1; then fail "partial task stop must fail"; fi
+[[ $(<"$OMARCHY_TEST_STOPPED") == "$first_id" ]] || fail "partial task stop retains only the earlier successful action"
+[[ $(omarchy-agent-state assignment-get "$assignment_id" | jq -r '.[0].status') == "stopping" ]] || fail "partial task stop must not finalize stopped"
+# Names are optional display metadata, never an eligibility requirement.
+jq '.[0].container = null' "$test_tmp/valid-stop.json" >"$runtime_snapshot"
+: >"$OMARCHY_TEST_STOPPED"
+"$ROOT/bin/omarchy-task-stop" "$assignment_id" >"$test_tmp/nameless-stop"
+[[ $(<"$OMARCHY_TEST_STOPPED") == "$first_id" ]] || fail "task stop uses the ID even without a display name"
+pass "task stop preserves partial failure and does not require a display name"
+unset OMARCHY_TEST_ENGINE_STATE OMARCHY_TEST_STOPPED
 printf '[]\n' >"$runtime_snapshot"
-pass "task stop stops active assignment containers"
 
 if "$ROOT/bin/omarchy-task-stop" "$assignment_id" >"$test_tmp/no-active-output" 2>&1; then
   fail "task stop rejects assignments without active instances"

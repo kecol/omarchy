@@ -36,11 +36,21 @@ if [[ -n $unsupported ]]; then
   exit 1
 fi
 
+# Validate every target before changing lifecycle state or stopping any container.
+if ! jq -e '
+  all(.[]; .runtime == "podman" and (.container_id | type == "string" and test("\\A[0-9a-f]{64}\\z")))
+  and ([.[].container_id] | length == (unique | length))
+' <<<"$active_instances" >/dev/null 2>&1; then
+  echo "Cannot stop assignment: invalid or duplicate container ID, or unsupported runtime" >&2
+  exit 1
+fi
+stop_rows=$(jq -c '.[]' <<<"$active_instances")
+
 omarchy-agent-state assignment-status "$assignment_id" stopping
-jq -r '.[].container' <<<"$active_instances" | while IFS= read -r container; do
-  if [[ -n $container && $container != "null" ]]; then
-    env -u CONTAINER_HOST -u CONTAINER_CONNECTION podman --remote=false stop "$container" >/dev/null
-    printf 'Stopped %s\n' "$container"
-  fi
-done
+while IFS= read -r row; do
+  container_id=$(jq -r '.container_id' <<<"$row")
+  container=$(jq -r '.container // .container_id' <<<"$row")
+  env -u CONTAINER_HOST -u CONTAINER_CONNECTION podman --remote=false stop "$container_id" >/dev/null
+  printf 'Stopped %s\n' "$container"
+done <<<"$stop_rows"
 omarchy-agent-state assignment-status "$assignment_id" stopped
