@@ -2,7 +2,7 @@
 
 ## Delivery status
 
-IMPLEMENTED CANDIDATE; focused checks and named native qualification passed. Publication and continuous integration (CI) are approved but pending. Task 3.1 remains open until required CI and the final delivery review complete. Merge, active integration, main-spec synchronization and archive are not approved or performed.
+IMPLEMENTED AND PUBLISHED CANDIDATE; focused checks, named native qualification and reviewed code continuous integration (CI) passed. Task 3.1 is complete after content-bound delivery review. [PR18](https://github.com/kecol/omarchy/pull/18) remains open and the candidate remains inactive. Merge, active integration, main-spec synchronization and archive are not approved or performed.
 
 The candidate branch is `fix/task-audit-stop-target-binding`, based on `19eea4aa53de29b8106bd0e58d5482778ccf5ae9`. The active dev-linked checkout remains at that base. Planning and earlier focused-check approval did not grant native execution; the user separately approved the new private packet and one native invocation. The user subsequently approved commit, PR publication and CI. No earlier consumed native approval was reused.
 
@@ -58,7 +58,11 @@ The retained resource policy is `bounded-native-reclaim-aware-v1`, digest `0656e
 
 ## Publication and CI
 
-Commit and PR publication are approved for this candidate only. Required CI has not yet run for this change. Do not substitute the prior runtime-availability CI result or these focused/native results for the new PR's exact tested checkout. Record original CI failures and explicit skips without automatic retries or trust exemptions.
+[PR18](https://github.com/kecol/omarchy/pull/18) publishes code/review commit `b196ad94fcffc487dc045091987c51eb1e80507d`. Both author and committer were explicitly pinned to `kecol <5040769+kecol@users.noreply.github.com>`. [Tests run 44077579604](https://github.com/kecol/omarchy/actions/runs/44077579604), attempt 1, passed the CLI suite and all 454 shell test files with zero failures and eight explicit skip-bearing files. Its actual checkout was `d805cbedce03a85e37e2ecab611023e87df81b3c`, with base/head parents `19eea4aa53de29b8106bd0e58d5482778ccf5ae9` and `b196ad94fcffc487dc045091987c51eb1e80507d`. Its tree matched the published code tree: `a3fa7856e26bae948accdfbf6d7c83eaa88cfa77`. The workflow reported zero changed source files and `rc=0`.
+
+The eight skip-bearing files retain their exact limits: two require an installed Pi binary; one lacks hiddev hardware; two lack the Chinese or Turkish locale; one lacks Kitty; one covers a no-battery panel case; and structural i18n marks no pending translations. Structural i18n checks executed. [Translation run 44077579429](https://github.com/kecol/omarchy/actions/runs/44077579429) passed structural, sync-workflow and extraction checks. These are VM-backed regression results, many with fake executables or scratch data, not additional native engine, provider or hardware qualification.
+
+The later documentation-only reconciliation records these code-head results and completes task 3.1 without changing runtime/test content. Its automatic new-head checks remain distinct and are retained in the publication receipts. No manual CI retry or successful local-suite rerun was used to reproduce evidence. The prior runtime-availability CI result is not substituted for this change's qualification.
 
 ## Integration and rollback handoff
 
