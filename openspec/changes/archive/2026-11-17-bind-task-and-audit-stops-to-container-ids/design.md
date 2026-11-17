@@ -2,7 +2,7 @@
 
 ## Context
 
-See [proposal.md](proposal.md) for motivation, reviewed baseline and exact source scope. The existing [availability contract](../../specs/managed-runtime-availability/spec.md) validates complete engine observations; it does not bind later actions to immutable targets. The proposed [target-binding contract](specs/managed-stop-target-binding/spec.md) owns that additional boundary.
+See [proposal.md](proposal.md) for motivation, reviewed baseline and exact source scope. The existing [availability contract](../../../specs/managed-runtime-availability/spec.md) validates complete engine observations; it does not bind later actions to immutable targets. The proposed [target-binding contract](specs/managed-stop-target-binding/spec.md) owns that additional boundary.
 
 The two Bash callers already receive `container_id`, container name and workflow labels. The producer checks engine IDs, but labels can be absent or repeated. The consumer must not substitute label identity or display names for the engine ID. Existing newer controllers use process/namespace fingerprints and separate confirmation policies; importing them would change behavior and expand this change beyond two CLI owners.
 
