@@ -1,0 +1,26 @@
+# Tasks
+
+**IMPLEMENTED CANDIDATE; focused and named native qualification passed; PR/CI pending; integration blocked.** After separate apply and candidate/focused-execution approvals, tasks 1.1 and 2.1 were implemented in `$HOME/Projects/omarchy-stop-target-binding`, branch `fix/task-audit-stop-target-binding`, based on `19eea4aa53de29b8106bd0e58d5482778ccf5ae9`. The active dev link and runtime source remain unchanged. Use [design.md](design.md) and the [target-binding contract](specs/managed-stop-target-binding/spec.md).
+
+Final task/workspace and inventory/audit fixtures passed with 30 and 17 assertion groups without skips. Three semantic negative controls detected name retargeting and the combined audit association-boundary omission. Original fixture/control failures remain retained. Private evidence and source bindings: `$HOME/Work/omarchy-stop-target-binding-apply-01/REVIEW.md`. That focused checkpoint did not execute a real engine, advisory doctor, VM or package transaction. A later separately approved native invocation passed N1–N6 with real rootless Podman, a delayed real snapshot and an inert adjacent advisory doctor; guest provisioning/restoration and owned cleanup were confirmed. Its 6,121 memory max-boundary events remain explicit under the reviewed resource policy, not a pressure-free claim. See [outcome.md](outcome.md) for exact content bindings, substitutions, original failures and the integration/rollback handoff. Commit/publication and PR/CI are now separately approved but pending. Task 3.1 remains open until required CI and delivery review complete. No provider, merge, activation, main-spec sync or archive action occurred.
+
+## 1. Task-stop target binding
+
+- [x] 1.1 In the approved candidate, change only `bin/omarchy-task-stop` and its existing `test/shell.d/task-workspace-test.sh` coverage to validate the complete selected plan before lifecycle writes and stop only full IDs. Include realistic synthetic IDs, name reuse, disappearance, invalid later rows, duplicates and partial stop failure; update the task-stop description in `docs/managed-agents.md`. Verify the approved focused suite with complete logs and source bindings, demonstrate a semantic base/name-target negative control in a disposable copy, and retain routing, no-active, unavailable-observation and successful-state coverage.
+
+## 2. Audit finding-to-action binding
+
+- [x] 2.1 Change only `bin/omarchy-agent-audit` and its existing `test/shell.d/agent-inventory-test.sh` coverage to associate failures with container IDs, validate the snapshot ID set and complete repair plan, refuse missing/ambiguous failed-instance associations and stop only selected full IDs. Cover passing/failing label collisions, a distinct healthy row, malformed/duplicate IDs, name reuse, disappearance and stop failure without failed-target finalization. Update the audit description in `docs/managed-agents.md` and add a prospective supplement in `docs/agent-safety-boundaries.md` without rewriting historical rows. Verify the approved focused suite with its inert adjacent doctor, complete logs and source bindings; demonstrate semantic name-target and instance-key omission failures in disposable copies and retain existing output/locality/availability checks.
+
+## 3. Integration review
+
+- [ ] 3.1 Deliver a content-bound review reconciling both callers, their focused/negative-control results, required targeted native and PR/CI evidence, partial-failure behavior, compatibility limits and activation/rollback handoff. Verify the reference links, strict OpenSpec validation, unchanged out-of-scope content and exact reviewed source/test bindings without unnecessary suite reruns. Leave this task open while a required native or CI result is missing or failed unless the user separately reviews a specific documented exception. Record original failures, explicit substitutions/skips and blocked/not-run coverage rather than treating fixtures as native proof.
+
+## Workflow follow-up
+
+- Initial approval covered only the planning artifacts and CLI-generated metadata. The user subsequently approved apply and separately scoped candidate creation, the two runtime owners, existing fixtures, scoped reference updates and focused/negative-control execution. No ledger or main-spec edit is included.
+- Preserve unrelated work and stricter active permissions. Do not interpret completed candidate tasks as approval to integrate the candidate.
+- A new bounded native packet and exactly one invocation received separate approval and completed. That invocation is consumed; this checklist grants no retry or real advisory-doctor, provider, image-build or paused-campaign permission.
+- Commit/publication and PR/CI received separate approval. Pin public author and committer identity explicitly. Required CI remains pending; no merge or activation follows from this approval.
+- Keep active integration blocked until required qualification is reviewed, then obtain separate merge and activation approval. OpenSpec planning completion does not grant those permissions.
+- Synchronize the main spec and archive only after separate closeout approval. Preserve historical evidence and record actual implemented, validated and active status distinctly.

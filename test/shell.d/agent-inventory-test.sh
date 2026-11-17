@@ -79,7 +79,12 @@ case ${1:-} in
     echo "private-engine-detail" >&2
     exit "${OMARCHY_TEST_INSPECT_STATUS:-0}"
     ;;
-  stop) exit 0 ;;
+  stop)
+    id=$(jq -r --arg target "${2:-}" '.[] | select(.id == $target or .name == $target) | .id' "$OMARCHY_TEST_ENGINE_STATE")
+    [[ -n $id ]] || { echo "fixture target missing" >&2; exit 125; }
+    [[ $id != "${OMARCHY_TEST_FAIL_ID:-}" ]] || { echo "fixture stop failed" >&2; exit 42; }
+    printf '%s\n' "$id" >>"$OMARCHY_TEST_STOPPED"
+    ;;
   *) echo "unexpected podman call: $*" >&2; exit 1 ;;
 esac
 SH
@@ -107,7 +112,7 @@ cat >"$snapshot_file" <<'JSON'
       "cpus": null
     },
     "container": "omarchy-agent-pi-019abcde1111",
-    "container_id": "container123",
+    "container_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "status": "running",
     "pid": 1234,
     "image": "localhost/omarchy-harness-pi:latest",
@@ -315,6 +320,7 @@ audit_json=$("$audit_command" --json)
 [[ $(jq -r '.ok' <<<"$audit_json") == "true" ]] || fail "agent audit passes safe active instances" "$audit_json"
 [[ $(jq -r '.checks[] | select(.name == "source_unmounted") | .status' <<<"$audit_json") == "pass" ]] || fail "agent audit checks source mount policy" "$audit_json"
 [[ $(jq -r '.checks[] | select(.name == "resources") | .status' <<<"$audit_json") == "pass" ]] || fail "agent audit checks resource policy" "$audit_json"
+cp "$snapshot_file" "$test_tmp/safe-snapshot.json"
 python - "$snapshot_file" <<'PY'
 import json, sys
 path = sys.argv[1]
@@ -326,8 +332,15 @@ if "$audit_command" >"$test_tmp/audit-fail" 2>&1; then
   fail "agent audit rejects runtime policy drift"
 fi
 grep -Fq 'source_unmounted' "$test_tmp/audit-fail" || fail "agent audit names source mount drift"
+cp "$snapshot_file" "$test_tmp/unsafe-snapshot.json"
+first_id=$(jq -r '.[0].container_id' "$snapshot_file")
+second_id=$(printf 'b%.0s' {1..64})
+export OMARCHY_TEST_ENGINE_STATE="$test_tmp/engine-state.json"
+export OMARCHY_TEST_STOPPED="$test_tmp/stopped-ids"
+jq -n --arg a "$first_id" --arg b "$second_id" '[{id: $a, name: "renamed-original"}, {id: $b, name: "omarchy-agent-pi-019abcde1111"}]' >"$OMARCHY_TEST_ENGINE_STATE"
+: >"$OMARCHY_TEST_STOPPED"
 "$audit_command" --fix >"$test_tmp/audit-fix"
-grep -Fxq -- '--remote=false stop omarchy-agent-pi-019abcde1111' "$podman_log" || fail "agent audit --fix stops drifted containers"
+[[ $(<"$OMARCHY_TEST_STOPPED") == "$first_id" ]] || fail "audit repair targets renamed original, not replacement at the observed name"
 grep -Fq $'assignment-status\tassignment123\tfailed' "$state_log" || fail "agent audit --fix marks managed assignments failed"
 grep -Fq 'fix: 019abcde-111 stopped omarchy-agent-pi-019abcde1111' "$test_tmp/audit-fix" || fail "agent audit --fix reports stopped containers"
 python - "$snapshot_file" <<'PY'
@@ -337,7 +350,71 @@ data = json.load(open(path))
 data[0]["filesystem"]["source"] = "unmounted"
 json.dump(data, open(path, "w"))
 PY
-pass "agent audit detects active runtime drift"
+pass "agent audit detects drift and stops the observed ID despite name reuse"
+
+expect_repair_refusal() {
+  : >"$podman_log"
+  : >"$state_log"
+  if "$audit_command" --fix --json >"$test_tmp/repair-refusal.json" 2>"$test_tmp/repair-refusal.stderr"; then fail "invalid or ambiguous audit repair must refuse"; fi
+  grep -Fq 'Cannot repair runtime:' "$test_tmp/repair-refusal.stderr" || fail "audit repair refusal has a diagnostic"
+  [[ ! -s $podman_log ]] || fail "audit must validate the entire repair plan before any stop"
+  if grep -Eq '^(finish|assignment-status)' "$state_log"; then fail "invalid audit plan must not finalize lifecycle state"; fi
+}
+
+for invalid in 'null' '123' '[]' '""' '"--all"' '("a" * 63)' '("A" * 64)' '("a" * 64 + "\n")'; do
+  # Even an invalid passing row makes the snapshot-to-repair ID binding unavailable.
+  jq ". + [.[0] | .instance = \"healthy\" | .filesystem.source = \"unmounted\" | .container_id = $invalid]" "$test_tmp/unsafe-snapshot.json" >"$snapshot_file"
+  expect_repair_refusal
+done
+jq '. + .' "$test_tmp/unsafe-snapshot.json" >"$snapshot_file"
+expect_repair_refusal
+for value in 'null' '""' '123' '[]'; do
+  jq ".[0].instance = $value" "$test_tmp/unsafe-snapshot.json" >"$snapshot_file"
+  expect_repair_refusal
+done
+jq '.[0].runtime = "other"' "$test_tmp/unsafe-snapshot.json" >"$snapshot_file"
+expect_repair_refusal
+pass "audit repair rejects invalid IDs, duplicate IDs, missing instance associations and unsupported runtimes before mutation"
+
+jq --arg b "$second_id" '. + [.[0] | .container_id = $b | .container = "passing-peer" | .filesystem.source = "unmounted"]' "$test_tmp/unsafe-snapshot.json" >"$snapshot_file"
+expect_repair_refusal
+pass "audit repair refuses a failed-row instance label shared by a passing container"
+
+jq --arg b "$second_id" '. + [.[0] | .container_id = $b | .container = "passing-peer" | .instance = "healthy" | .assignment_id = "healthy-assignment" | .filesystem.source = "unmounted"]' "$test_tmp/unsafe-snapshot.json" >"$snapshot_file"
+: >"$OMARCHY_TEST_STOPPED"
+: >"$state_log"
+"$audit_command" --fix --json >"$test_tmp/selective-repair.json"
+[[ $(<"$OMARCHY_TEST_STOPPED") == "$first_id" ]] || fail "audit repair must stop only the distinct failing container"
+jq -e '.fixed | length == 1 and .[0].action == "stopped"' "$test_tmp/selective-repair.json" >/dev/null || fail "audit repair reports only the selected action"
+if grep -Fq healthy "$state_log"; then fail "audit repair must not finalize a healthy instance or assignment"; fi
+pass "audit repair selects only the failing row among distinct valid instances"
+
+cp "$test_tmp/unsafe-snapshot.json" "$snapshot_file"
+jq -n --arg b "$second_id" '[{id: $b, name: "omarchy-agent-pi-019abcde1111"}]' >"$OMARCHY_TEST_ENGINE_STATE"
+: >"$OMARCHY_TEST_STOPPED"
+: >"$state_log"
+: >"$podman_log"
+if "$audit_command" --fix --json >"$test_tmp/missing-repair.json" 2>"$test_tmp/missing-repair.stderr"; then fail "vanished audit ID must fail without retargeting"; fi
+[[ ! -s $OMARCHY_TEST_STOPPED && $(wc -l <"$podman_log") == 1 ]] || fail "audit must not stop replacement or retry a vanished ID"
+jq -e '.fixed | length == 1 and .[0].action == "stop-failed"' "$test_tmp/missing-repair.json" >/dev/null || fail "audit reports vanished target as stop-failed"
+if grep -Eq '^(finish|assignment-status)' "$state_log"; then fail "failed audit stop must not finalize lifecycle state"; fi
+pass "audit repair reports vanished IDs without name fallback or finalization"
+
+jq -n --arg a "$first_id" --arg b "$second_id" '[{id: $a, name: "renamed-original"}, {id: $b, name: "replacement"}]' >"$OMARCHY_TEST_ENGINE_STATE"
+jq --arg b "$second_id" '. + [.[0] | .container_id = $b | .instance = "second" | .assignment_id = "second-assignment"]' "$test_tmp/unsafe-snapshot.json" >"$snapshot_file"
+: >"$OMARCHY_TEST_STOPPED"
+: >"$state_log"
+if OMARCHY_TEST_FAIL_ID="$second_id" "$audit_command" --fix --json >"$test_tmp/partial-repair.json" 2>"$test_tmp/partial-repair.stderr"; then fail "partial audit repair must return failure"; fi
+[[ $(<"$OMARCHY_TEST_STOPPED") == "$first_id" ]] || fail "partial audit repair keeps only successful action"
+jq -e '[.fixed[].action] == ["stopped", "stop-failed"]' "$test_tmp/partial-repair.json" >/dev/null || fail "audit keeps separate success and failure outcomes"
+if grep -Fq second "$state_log"; then fail "audit must not finalize failed target instance or assignment"; fi
+jq '.[0].container = null' "$test_tmp/unsafe-snapshot.json" >"$snapshot_file"
+: >"$OMARCHY_TEST_STOPPED"
+"$audit_command" --fix --json >"$test_tmp/nameless-repair.json"
+[[ $(<"$OMARCHY_TEST_STOPPED") == "$first_id" ]] || fail "audit repair must not require a display name"
+pass "audit repair preserves partial failure and treats names only as display metadata"
+cp "$test_tmp/safe-snapshot.json" "$snapshot_file"
+unset OMARCHY_TEST_ENGINE_STATE OMARCHY_TEST_STOPPED
 
 inspect_json=$("$ROOT/bin/omarchy-agent-inspect" 019abcde --json)
 [[ $(jq -r '.record_source' <<<"$inspect_json") == "observed" ]] || fail "agent inspect prefers observed runtime state"

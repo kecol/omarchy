@@ -26,6 +26,15 @@ done
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
 snapshot=$(omarchy-agent-runtime-snapshot)
+if [[ $fix == "true" ]] && ! jq -e '
+  type == "array"
+  and all(.[]; .container_id | type == "string" and test("\\A[0-9a-f]{64}\\z"))
+  and ([.[].container_id] | length == (unique | length))
+' <<<"$snapshot" >/dev/null 2>&1; then
+  echo "Cannot repair runtime: invalid or duplicate container ID" >&2
+  exit 1
+fi
+snapshot_rows=$(jq -c '.[]' <<<"$snapshot")
 policy=$(omarchy-agent-policy --json)
 if openshell_status=$("$script_dir/omarchy-agent-openshell-doctor" --json --quick 2>/dev/null); then
   openshell_status=$(jq '.available = true' <<<"$openshell_status")
@@ -37,7 +46,7 @@ else
   fi
 fi
 checks='[]'
-unsafe_instances='{}'
+unsafe_containers='{}'
 fixed_instances='[]'
 failed=0
 
@@ -55,13 +64,15 @@ add_check() {
     <<<"$checks")
   if [[ $status == "fail" ]]; then
     failed=1
-    unsafe_instances=$(jq --arg instance "$instance" '. + {($instance): true}' <<<"$unsafe_instances")
+    # Each check belongs to the current observed container, not its mutable labels.
+    unsafe_containers=$(jq --arg id "$container_id" '. + {($id): true}' <<<"$unsafe_containers")
   fi
 }
 
 while IFS= read -r instance_json; do
   [[ -n $instance_json ]] || continue
   instance=$(jq -r '.instance // "unknown"' <<<"$instance_json")
+  container_id=$(jq -r '.container_id // ""' <<<"$instance_json")
   container=$(jq -r '.container // "unknown"' <<<"$instance_json")
 
   source_access=$(jq -r '.filesystem.source // "unknown"' <<<"$instance_json")
@@ -126,16 +137,28 @@ while IFS= read -r instance_json; do
       add_check "$instance" managed_labels fail "$container is managed but lacks task or assignment labels"
     fi
   fi
-done < <(jq -c '.[]' <<<"$snapshot")
+done <<<"$snapshot_rows"
 
 if [[ $fix == "true" && $failed == "1" ]]; then
+  repair_plan=$(jq --argjson unsafe "$unsafe_containers" '[.[] | select($unsafe[.container_id] == true)]' <<<"$snapshot")
+  # Validate all failed-row associations, including collisions with passing rows.
+  if ! jq -e --argjson snapshot "$snapshot" '
+    all(.[];
+      .runtime == "podman"
+      and (.instance | type == "string" and length > 0)
+      and (.instance as $instance | [$snapshot[] | select(.instance == $instance)] | length == 1))
+  ' <<<"$repair_plan" >/dev/null 2>&1; then
+    echo "Cannot repair runtime: missing or ambiguous instance association, or unsupported runtime" >&2
+    exit 1
+  fi
+  repair_rows=$(jq -c '.[]' <<<"$repair_plan")
   while IFS= read -r instance_json; do
     [[ -n $instance_json ]] || continue
     instance=$(jq -r '.instance // ""' <<<"$instance_json")
-    [[ -n $instance && $(jq -r --arg instance "$instance" '.[$instance] // false' <<<"$unsafe_instances") == "true" ]] || continue
-    container=$(jq -r '.container // ""' <<<"$instance_json")
+    container_id=$(jq -r '.container_id' <<<"$instance_json")
+    container=$(jq -r '.container // .container_id' <<<"$instance_json")
     assignment_id=$(jq -r '.assignment_id // ""' <<<"$instance_json")
-    if [[ -n $container ]] && env -u CONTAINER_HOST -u CONTAINER_CONNECTION podman --remote=false stop "$container" >/dev/null; then
+    if env -u CONTAINER_HOST -u CONTAINER_CONNECTION podman --remote=false stop "$container_id" >/dev/null; then
       omarchy-agent-state finish "$instance" failed 1 >/dev/null 2>&1 || true
       if [[ -n $assignment_id ]]; then
         omarchy-agent-state assignment-status "$assignment_id" failed >/dev/null 2>&1 || true
@@ -153,7 +176,7 @@ if [[ $fix == "true" && $failed == "1" ]]; then
         '. + [{instance: $instance, container: $container, action: "stop-failed"}]' \
         <<<"$fixed_instances")
     fi
-  done < <(jq -c '.[]' <<<"$snapshot")
+  done <<<"$repair_rows"
 fi
 
 record=$(jq -n \
