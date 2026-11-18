@@ -23,6 +23,7 @@ unset CLAUDE_CONFIG_DIR CODEX_HOME GROK_HOME
 python3 - <<'PY'
 import base64, contextlib, copy, ctypes, importlib.machinery, importlib.util, io, json, os, subprocess, sys
 from pathlib import Path
+from unittest import mock
 
 loader = importlib.machinery.SourceFileLoader("transfer", str(Path(os.environ["OMARCHY_PATH"]) / "bin/omarchy-agent-account-transfer"))
 spec = importlib.util.spec_from_loader(loader.name, loader)
@@ -189,6 +190,28 @@ for name, expected in [("node", True), ("nvim", False)]:
   finally:
     child.terminate()
     child.wait()
+
+# Unknown default homes refuse explicitly, without inventing a match against
+# the receiver's cwd. Synthetic proc inputs avoid leaking a HOME-less process
+# into the parallel suite; classification and refusal use the real detector.
+proc_root = root / "detector-proc"
+proc = proc_root / str(os.getpid() + 1)
+proc.mkdir(parents=True)
+(proc / "comm").write_text("claude\n")
+(proc / "cmdline").write_bytes(b"python3\0-c\0synthetic\0")
+with contextlib.chdir(Path.home()), mock.patch.object(state, "home_in_use", return_value=False), mock.patch.object(transfer, "Path", side_effect=lambda value: proc_root if value == "/proc" else Path(value)):
+  target = state.primary_home("claude")
+  for environment in (b"", b"HOME=\0", b"HOME=relative\0"):
+    (proc / "environ").write_bytes(environment)
+    try:
+      transfer.home_in_use("claude", target)
+    except state.AccountError as error:
+      assert "Cannot determine an absolute home" in str(error)
+    else:
+      raise AssertionError("unknown default home must refuse, not report a guessed match or allow copy")
+  for home, expected in ((Path.home(), True), (root / "unrelated-home", False)):
+    (proc / "environ").write_bytes(b"HOME=" + os.fsencode(home) + b"\0")
+    assert transfer.home_in_use("claude", target) is expected
 
 # Abrupt receiver death after copying files is recovered on the next refresh.
 machine("interrupted")
