@@ -49,6 +49,7 @@ status=$(awk -v n="$launches" 'NR == n { print; found = 1 } END { if (!found) pr
 
 if [[ $status == "run" ]]; then
   trap 'touch "$OMARCHY_TEST_QS_TERMINATED"; exit 143' TERM
+  touch "$OMARCHY_TEST_QS_READY"
   while true; do sleep 0.05; done
 fi
 
@@ -95,6 +96,7 @@ qs_log="$test_tmp/quickshell.log"
 qs_env_log="$test_tmp/quickshell-env.log"
 logger_log="$test_tmp/logger.log"
 qs_terminated="$test_tmp/quickshell-terminated"
+qs_ready="$test_tmp/quickshell-ready"
 hyprctl_misses="$test_tmp/hyprctl-misses"
 
 launch_shell() {
@@ -111,6 +113,7 @@ launch_shell() {
   OMARCHY_TEST_COMPOSITOR_GONE="${2:-0}" \
   OMARCHY_TEST_LOGGER_LOG="$logger_log" \
   OMARCHY_TEST_QS_TERMINATED="$qs_terminated" \
+  OMARCHY_TEST_QS_READY="$qs_ready" \
   OMARCHY_TEST_HYPRCTL_MISSES="${3:-0}" \
   OMARCHY_TEST_HYPRCTL_MISS_COUNT="$hyprctl_misses" \
     timeout 30 "$launch_shell_bin"
@@ -187,12 +190,13 @@ pass "a signal during backoff stops the supervisor before it relaunches"
 : >"$qs_log"
 : >"$qs_env_log"
 : >"$logger_log"
-rm -f "$qs_terminated"
+rm -f "$qs_terminated" "$qs_ready"
 
 PATH="$fake_bin:$PATH" \
 OMARCHY_PATH="$shell_root" \
 OMARCHY_TEST_QS_LOG="$qs_log" \
 OMARCHY_TEST_QS_ENV_LOG="$qs_env_log" \
+OMARCHY_TEST_QS_READY="$qs_ready" \
 OMARCHY_TEST_QS_STATUSES='run' \
 OMARCHY_TEST_COMPOSITOR_GONE=0 \
 OMARCHY_TEST_LOGGER_LOG="$logger_log" \
@@ -200,10 +204,12 @@ OMARCHY_TEST_QS_TERMINATED="$qs_terminated" \
   "$launch_shell_bin" &
 launch_pid=$!
 
+# The launch log precedes trap installation; wait until TERM can be handled.
 for (( waited = 0; waited < 100; waited++ )); do
-  [[ $(launches) == 1 ]] && break
+  [[ -f $qs_ready ]] && break
   sleep 0.05
 done
+[[ -f $qs_ready ]] || fail "the healthy shell installs its TERM handler before the signal"
 [[ $(launches) == 1 ]] || fail "the healthy shell launched before the signal" "$(<"$qs_log")"
 
 kill -TERM "$launch_pid"
