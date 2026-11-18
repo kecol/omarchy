@@ -3,6 +3,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
@@ -114,6 +115,43 @@ cleanup() {''' + cleanup + '\ntrap cleanup EXIT\nexit "$3"\n'
 
     def test_success_is_unchanged_and_has_no_failure_capture(self):
         self.assertNotIn('idle-shell-diagnostic', self.cleanup_case(0))
+
+    def lock_cleanup_case(self, status, break_collector=False):
+        # Execute the actual trap binding and cleanup bodies, not the lock
+        # test's compositor gates, shell launch, or process-signalling logic.
+        shell_dir = HERE.parents[1]
+        text = (shell_dir / 'lock-appear-budget-test.sh').read_text()
+        base = (shell_dir / 'base-test.sh').read_text()
+        shared = re.search(r'^scratch_shell_cleanup\(\) \{.*?^\}', base, re.M | re.S).group()
+        hook = re.search(r'^lock_failure_cleanup\(\) \{.*?^\}', text, re.M | re.S)
+        traps = re.findall(r'^trap .+ EXIT$', text, re.M)
+        binding = traps[-1] if traps else 'trap scratch_shell_cleanup EXIT'
+        source = self.root / 'missing-collector' if break_collector else shell_dir
+        # Only the public runtime-tree argument changes in this synthetic test.
+        body = hook.group().replace('"$SCRATCH_DIR" / "$status"', '"$SCRATCH_DIR" "$DIAGNOSTIC_RUNTIME" "$status"') if hook else ''
+        script = ('set -euo pipefail\nSCRATCH_DIR=$1\nSHELL_TEST_DIR=$2\nDIAGNOSTIC_RUNTIME=$4\nround=3\n'
+                  'stop_scratch_shell() { :; }\n' + shared + '\n' + body + '\n' + binding + '\nexit "$3"\n')
+        result = subprocess.run(['/bin/bash', '-c', script, 'inert-lock-cleanup', str(self.scratch), str(source), str(status), str(self.runtime)],
+                                stdin=subprocess.DEVNULL, capture_output=True, timeout=35)
+        self.assertEqual(result.returncode, status)
+        self.assertFalse(self.scratch.exists(), 'Shared scratch deletion must still run')
+        return result.stderr.decode()
+
+    def test_lock_failure_capture_precedes_shared_cleanup_and_retains_status(self):
+        output = self.lock_cleanup_case(37)
+        marker = '# idle-shell-diagnostic '
+        result = json.loads(next(line[len(marker):] for line in output.splitlines() if line.startswith(marker))) if marker in output else None
+        self.assertIsNotNone(result, 'Lock failure evidence must precede scratch deletion')
+        self.assertEqual(result['test_exit_status'], 37)
+        self.assertEqual(result['reports'][0]['reported_signals'], [11])
+        self.assertIn('round=3 original_status=37', output)
+        self.assertNotIn('SECRET', output)
+
+    def test_lock_collector_failure_retains_status_and_shared_cleanup(self):
+        self.assertIn('lock-appear diagnostic collection failed; original failure retained', self.lock_cleanup_case(37, break_collector=True))
+
+    def test_lock_success_has_no_failure_capture(self):
+        self.assertNotIn('diagnostic', self.lock_cleanup_case(0))
 
 
 if __name__ == '__main__':

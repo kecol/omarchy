@@ -19,7 +19,23 @@ require_comparable_speed "lock appear budget"
 BUDGET_MS=$(( ${OMARCHY_LOCK_APPEAR_BUDGET_MS:-300} * SPEED_PERCENT / 100 ))
 REOPEN_BUDGET_MS=$(( ${OMARCHY_LOCK_REAPPEAR_BUDGET_MS:-150} * SPEED_PERCENT / 100 ))
 
+# Capture before the shared cleanup removes this sample's scratch HOME.
+# This runs only on failure, outside every successful timing measurement.
+lock_failure_cleanup() {
+  local status=$?
+
+  if (( status != 0 )) && [[ -n $SCRATCH_DIR && -d $SCRATCH_DIR ]]; then
+    printf '# lock-appear diagnostic round=%s original_status=%s\n' "${round:-not-started}" "$status" >&2
+    timeout --kill-after=2 25 /usr/bin/python3 -I -B \
+      "$SHELL_TEST_DIR/fixtures/idle-shell/diagnostics.py" "$SCRATCH_DIR" / "$status" ||
+      printf '# lock-appear diagnostic collection failed; original failure retained\n' >&2
+  fi
+  scratch_shell_cleanup
+  return 0
+}
+
 setup_scratch_shell
+trap lock_failure_cleanup EXIT
 
 appear_ms() {
   local start end

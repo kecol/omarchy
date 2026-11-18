@@ -114,6 +114,8 @@ A handful of tests fail when a fast path gets slow again. Each prefers a count t
 
 On failure, the idle-shell test writes a bounded diagnostic JSON record to its existing stderr log before it removes its scratch HOME. The record contains file hashes, public package versions and sanitized frame symbols and signal numbers when the scratch Quickshell report provides them. It does not copy cores, process environments, command arguments or raw report text. Missing files, symlinks, special files, oversized files and incomplete metadata stay explicit gaps. These post-failure named-file observations are not original process identity, authenticated symbolization or proof of the crash cause. The collector cannot change the test's failure status, readiness assertions or idle budget. Its fixture tests use synthetic files and cleanup only; they do not start Quickshell.
 
+The lock-appearance test uses the same bounded collector on failure, before shared cleanup removes the current sample's scratch HOME. A context line records the sample and original status; the collector's existing JSON marker follows. Collection has a 25-second timeout and a two-second kill grace. A collector failure remains explicit and does not replace the original test verdict. Successful samples and all timing assertions remain unchanged. This captures only the failing sample, not a history of earlier samples, and does not establish the crash cause.
+
 Override a budget through the environment variable named at the top of each file when measuring something slower on purpose.
 
 ## Companion checkouts
