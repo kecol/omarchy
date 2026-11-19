@@ -1,5 +1,7 @@
 # Tasks
 
+Historical documentation checkpoint: this record preserves the original assessment or comparison and its then-unresolved choices. The later bounded adapter delivery is recorded in the [namespace delivery record](../2026-11-19-support-agent-catalog-menu-namespaces/tasks.md#delivery-and-current-status). It does not implement the broader proposed architecture or renew runtime qualification.
+
 This is a documentation-only assessment. Completed checkboxes mean that the assessment deliverables exist; they do not themselves grant architectural acceptance or implementation permission. The owner separately accepted the overall direction and approved recording that acceptance and the guiding references. Concrete interfaces and implementation remain unapproved. Runtime specifications are intentionally skipped.
 
 ## 1. Current-source evidence

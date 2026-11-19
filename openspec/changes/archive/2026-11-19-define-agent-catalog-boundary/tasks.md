@@ -1,5 +1,7 @@
 # Tasks
 
+Historical documentation checkpoint: this record preserves the original assessment or comparison and its then-unresolved choices. The later bounded adapter delivery is recorded in the [namespace delivery record](../2026-11-19-support-agent-catalog-menu-namespaces/tasks.md#delivery-and-current-status). It does not implement the broader proposed architecture or renew runtime qualification.
+
 These tasks deliver the authorized documentation proposal only. They do not implement either representation. Runtime specifications are skipped because this change adds no runtime behavior. Owner selection and any later implementation/test/publication permission remain separate.
 
 ## 1. Define the contract and representation choices

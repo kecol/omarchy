@@ -1,28 +1,30 @@
 # Agent catalog boundary
 
+Historical documentation checkpoint: this record preserves the original assessment or comparison and its then-unresolved choices. The later bounded adapter delivery is recorded in the [namespace delivery record](../2026-11-19-support-agent-catalog-menu-namespaces/tasks.md#delivery-and-current-status). It does not implement the broader proposed architecture or renew runtime qualification.
+
 ## Context
 
-**Documentation proposal only.** The owner selected catalog-first planning under the accepted [architecture direction](../assess-fork-upstream-coupling/design.md). The owner has not selected a representation or authorized implementation. See [proposal.md](proposal.md) for motivation and scope.
+**Documentation proposal only.** The owner selected catalog-first planning under the accepted [architecture direction](../2026-11-19-assess-fork-upstream-coupling/design.md). The owner has not selected a representation or authorized implementation. See [proposal.md](proposal.md) for motivation and scope.
 
 The current source baseline is fork `0a88b4f398e03bac581d652d579940f77e4fd7ed`. The upstream menu comparison is pinned to `c3c8acf1ef376d19c400464eab9bc382a8667c6f`. No fetch, merge, reader invocation or application test is needed to establish the following source facts:
 
-- [`catalog.js`](../../../default/agents/catalog.js) already exports `agentCatalog(raw)` as a pure CommonJS function. Do not repeat its earlier extraction.
-- Two Node snippets read only the bundled `default/omarchy/omarchy-menu.jsonc`: [`command-guards.py`](../../../default/agents/command-guards.py) in `discover(root, extra)`, and [`launch-menu.py`](../../../default/agents/launch-menu.py) in `agent_catalog()`.
+- [`catalog.js`](../../../../default/agents/catalog.js) already exports `agentCatalog(raw)` as a pure CommonJS function. Do not repeat its earlier extraction.
+- Two Node snippets read only the bundled `default/omarchy/omarchy-menu.jsonc`: [`command-guards.py`](../../../../default/agents/command-guards.py) in `discover(root, extra)`, and [`launch-menu.py`](../../../../default/agents/launch-menu.py) in `agent_catalog()`.
 - The reader recognizes only `^setup\.default\.agent\.[a-z0-9-]+$`. The inspected upstream product rows use `agent.harness.*`. Taking that menu alone therefore changes discovery without changing either Python caller.
 - Both callers already consume logical names, not menu actions or menu trees. Their policies and subprocess contracts differ.
 - The inspected upstream `omarchy-default-agent` remains an installer/save/launch entrypoint, not a pure catalog API. Do not execute it or scrape its case statement as a replacement source of product metadata.
 
-These are source observations, not newly reproduced runtime failures. Earlier [extraction results](../extract-agent-catalog-reader/outcome.md) remain historical scoped evidence; its preparation-time deployment statements do not describe the current checkout's later integration status.
+These are source observations, not newly reproduced runtime failures. Earlier [extraction results](../../extract-agent-catalog-reader/outcome.md) remain historical scoped evidence; its preparation-time deployment statements do not describe the current checkout's later integration status.
 
 ### Important guiding references
 
 | Reference | How it guides this boundary |
 | --- | --- |
-| [AGENTS.md](../../../AGENTS.md), [OpenSpec reference](../../../docs/openspec.md) | Keep scope small, distinguish planning from permission, and use an inactive candidate for any later safety-sensitive runtime edits. |
-| [Managed-agent catalog contract](../../../docs/managed-agents.md#bundled-catalog-reader), [safety inventory](../../../docs/agent-safety-boundaries.md) | Preserve current caller ownership and limits. Catalog extraction is not containment or authenticated launch approval. |
-| [Menu reference](../../../docs/menu.md), [original extraction design](../../../plans/agent-safety-first-extraction.md) | Preserve the limited parser contract and bundled-only data scope. User overlays and runtime providers have different semantics. |
-| [Testing reference](../../../docs/testing.md), [guard fixture](../../../test/shell.d/fixtures/agent-command-guards-test.py), [menu fixture](../../../test/shell.d/fixtures/agent-menu-test.py) | Extend actual parsing/transport cases instead of adding snapshots, source greps or a new harness. No existing suite was rerun for this proposal. |
-| [Runtime-availability spec](../../specs/managed-runtime-availability/spec.md), [stop-target-binding spec](../../specs/managed-stop-target-binding/spec.md), [work ledger](../../history/work-ledger.md) | Leave runtime inventory, lifecycle targeting and prior evidence unchanged. The catalog's historical empty-list behavior is not the engine-observation contract. |
+| [AGENTS.md](../../../../AGENTS.md), [OpenSpec reference](../../../../docs/openspec.md) | Keep scope small, distinguish planning from permission, and use an inactive candidate for any later safety-sensitive runtime edits. |
+| [Managed-agent catalog contract](../../../../docs/managed-agents.md#bundled-catalog-reader), [safety inventory](../../../../docs/agent-safety-boundaries.md) | Preserve current caller ownership and limits. Catalog extraction is not containment or authenticated launch approval. |
+| [Menu reference](../../../../docs/menu.md), [original extraction design](../../../../plans/agent-safety-first-extraction.md) | Preserve the limited parser contract and bundled-only data scope. User overlays and runtime providers have different semantics. |
+| [Testing reference](../../../../docs/testing.md), [guard fixture](../../../../test/shell.d/fixtures/agent-command-guards-test.py), [menu fixture](../../../../test/shell.d/fixtures/agent-menu-test.py) | Extend actual parsing/transport cases instead of adding snapshots, source greps or a new harness. No existing suite was rerun for this proposal. |
+| [Runtime-availability spec](../../../specs/managed-runtime-availability/spec.md), [stop-target-binding spec](../../../specs/managed-stop-target-binding/spec.md), [work ledger](../../../history/work-ledger.md) | Leave runtime inventory, lifecycle targeting and prior evidence unchanged. The catalog's historical empty-list behavior is not the engine-observation contract. |
 
 Surface important new references or conflicts before they change the chosen scope or contract. Older plans inform the design; they do not authorize stronger mechanisms or execution.
 

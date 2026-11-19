@@ -1,5 +1,7 @@
 # Proposal
 
+Historical documentation checkpoint: this record preserves the original assessment or comparison and its then-unresolved choices. The later bounded adapter delivery is recorded in the [namespace delivery record](../2026-11-19-support-agent-catalog-menu-namespaces/tasks.md#delivery-and-current-status). It does not implement the broader proposed architecture or renew runtime qualification.
+
 ## Why
 
 The fork needs an architectural decision before another upstream intake: which responsibilities should it own, and through which interfaces should those responsibilities connect to the upstream desktop? Selecting individually applicable commits does not answer whether the current ownership and dependency boundaries cause avoidable recurring adaptation.
@@ -31,7 +33,7 @@ None. `managed-runtime-availability` and `managed-stop-target-binding` remain au
 
 Only this change's CLI-generated metadata, proposal, design/assessment and task record may change. Source comparison covers current fork `0a88b4f398e03bac581d652d579940f77e4fd7ed`, upstream `c3c8acf1ef376d19c400464eab9bc382a8667c6f` and common ancestor `6194f4606c585da8b839b87df9120b7d796afedf`. These are pinned analysis inputs, not moving compatibility promises.
 
-The starting evidence is the [boundary inventory](../../../docs/agent-safety-boundaries.md), [managed-agent reference](../../../docs/managed-agents.md), [work ledger](../../history/work-ledger.md), [first extraction design](../../../plans/agent-safety-first-extraction.md) and current source. Historical inventory/classification is reused and reconciled with later deliveries, not rewritten or treated as new test execution.
+The starting evidence is the [boundary inventory](../../../../docs/agent-safety-boundaries.md), [managed-agent reference](../../../../docs/managed-agents.md), [work ledger](../../../history/work-ledger.md), [first extraction design](../../../../plans/agent-safety-first-extraction.md) and current source. Historical inventory/classification is reused and reconciled with later deliveries, not rewritten or treated as new test execution.
 
 ### Agent-safety effect and upstream benefit
 

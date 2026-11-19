@@ -1,5 +1,7 @@
 # Proposal
 
+Historical documentation checkpoint: this record preserves the original assessment or comparison and its then-unresolved choices. The later bounded adapter delivery is recorded in the [namespace delivery record](../2026-11-19-support-agent-catalog-menu-namespaces/tasks.md#delivery-and-current-status). It does not implement the broader proposed architecture or renew runtime qualification.
+
 ## Why
 
 The owner accepted selective integration-boundary adaptation and chose catalog definition as the next planning step. The existing agent-owned reader removes desktop-code imports but still derives product identity from menu placement; upstream's move from `setup.default.agent.*` to `agent.harness.*` exposes that remaining data dependency.
@@ -28,7 +30,7 @@ None. The existing runtime-availability and stop-target-binding specifications r
 
 ### Authorized scope and status
 
-Only this change's metadata, proposal, design and task record may change. The existing accepted [architectural assessment](../assess-fork-upstream-coupling/design.md) and earlier [catalog-extraction outcome](../extract-agent-catalog-reader/outcome.md) remain reference inputs, not files to rewrite. The earlier reader extraction already exists at current fork `0a88b4f398e03bac581d652d579940f77e4fd7ed`; it must not be repeated.
+Only this change's metadata, proposal, design and task record may change. The existing accepted [architectural assessment](../2026-11-19-assess-fork-upstream-coupling/design.md) and earlier [catalog-extraction outcome](../../extract-agent-catalog-reader/outcome.md) remain reference inputs, not files to rewrite. The earlier reader extraction already exists at current fork `0a88b4f398e03bac581d652d579940f77e4fd7ed`; it must not be repeated.
 
 Source inspection uses upstream `c3c8acf1ef376d19c400464eab9bc382a8667c6f` as a pinned comparison, not a moving compatibility promise. Existing fixture source was inspected; no application tests, Node reader invocation, agent, engine, provider, GUI or VM ran for this proposal.
 

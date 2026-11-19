@@ -2,11 +2,11 @@
 
 ## Context
 
-Option B is selected under the owner's delegated decision. This is the implementation plan for that option, not another architecture study. See [proposal.md](proposal.md), the [behavior delta](specs/bundled-agent-catalog/spec.md) and the prior [contract comparison](../define-agent-catalog-boundary/design.md).
+Option B is selected under the owner's delegated decision. This is the implementation plan for that option, not another architecture study. See [proposal.md](proposal.md), the [behavior delta](specs/bundled-agent-catalog/spec.md) and the prior [contract comparison](../2026-11-19-define-agent-catalog-boundary/design.md).
 
-Current `default/agents/catalog.js` recognizes only the legacy namespace. The existing two real-transport fixture seams and caller-specific checks were inspected in the preceding contract proposal. No new application tests have run. Earlier assessment records remain completed documentation snapshots; this change supersedes their representation-decision status without rewriting their history or claiming code exists.
+At the planning checkpoint, `default/agents/catalog.js` recognized only the legacy namespace. The existing two real-transport fixture seams and caller-specific checks had been inspected in the preceding contract proposal; implementation tests had not yet run. This design preserves that implementation plan. The [delivery and current-status record](tasks.md#delivery-and-current-status) now records the implemented adapter, focused and CI qualification, merge and source-only activation. Earlier assessment records remain completed documentation snapshots; later delivery does not rewrite their history or implement the broader proposed architecture.
 
-Guiding references are [AGENTS.md](../../../AGENTS.md), [managed-agent catalog behavior](../../../docs/managed-agents.md#bundled-catalog-reader), [menu syntax](../../../docs/menu.md), [testing](../../../docs/testing.md), [OpenSpec execution/activation rules](../../../docs/openspec.md) and the [original extraction outcome](../extract-agent-catalog-reader/outcome.md). Important new reference conflicts must be reported before scope or behavior changes.
+Guiding references are [AGENTS.md](../../../../AGENTS.md), [managed-agent catalog behavior](../../../../docs/managed-agents.md#bundled-catalog-reader), [menu syntax](../../../../docs/menu.md), [testing](../../../../docs/testing.md), [OpenSpec execution/activation rules](../../../../docs/openspec.md) and the [original extraction outcome](../../extract-agent-catalog-reader/outcome.md). Important new reference conflicts must be reported before scope or behavior changes.
 
 ## Goals / Non-Goals
 
