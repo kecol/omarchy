@@ -277,6 +277,12 @@ class GuardsTests(unittest.TestCase):
     menu.write_text('// bundled data only\n{"items":{"setup.default.agent.future-catalog":{},"other.pi":{}},}')
     with patch.dict(os.environ,{**self.env,'OMARCHY_PATH':str(checkout)},clear=True),patch.object(module,'ROOT',checkout):
       self.assertEqual(module.discover(self.state,{}),{'future-catalog':'future-catalog'})
+      for prefix in ('setup.default.agent', 'agent.harness'):
+        menu.write_text(json.dumps({'items': {prefix+'.future-catalog': {'label': 42}, 'other.pi': {}}}))
+        with self.subTest(prefix=prefix):
+          self.assertEqual(module.discover(self.state,{}),{'future-catalog':'future-catalog'})
+      menu.write_text(json.dumps({'agent.harness.future-catalog': {}, 'setup.default.agent.future-catalog': {}}))
+      self.assertEqual(module.discover(self.state,{}),{'future-catalog':'future-catalog'})
       # Empty/malformed catalog retains the existing guard-only registration path.
       for raw in ('', '{', '[]', '{}'):
         menu.write_text(raw)

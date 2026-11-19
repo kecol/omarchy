@@ -125,9 +125,23 @@ for (const raw of JSON.parse(fs.readFileSync(0, 'utf8'))) {
     with patch.object(m, 'ROOT', checkout), patch.dict(os.environ, OMARCHY_PATH=str(checkout)):
       menu.write_text('// catalog\n{"items":{"setup.default.agent.future-agent":{"label":"Future"},"setup.default.agent.alpha":{}},}')
       self.assertEqual(m.agent_catalog(), [dict(name='future-agent',label='Future'),dict(name='alpha',label='setup.default.agent.alpha')])
+      for wrapped in (False, True):
+        rows = {'agent.harness.future-agent': {'label': 'Future', 'action': 'must-not-run'},
+          'setup.default.agent.alpha': {'label': False}, 'agent.harness.beta': {'label': ''},
+          'agent.harness': {}, 'agent.harness.pi.nested': {}, 'other.pi': {},
+          'agent.harness.UPPER': {}, 'agent.harness.under_score': {},
+          'agent.harness.null-row': None, 'agent.harness.array-row': []}
+        menu.write_text(json.dumps({'items': rows} if wrapped else rows))
+        with self.subTest(wrapped=wrapped):
+          self.assertEqual(m.agent_catalog(), [dict(name='future-agent',label='Future'),
+            dict(name='alpha',label='setup.default.agent.alpha'),dict(name='beta',label='agent.harness.beta')])
       for raw in ('', '{', '{}', '[]', json.dumps({'setup.default.agent.pi': {'label': 42}}),
           json.dumps({'setup.default.agent.pi': {'label': 'bad\x1b[31m'}}),
-          json.dumps({f'setup.default.agent.agent-{i}': {} for i in range(129)})):
+          json.dumps({f'setup.default.agent.agent-{i}': {} for i in range(129)}),
+          json.dumps({'agent.harness.pi': {'label': 42}}),
+          json.dumps({'agent.harness.pi': {'label': 'bad\x1b[31m'}}),
+          json.dumps({'agent.harness.pi': {}, 'setup.default.agent.pi': {}}),
+          json.dumps({f'agent.harness.agent-{i}': {} for i in range(129)})):
         menu.write_text(raw)
         with self.subTest(raw_length=len(raw)), self.assertRaises(RuntimeError):m.agent_catalog()
       menu.unlink()

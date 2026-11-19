@@ -23,7 +23,7 @@ function agentCatalog(raw) {
   for (var id in source) {
     var entry = source[id]
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue
-    if (!/^setup\.default\.agent\.[a-z0-9-]+$/.test(id)) continue
+    if (!/^(?:setup\.default\.agent|agent\.harness)\.[a-z0-9-]+$/.test(id)) continue
     out.push({name: id.split(".").pop(), label: entry.label || id})
   }
   return out
