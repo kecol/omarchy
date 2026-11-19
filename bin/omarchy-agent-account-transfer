@@ -201,6 +201,10 @@ def home_in_use(provider: str, home: Path) -> bool:
       configured = next((v[len(home_key):].decode() for v in env if v.startswith(home_key)), "")
       selected_pin = next((v[len(pinned_key):].decode() for v in env if v.startswith(pinned_key)), "")
       process_home = next((v[5:].decode() for v in env if v.startswith(b"HOME=")), "")
+      # A relative default would associate this receiver's working directory
+      # with the candidate. Missing home evidence must refuse, not allow copy.
+      if not configured and not selected_pin and not Path(process_home).is_absolute():
+        raise accounts.AccountError(f"Cannot determine an absolute home for a {accounts.PROVIDERS[provider]['name']} session; refusing account copy")
       selected = Path(configured or selected_pin) if configured or selected_pin else Path(process_home) / f".{provider}"
       if selected.resolve() == home.resolve():
         return True
