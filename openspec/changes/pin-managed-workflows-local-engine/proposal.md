@@ -1,5 +1,7 @@
 # Proposal
 
+Historical routing-only checkpoint: this document records the original options-only implementation and its planning or verification scope. Baseline behavior, preservation instructions, status and approval statements refer to that checkpoint, not current delivery. The [current contract reconciliation](design.md#current-contract-reconciliation) identifies the later safeguards that must remain in effect. The original [outcome](outcome.md) remains historical evidence, not renewed qualification.
+
 ## Why
 
 The harness launcher already pins Podman to its local engine, but the legacy managed-runtime snapshot, audit-fix/task-stop actions and editor workspace backend invoke bare Podman. Ambient remote-engine defaults can therefore direct host-local workflow metadata and actions to a different engine; explicit locality removes this configuration-dependent mismatch without extracting a new framework or changing shared desktop code.

@@ -8,7 +8,7 @@ Keep Omarchy's host-local managed-runtime and editor-workspace workflows on the 
 
 ### Requirement: Managed-runtime inventory and legacy stop actions select the local engine
 
-Managed-runtime snapshot queries, `omarchy agent audit --fix` stop actions and `omarchy task stop` stop actions SHALL explicitly select the local Podman engine regardless of ambient remote-engine defaults. The engine-selection boundary covers both observation and the subsequent action, not just one side of that workflow.
+Managed-runtime snapshot, audit-fix and task-stop Podman requests SHALL select the local engine with `--remote=false` and remove `CONTAINER_HOST` and `CONTAINER_CONNECTION` from each child environment. Observation and dependent stops SHALL retain the current availability, full-ID targeting, complete-plan validation, refusal and finalization contracts.
 
 #### Scenario: Managed inventory under a remote default
 
@@ -20,17 +20,17 @@ Managed-runtime snapshot queries, `omarchy agent audit --fix` stop actions and `
 
 - **WHEN** audit fix requests a stop for a drifted instance while ambient configuration selects a remote Podman engine
 - **THEN** its stop request explicitly selects the local engine
-- **AND** the requested container name and existing audit registry-update behavior remain unchanged
+- **AND** the target is the selected row’s full observed 64-character lowercase hexadecimal container ID, never a name or name fallback; repair validation and dependent finalization follow the current target-binding contract.
 
 #### Scenario: Assignment stop under a remote default
 
 - **WHEN** task stop resolves an assignment with active supported instances while ambient configuration selects a remote Podman engine
 - **THEN** its snapshot queries and every requested stop explicitly select the local engine
-- **AND** assignment selection, existing container targets and stopping/stopped state transitions remain unchanged
+- **AND** every selected target is validated before any stop or lifecycle-state write; requests use full observed IDs without name fallback, and final `stopped` status requires all selected stops to succeed.
 
 ### Requirement: Editor workspace engine operations select the local engine
 
-Editor workspace engine operations SHALL explicitly select the local Podman engine regardless of ambient remote-engine defaults. This includes runtime listing, readiness and identity inspection, image/volume operations, explicit builds, container start/run, SSH endpoint/key discovery and ordinary or failed-audit stops. Host paths and loopback SSH remain host-local inputs.
+Editor workspace Podman requests SHALL use `--remote=false` with `CONTAINER_HOST` and `CONTAINER_CONNECTION` absent from each child environment. This applies to listing, readiness/identity inspection, image/volume operations, explicit builds, start/run, SSH endpoint/key discovery and ordinary/failed-audit stops. Generic Git/SSH/editor subprocess environments, caller-specific failures, host-local paths and loopback SSH SHALL retain their existing policies.
 
 #### Scenario: Workspace listing under a remote default
 
@@ -53,13 +53,13 @@ Editor workspace engine operations SHALL explicitly select the local Podman engi
 
 ### Requirement: Local routing does not introduce remote fallback or global configuration changes
 
-The scoped workflows SHALL NOT retry a failed local Podman operation against a remote engine or change user engine connection configuration to achieve locality. This requirement does not replace each caller's existing error/output handling or govern direct user Podman commands and the workspace editor's intentional Remote SSH connection.
+The scoped workflows SHALL NOT retry a failed local Podman operation against a remote engine or rewrite user engine connection settings or parent/global environment defaults. Local routing SHALL preserve each caller's current failure contract, including snapshot unavailability refusal. Direct user Podman commands and the workspace editor's intentional Remote SSH connection remain outside this contract.
 
 #### Scenario: Local engine failure with a reachable remote default
 
 - **WHEN** a scoped local engine request fails while ambient configuration selects a remote engine
 - **THEN** the workflow does not issue a remote-engine retry
-- **AND** its existing failure/output policy remains in effect, including the legacy snapshot's documented empty-success limitation
+- **AND** unavailable managed-runtime observation returns nonzero with a diagnostic and no snapshot stdout, and dependent safety-sensitive actions refuse. Workspace runtime-listing failure retains its distinct unknown-state reporting.
 
 #### Scenario: Omarchy operation leaves the user's engine preference intact
 

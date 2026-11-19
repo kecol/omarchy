@@ -1,5 +1,7 @@
 # Design
 
+Historical routing-only checkpoint: this document records the original options-only implementation and its planning or verification scope. Baseline behavior, preservation instructions, status and approval statements refer to that checkpoint, not current delivery. The [current contract reconciliation](design.md#current-contract-reconciliation) identifies the later safeguards that must remain in effect. The original [outcome](outcome.md) remains historical evidence, not renewed qualification.
+
 ## Context
 
 See [proposal.md](proposal.md) for motivation and [managed-engine-selection](specs/managed-engine-selection/spec.md) for the proposed routing contract. This security-relevant change spans four owners, so it needs an explicit design despite the small argument edits.
@@ -59,3 +61,15 @@ Keep complete separate logs under `$HOME/Work/` and use the existing bounded tes
 No state migration, user configuration edit, image rebuild, connection conversion, live stop or activation is required to implement the source change. Deliver the four runtime edits coherently so observation and action do not temporarily use different routing policies. Update only the three existing fixture areas and relevant references/tracking after approved implementation.
 
 Rollback restores those four owners and their associated tests/documentation from the same pre-change revision, without resetting unrelated edits or changing workspace directories, volumes, keys, registry records, mode/defaults or user connection configuration. Rollback also restores the old ambient-routing weakness and must be reviewed as such. Do not move remotely created resources to the host or guess a recovery target. Publication, deployment and archival remain separately gated.
+
+## Current contract reconciliation
+
+Current scoped Podman requests retain `--remote=false` and exclude `CONTAINER_HOST` and `CONTAINER_CONNECTION` from their child environments. Parent/global defaults and generic Git/SSH/editor subprocess environments remain unchanged. This is not a complete engine-configuration sanitizer or engine-access denial.
+
+The [runtime-availability contract](../../specs/managed-runtime-availability/spec.md) supersedes the historical snapshot empty-success limitation. Unavailable required observation produces nonzero failure, a diagnostic and no snapshot stdout; dependent safety-sensitive actions refuse.
+
+The [stop-target-binding contract](../../specs/managed-stop-target-binding/spec.md) supersedes historical task/audit name targeting. Preserve full observed container IDs, complete-plan validation, ambiguity refusal, no name fallback and failure-aware finalization. This does not extend task/audit targeting requirements to workspace stops or change either controller’s existing stop grace/escalation policy.
+
+These safeguards were delivered by later changes, not the original routing patch. Their evidence remains separate from the original fixture results. This reconciliation runs no application tests and renews no native or graphical qualification.
+
+The historical rollback paragraph is not a current rollback recipe. Restoring pre-routing owners could also remove later safeguards. Any rollback requires separate review and approval. Specification synchronization, archive, publication and runtime actions remain separately gated.

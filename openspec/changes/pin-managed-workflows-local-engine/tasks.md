@@ -1,5 +1,7 @@
 # Tasks
 
+Historical routing-only checkpoint: this document records the original options-only implementation and its planning or verification scope. Baseline behavior, preservation instructions, status and approval statements refer to that checkpoint, not current delivery. The [current contract reconciliation](design.md#current-contract-reconciliation) identifies the later safeguards that must remain in effect. The original [outcome](outcome.md) remains historical evidence, not renewed qualification.
+
 Status: IMPLEMENTED SOURCE; all three tasks complete, source review accepted and atomic commit separately authorized. Not activated. The user's separate apply request covered the scoped fixture suites. All three suites passed once without skips (including 23 workspace Python methods); three disposable omission controls failed as intended. Final source-policy comparison, approved-file scope, document links/whitespace, protected-file hashes and strict OpenSpec validation passed. See `outcome.md` for evidence and limits. No live engine/agent/doctor/provider/GUI/VM actions ran; installation, activation, pushes and archiving remain excluded.
 
 ## 1. Pin host-local workflow engine selection
