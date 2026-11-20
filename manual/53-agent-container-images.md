@@ -8,7 +8,7 @@ An interactive `omarchy agent` launch in container mode shows the local image be
 
 If no local image exists, the menu offers **Prepare and run** and **Exit**. Preparation asks for confirmation (default Cancel), builds and checks the image, and starts that image only after success. See [first-run preparation](58-agent-container-preparation.md) for CLI preparation, prerequisites, and authentication limits.
 
-After a successful update, the menu shows the new version. Select **Run** to start it. Omarchy checks the executable/version and disposable runtime fixtures before changing the local `latest` tag. Pi, Codex, Claude Code, and OpenCode use the same backend with reviewed per-harness metadata. If building or validation fails, the previous image remains selected.
+After a successful update, the menu shows the new version. Select **Run** to start it. Omarchy checks the executable/version and disposable runtime fixtures before changing the local `latest` tag. Pi, Codex, Claude Code, OpenCode, and Oh My Pi (`omp`) use the same backend with reviewed per-harness metadata. If building or validation fails, the previous image remains selected.
 
 The `latest` tag means the most recently built and verified local image. It does not check the release server during each launch. The host Pi version and container Pi version can differ.
 
@@ -47,9 +47,12 @@ Build a specific version:
 
 ```bash
 omarchy harness build pi 1.4.0
+omarchy harness build omp 19.0.0
 ```
 
-Both commands verify the image before selecting it for future launches. Versioned tags remain available. When a different image replaces `latest`, the old image also receives the `previous` tag.
+Oh My Pi currently supports version 19.0.0 on x86. Specify this version when building its image.
+
+Build commands verify the image before selecting it for future launches. Versioned tags remain available. When a different image replaces `latest`, the old image also receives the `previous` tag.
 
 ## Restore the previous image
 

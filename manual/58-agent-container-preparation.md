@@ -2,7 +2,7 @@
 
 A fresh install needs no pre-existing agent image or running container. In Container mode, an interactive agent launch offers **Prepare and run** when its image is missing. Preparation uses a reviewed bundled recipe; it does not install the agent on the host.
 
-Pi, Codex, Claude Code (`claude`), and OpenCode (`opencode`) have bundled definitions and recipes. Other agents are not automatically given generated recipes. Unsupported Container defaults are rejected before saving or installing anything on the host. Selecting a supported default validates its recipe, not engine readiness or authentication.
+Pi, Codex, Claude Code (`claude`), OpenCode (`opencode`), and Oh My Pi (`omp`) have bundled definitions and recipes. Other agents are not automatically given generated recipes. Unsupported Container defaults are rejected before saving or installing anything on the host. Selecting a supported default validates its recipe, not engine readiness or authentication.
 
 ## Prepare without starting an agent
 
@@ -11,6 +11,7 @@ omarchy agent prepare --agent codex
 omarchy agent prepare --agent pi
 omarchy agent prepare --agent claude
 omarchy agent prepare --agent opencode
+omarchy agent prepare --agent omp --version=19.0.0
 ```
 
 An existing matching local image is reused without release lookup or rebuilding. Otherwise a confirmation, defaulting to Cancel, explains the download/build and disposable checks. No saved execution mode is changed.
@@ -63,8 +64,10 @@ omarchy agent --inline --container --agent codex --directory /path/to/project
 
 An inline project directory is a **read-write bind mount**, not a private clone. Use the Workspaces workflow for an independent editor workspace. Editor containers and their account stores are not reused for this harness.
 
-Claude Code and OpenCode are optional selections. For example, use `--agent claude` or `--agent opencode` in the launch command above. Selecting either does not change the saved default. Follow the selected agent's in-container sign-in instructions; a browser callback that needs port forwarding is not configured automatically.
+Claude Code, OpenCode, and Oh My Pi are optional selections. For example, use `--agent claude`, `--agent opencode`, or `--agent omp` in the launch command above. Selecting one does not change the saved default. Follow the selected agent's in-container sign-in instructions; a browser callback that needs port forwarding is not configured automatically.
 
 Authentication belongs to the agent's explicit in-container sign-in flow and persistent container home. Host sign-in state is not copied during preparation. No provider request is used as a readiness test, and failure never silently falls back to Host.
+
+Oh My Pi uses executable `omp` and a separate persistent container home, `omarchy-agent-omp-home`, for ordinary launches. Pi's home and saved sessions remain separate. Preparation does not copy credentials or migrate sessions between them.
 
 See [image selection and rollback](53-agent-container-images.md) for updates and previous-image recovery.

@@ -1,0 +1,6 @@
+{
+  "name": "omp",
+  "harness": "omp",
+  "runtime": "podman",
+  "command": ["omp"]
+}

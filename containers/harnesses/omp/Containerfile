@@ -1,0 +1,33 @@
+FROM docker.io/library/archlinux@sha256:d4594bb2300cba11f41c2f27923eb56f63d9988909c402f9c95517d1e362c899
+
+ARG OMP_VERSION=19.0.0
+ARG TARGETARCH
+ARG HARNESS_UID=1000
+ARG HARNESS_GID=1000
+
+# Pin upstream's standalone native release, not an installer or a host copy.
+# TARGETARCH uses OCI architecture names supplied by the builder.
+RUN test "$OMP_VERSION" = "19.0.0" \
+    && pacman -Syu --noconfirm --needed \
+      ca-certificates curl fd git jq openssh ripgrep \
+    && case "$TARGETARCH" in \
+      amd64) asset=omp-linux-x64; sha=c7cc5c8d505053c8ffaf180417e5d5c781235b9d936f286810560151120109bf ;; \
+      arm64) asset=omp-linux-arm64; sha=6301041309d9bb26c19576ab116d828dba9c74654507cfa3594d62d310864626 ;; \
+      *) echo "Unsupported OCI architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && install -d /opt/omp/bin \
+    && curl --fail --location --proto '=https' --proto-redir '=https' --retry 0 --max-time 300 \
+      "https://github.com/can1357/oh-my-pi/releases/download/v$OMP_VERSION/$asset" \
+      --output /opt/omp/bin/omp \
+    && printf '%s  %s\n' "$sha" /opt/omp/bin/omp | sha256sum --check --status \
+    && chmod 755 /opt/omp/bin/omp \
+    && ln -s /opt/omp/bin/omp /usr/local/bin/omp \
+    && groupadd --gid "$HARNESS_GID" agent \
+    && useradd --uid "$HARNESS_UID" --gid "$HARNESS_GID" --create-home --shell /bin/bash agent \
+    && install -d -o agent -g agent /workspace \
+    && rm -rf /var/cache/pacman/pkg/* /var/lib/pacman/sync/*
+
+ENV HOME=/home/agent
+USER agent
+WORKDIR /workspace
+ENTRYPOINT ["omp"]
