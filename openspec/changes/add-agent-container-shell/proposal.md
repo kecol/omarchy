@@ -15,11 +15,11 @@ Users need an independent maintenance terminal in a running agent container with
 
 ### Observed behavior and agreed direction
 
-`default/agents/session-menu.py` currently supports attachment and explicit closure, not a second shell. `default/agents/sessions.py` already supplies current-user inventory, UUID-prefix selection and process/container fingerprints. `bin/omarchy-agent-run-podman` uses the harness as the entrypoint and enables automatic container removal. The agreed first deliverable extends terminal access only; it does not replace this lifecycle.
+At proposal time, `default/agents/session-menu.py` supported attachment and explicit closure, not a second shell. `default/agents/sessions.py` already supplied current-user inventory, UUID-prefix selection and process/container fingerprints. `bin/omarchy-agent-run-podman` uses the harness as the entrypoint and enables automatic container removal. The delivered shell action extends terminal access only; it does not replace this lifecycle. See [outcome.md](outcome.md) for the implemented behavior, scoped verification and source activation.
 
 ### Non-goals and unverified assumptions
 
-Herdr, SSH, persistent container owners, restart/resume, conversation sharing, extension installation, image builds, credential transfer, arbitrary command execution options and changes to task execution are excluded. Host agents, editor workspace containers and remote engines are not shell-picker targets. Bash exists in the bundled recipes; compatibility with arbitrary custom images and real terminal execution remains unverified. Missing Bash must fail without installation or fallback.
+Herdr, SSH, persistent container owners, restart/resume, conversation sharing, extension installation, image builds, credential transfer, arbitrary command execution options and changes to task execution are excluded. Host agents, editor workspace containers and remote engines are not shell-picker targets. Bash exists in the bundled recipes. Real terminal execution was subsequently verified within the bounded local x86 scope recorded in [outcome.md](outcome.md); compatibility with arbitrary custom images, other platforms and untested terminal configurations remains unverified. Missing Bash must fail without installation or fallback.
 
 ## Capabilities
 

@@ -2,9 +2,9 @@
 
 ## Status
 
-IMPLEMENTED SOURCE IN AN INACTIVE CANDIDATE. Focused offline checks passed. The planned native and terminal-visual scope is verified across attempts 03, 04 and 05, with the limits below. Attempts 01–04 remain failed at their original verifier/setup errors; attempt 05 completed its remaining scope and its captures were inspected. Final source review and a local commit are approved. The feature is not activated, published, merged, synchronized to main specs or archived.
+IMPLEMENTED, PUBLISHED, MERGED AND SOURCE-ACTIVE at `db9ba29a434bd21f0d183ed7b972a0d96aabd63c`. Focused offline checks passed. The planned native and terminal-visual scope is verified across attempts 03, 04 and 05, with the limits below. Attempts 01–04 remain failed at their original verifier/setup errors; attempt 05 completed its remaining scope and its captures were inspected. Publication, CI, merge and activation results are recorded separately below, including the failed publication attempt, merge-preflight control error and failed activation permission postflight. Main-spec synchronization and archive have not occurred.
 
-The source candidate is `$HOME/Projects/omarchy-agent-container-shell`, branch `feature/agent-container-shell`, based on `1f879a93f309b8742d83145b9a0321cdd2d9c76a`. The reviewed change artifacts accompany the inactive candidate. The active checkout retains matching untracked copies until separately approved integration. Pending `AGENTS.md` and `docs/project-goals.md` edits remain outside the implementation.
+Implementation was prepared in the inactive candidate `$HOME/Projects/omarchy-agent-container-shell`, branch `feature/agent-container-shell`, based on `1f879a93f309b8742d83145b9a0321cdd2d9c76a`, then committed as `9eae668dd7aed58bc021370505ecd7b0f552a379`. The active checkout now tracks the reviewed change artifacts. Their seven original planning files remain preserved in a private backup. Pending `AGENTS.md` and `docs/project-goals.md` edits remain local and outside this delivery.
 
 ## Implemented behavior
 
@@ -25,7 +25,7 @@ Logs are local under `/tmp/omarchy-agent-container-shell-checks/`; they are not 
 - `base-negative.log`: the new help-route test was run once against the unchanged active base and failed because it resolved to parent agent help rather than `omarchy-agent-shell`. This is an expected negative control, not an unexplained application failure or a full base-suite run.
 - `source-review.log`: abstract syntax comparison confirmed that `attach`, `verify_attach`, `close_selected` and `choose` are unchanged. Shared terminal-guard/error wording changes only make diagnostics action-neutral. `sessions.py`, `status.py` and `omarchy-agent-run-podman` match the base bytes.
 
-During the implementation and offline-check stage, no native shell, provider, account, live inventory or graphical action occurred. Subsequent native attempts are recorded separately below. No full CLI/theme suite, aggregate shell suite or CI run was performed. The scope does not change shared desktop components or the test runners.
+During the implementation and offline-check stage, no native shell, provider, account, live inventory or graphical action occurred. Subsequent native attempts are recorded separately below. No full CLI/theme suite or aggregate shell suite was run locally. Later CI results are recorded in the delivery section below. The scope does not change shared desktop components or the test runners.
 
 ## Source binding
 
@@ -87,10 +87,40 @@ Both fixture containers, both fresh home volumes and both synthetic project dire
 
 Private evidence is at `$HOME/Work/omarchy-agent-container-shell-native-05/`. `RESULT.json` retains the original successful controller outcome with visual review pending at capture time. `VERIFIED.json` records the subsequent inspected captures, combined coverage and unchanged five-file source binding. `SHA256SUMS.json` is a self-excluding evidence manifest. Original attempt receipts were not rewritten to claim later success.
 
+## Publication and CI review
+
+Local commit `9eae668dd7aed58bc021370505ecd7b0f552a379` contains the five implementation files and seven change artifacts. The final source review found no blocking issue in that scope. Tested implementation hashes matched, strict OpenSpec validation passed, and private runtime evidence and pending goal-document edits were excluded. No application or native test was repeated during commit preparation.
+
+Publication attempt 01 failed with Git exit status 128 because the isolated invocation could not obtain an HTTPS username. No feature branch or PR was created, and no CI run started. The original attempt remains failed. After renewed approval, attempt 02 supplied GitHub CLI's credential helper for that push only, without changing persistent Git configuration, and opened [PR23](https://github.com/kecol/omarchy/pull/23) against `quattro` at the exact reviewed commit.
+
+[Tests 44917255058](https://github.com/kecol/omarchy/actions/runs/44917255058) passed for that feature head: CLI/theme and aggregate shell checks completed 454 test files without failures; eight files contained skipped checks. The downloaded session-menu log confirms all 34 methods passed without skips. [Translation checks 44917255103](https://github.com/kecol/omarchy/actions/runs/44917255103) also passed for the same head. These CI results are regression evidence, not additional native Podman or graphical acceptance qualification.
+
+The skip-bearing files were `agent-model-recovery-native-test.sh`, `agent-openshell-native-tools-test.sh`, `brightness-display-apple-cache-test.sh`, `fontconfig-cjk-test.sh`, `hw-match-device-tree-test.sh`, `i18n-test.sh`, `kitty-config-test.sh` and `panel-open-budgets-test.sh`, all under `test/shell.d/`. A passing file with skipped checks does not qualify those skipped cases. No manual CI retry or dispatch occurred.
+
+Private receipts remain under `$HOME/Work/omarchy-agent-container-shell-commit-01/`, `$HOME/Work/omarchy-agent-container-shell-publication-01/` and `$HOME/Work/omarchy-agent-container-shell-publication-02/`. Raw native records and screenshots were not uploaded.
+
+## Merge and retained preflight control error
+
+After separate merge approval, GitHub merged PR23 as `db9ba29a434bd21f0d183ed7b972a0d96aabd63c`, with parents `1f879a93f309b8742d83145b9a0321cdd2d9c76a` and `9eae668dd7aed58bc021370505ecd7b0f552a379`. The initial textual diff-comparison assertion failed because GitHub and local Git supplied different informational hunk-header function labels. The command sequence lacked failure stopping after that assertion and incorrectly continued to the authorized merge. This is a failed preflight and an assistant command-control error, not a successful admission check or a product defect.
+
+Mutation stopped after detection. Independent read-only checks confirmed the expected parents and exact identity between the merged tree and the reviewed feature tree. These checks do not reclassify the original preflight as passed. No rollback, merge retry, source change or activation occurred during that follow-up. The existing active source, goal-document metadata, planning copies, modes and unrelated worktree indexes remained preserved.
+
+The automatic [post-merge Tests 44918793323](https://github.com/kecol/omarchy/actions/runs/44918793323) passed at the exact merge: 454 test files completed without failures; eight files contained skipped checks. No CI retry occurred. Private merge, incident, tree-verification and CI receipts remain under `$HOME/Work/omarchy-agent-container-shell-merge-01/`.
+
+## Source activation and permission correction
+
+After separate source-activation approval, the existing dev-linked `quattro` checkout fast-forwarded from the base to the reviewed merge. Before checkout, the seven byte-identical untracked planning files were moved to a private backup so that incoming tracked files could take their place. Goal-document edits were not moved or stashed. No merge commit, image build, package operation, migration, refresh or restart was needed.
+
+Activation attempt 01 completed the fast-forward but failed its permission postflight. The private-evidence umask `077` was inherited by Git checkout: four replaced tracked files and seven incoming planning files became `0600`, the new command became `0700`, and three incoming planning directories became `0700`. Source bytes still matched the reviewed commit. The original attempt remains failed; correction did not proceed automatically.
+
+After renewed approval, attempt 02 restored permissions only on those twelve files and three directories: regular documents and Python files to `0644`, the command to `0755`, and the three planning directories to their original `0755`. Postflight verified all 5,559 preexisting tracked-file modes, 22 other worktree indexes, unrelated active-index entries, pending goal-document metadata, planning contents/modes/owners, and the unchanged tested implementation bytes. The original planning files remain intact under `$HOME/Work/omarchy-agent-container-shell-activation-01/planning-backup/`.
+
+The active `omarchy agent shell --help` route passed without inventory or container execution. Activation did not enter a container, launch a provider, restart an agent or repeat application/native tests. Subsequent invocations use the activated source; this is not a new native or graphical qualification. Private failure and correction receipts remain under `$HOME/Work/omarchy-agent-container-shell-activation-01/` and `$HOME/Work/omarchy-agent-container-shell-activation-02/`.
+
 ## Remaining gates and limitations
 
 [verification-plan.md](verification-plan.md) now records completed bounded checks, not standing permission to execute again. Core native cases came from attempt 03, the replacement and fault-injection cases from attempt 04, and graphical/main-process-exit cases from attempt 05. Inventory was scoped by a private adapter to nonce-labeled synthetic fixtures; the metadata failure was injected, not a real engine outage. The containers used a finite Bash wait process rather than an agent/provider. This is local x86 image and fullscreen-terminal evidence, not qualification of every image, platform, custom shell configuration or narrow terminal. No additional application test or runtime retry follows from this closeout.
 
 Fresh validation plus full-ID execution prevents name-based replacement targeting but is not atomic against every same-ID restart race. Labels and current-user identity are not authenticated ownership against another process with the same host-user authority. The shell shares the harness's existing files, home, credentials and limits. Bash startup code may execute. Harness exit still stops the container and its shells.
 
-Herdr, persistent container owners, conversation sharing and concurrent conversation-writer policy remain deferred to later exploration. Final source review found no blocking issue in the scoped change. Local commit approval does not authorize publication, active integration or archive. No application or native tests were repeated for this unchanged implementation during commit preparation. Do not activate merely to make the new command available for testing.
+Herdr, persistent container owners, conversation sharing and concurrent conversation-writer policy remain deferred to later exploration. Source delivery and activation are complete within the recorded scope. The documentation-only closeout reconciliation is a separate local, uncommitted and unpublished update. Main-spec synchronization and archive still require separate approval. Reconciliation does not renew native verification, erase failed attempts or authorize further runtime actions.

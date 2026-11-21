@@ -2,7 +2,7 @@
 
 ## Context
 
-See [proposal.md](proposal.md) for motivation and scope. This design is warranted because an additional container-execution action crosses identity, engine-selection and terminal boundaries.
+See [proposal.md](proposal.md) for motivation and scope. This design is warranted because an additional container-execution action crosses identity, engine-selection and terminal boundaries. It records the reviewed implementation plan and its pre-implementation context; prospective wording below does not describe current delivery status. See [outcome.md](outcome.md) for publication, CI, merge, source activation, retained failures and qualification limits.
 
 `default/agents/session-menu.py` owns the current terminal picker, attachment and close menus. It uses `sessions.inventory(..., diagnostics=False)`, `sessions.select()` and `sessions.fingerprint()` from `default/agents/sessions.py`. Inventory validates local rootless engine state, container labels/names, current-user init process ownership/start time and PID/mount namespaces. The fingerprint includes instance, agent, full container ID, name, init PID, boot ID, start ticks and namespaces.
 
