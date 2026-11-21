@@ -1,0 +1,7 @@
+#!/bin/bash
+
+# omarchy:summary=Open an independent shell in one verified running agent container
+# omarchy:args=[instance-uuid-or-prefix] [--check]
+# omarchy:examples=omarchy agent shell | omarchy agent shell 568a857f --check
+
+exec python3 -I -B "$OMARCHY_PATH/default/agents/session-menu.py" shell "$@"

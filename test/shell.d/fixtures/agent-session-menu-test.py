@@ -2,6 +2,8 @@ import contextlib
 import importlib.util
 import io
 import os
+import json
+import signal
 from pathlib import Path
 import subprocess
 import unittest
@@ -38,6 +40,7 @@ class MenuTests(unittest.TestCase):
     p = patch.object(m, 'terminal_required')
     self.terminal = p.start(); self.addCleanup(p.stop)
     self.capabilities = '20\ttrue\ttrue\ttrue'
+    self.shell_metadata = json.dumps('a'*64)+'\t20\ttrue'
     self.stdout = io.StringIO()
     p = contextlib.redirect_stdout(self.stdout)
     p.__enter__(); self.addCleanup(p.__exit__, None, None, None)
@@ -45,9 +48,12 @@ class MenuTests(unittest.TestCase):
     self.assertEqual(args[:3], ['podman', '--remote=false', 'inspect'])
     self.assertEqual(args[-1], self.row['container_id'])
     self.assertNotIn('Env', args[4]); self.assertNotIn('Mount', args[4])
+    if '{{json .ID}}' in args[4]:
+      self.assertNotIn('Tty', args[4]); self.assertNotIn('OpenStdin', args[4])
+      return self.shell_metadata
     return self.capabilities
   def label(self):
-    return 'codex | '+self.row['instance'][:8]+' | PID 20 | /fixture/project'
+    return 'codex | '+self.row['instance'][:8]+' | PID 20 | /fixture/project | 2026-10-26'
   def test_actual_terminal_guard_requires_foreground_controlling_terminal(self):
     class Tty:
       def isatty(self): return True
@@ -139,6 +145,169 @@ class MenuTests(unittest.TestCase):
     with patch.object(m.sessions, 'inventory', side_effect=m.Unavailable('unavailable')), patch.object(m, 'choose') as choose:
       with self.assertRaises(m.Unavailable): m.menu(self.proc)
       choose.assert_not_called()
+  def test_shell_exec_inherits_terminal_and_only_removes_child_remote_selectors(self):
+    previous = signal.getsignal(signal.SIGINT)
+    with patch.dict(os.environ, {'CONTAINER_HOST': 'unix:///fixture/remote', 'CONTAINER_CONNECTION': 'fixture'}), \
+      patch.object(m.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)) as run:
+      self.assertEqual(m.open_shell(self.row, self.proc), 0)
+      self.assertEqual(run.call_args.args[0], ['podman', '--remote=false', 'exec', '--interactive', '--tty',
+        'a'*64, '/bin/bash', '-i'])
+      self.assertEqual(set(run.call_args.kwargs), {'env', 'check'})
+      self.assertFalse(run.call_args.kwargs['check'])
+      self.assertEqual(run.call_args.kwargs['env'], {key: value for key, value in os.environ.items()
+        if key not in ('CONTAINER_HOST', 'CONTAINER_CONNECTION')})
+      self.assertEqual(os.environ['CONTAINER_CONNECTION'], 'fixture')
+      self.assertEqual(os.environ['CONTAINER_HOST'], 'unix:///fixture/remote')
+    self.assertEqual(signal.getsignal(signal.SIGINT), previous)
+    self.assertIn('concurrent writes', self.stdout.getvalue())
+
+  def test_shell_check_does_not_execute_or_require_terminal(self):
+    with patch.object(m.subprocess, 'run') as run:
+      self.assertEqual(m.open_shell(self.row, self.proc, check=True), 0)
+      run.assert_not_called()
+    self.terminal.assert_not_called()
+    self.assertIn('Bash availability was not checked', self.stdout.getvalue())
+
+  def test_shell_refuses_replacement_or_missing_instance_without_exec(self):
+    before = dict(self.row)
+    for rows in ([], [{**self.row, 'container_id': 'b'*64}], [self.row, self.row]):
+      with self.subTest(rows=rows), patch.object(m.sessions, 'inventory', return_value=rows), \
+        patch.object(m.subprocess, 'run') as run:
+        with self.assertRaises(m.Unavailable): m.open_shell(before, self.proc)
+        run.assert_not_called()
+
+  def test_shell_requires_full_id_and_valid_running_metadata(self):
+    for cid, data in (('a'*12, self.shell_metadata), ('a'*64, 'unsupported'),
+      ('a'*64, json.dumps('b'*64)+'\t20\ttrue'), ('a'*64, json.dumps('a'*64)+'\t21\ttrue'),
+      ('a'*64, json.dumps('a'*64)+'\t20\tfalse'), ('a'*64, json.dumps('a'*64)+'\ttrue\ttrue')):
+      with self.subTest(cid=cid, data=data), patch.object(m.subprocess, 'run') as run:
+        self.row['container_id'] = cid
+        self.shell_metadata = data
+        with self.assertRaises(m.Unavailable): m.open_shell(self.row, self.proc)
+        run.assert_not_called()
+
+  def test_shell_rechecks_process_start_namespaces_and_boot(self):
+    for method, value in (('identity', lambda pid: {'start_ticks': 101}),
+      ('namespace', lambda pid: ('changed', 'changed')), ('boot_id', 'changed-boot')):
+      with self.subTest(method=method), patch.object(self.proc, method, value), \
+        patch.object(m.subprocess, 'run') as run:
+        with self.assertRaises(m.Unavailable): m.open_shell(self.row, self.proc)
+        run.assert_not_called()
+
+  def test_shell_does_not_require_init_tty_or_open_stdin(self):
+    self.capabilities = '20\ttrue\tfalse\tfalse'
+    with patch.object(m.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)) as run:
+      self.assertEqual(m.open_shell(self.row, self.proc), 0)
+      self.assertEqual(run.call_count, 1)
+      with self.assertRaises(m.Unavailable): m.attach(self.row, self.proc)
+      self.assertEqual(run.call_count, 1)
+
+  def test_shell_unavailable_inventory_or_terminal_never_executes(self):
+    with patch.object(m.sessions, 'inventory', side_effect=m.Unavailable('unavailable')), \
+      patch.object(m.subprocess, 'run') as run:
+      with self.assertRaises(m.Unavailable): m.open_shell(self.row, self.proc)
+      run.assert_not_called()
+    self.terminal.side_effect = m.Unavailable('no terminal')
+    with patch.object(m.subprocess, 'run') as run:
+      with self.assertRaises(m.Unavailable): m.open_shell(self.row, self.proc)
+      run.assert_not_called()
+
+  def test_shell_failure_is_returned_once_and_signal_handler_restored(self):
+    previous = signal.getsignal(signal.SIGINT)
+    def result(*args, **kwargs):
+      signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
+      return subprocess.CompletedProcess([], 127)
+    with patch.object(m.subprocess, 'run', side_effect=result) as run:
+      self.assertEqual(m.open_shell(self.row, self.proc), 127)
+      self.assertEqual(run.call_count, 1)
+    self.assertEqual(signal.getsignal(signal.SIGINT), previous)
+    with patch.object(m.subprocess, 'run', side_effect=OSError('exec unavailable')) as run:
+      with self.assertRaises(OSError): m.open_shell(self.row, self.proc)
+      self.assertEqual(run.call_count, 1)
+    self.assertEqual(signal.getsignal(signal.SIGINT), previous)
+
+  def test_shell_cli_check_routes_prefix_without_execution(self):
+    with patch.object(m.sys, 'argv', ['session-menu.py', 'shell', '11111111', '--check']), \
+      patch.object(m.sessions.status, 'Proc', return_value=self.proc), patch.object(m.subprocess, 'run') as run:
+      self.assertEqual(m.main(), 0)
+      run.assert_not_called()
+    self.terminal.assert_not_called()
+
+  def test_shell_cli_without_selector_opens_shell_picker(self):
+    with patch.object(m.sys, 'argv', ['session-menu.py', 'shell']), \
+      patch.object(m.sessions.status, 'Proc', return_value=self.proc), patch.object(m, 'menu', return_value=0) as menu:
+      self.assertEqual(m.main(), 0)
+      menu.assert_called_once_with(self.proc, shell_only=True)
+
+  def test_shell_check_requires_selector_before_inventory(self):
+    with patch.object(m.sys, 'argv', ['session-menu.py', 'shell', '--check']), \
+      patch.object(m.sessions, 'inventory') as inventory, contextlib.redirect_stderr(io.StringIO()):
+      with self.assertRaises(SystemExit) as error: m.main()
+      self.assertEqual(error.exception.code, 2)
+      inventory.assert_not_called()
+
+  def test_shell_cli_refuses_invalid_or_ambiguous_selectors(self):
+    for selector, rows in (('codex', [self.row]), ('11111111', [self.row, self.row]), ('99999999', [self.row])):
+      with self.subTest(selector=selector), patch.object(m.sys, 'argv', ['session-menu.py', 'shell', selector, '--check']), \
+        patch.object(m.sessions.status, 'Proc', return_value=self.proc), \
+        patch.object(m.sessions, 'inventory', return_value=rows), patch.object(m.subprocess, 'run') as run:
+        with self.assertRaises(m.Unavailable): m.main()
+        run.assert_not_called()
+
+  def test_sessions_shell_returns_to_selected_actions_without_close(self):
+    with patch.object(m, 'choose', side_effect=[self.label(), 'Open shell', 'Back', 'Exit']) as choose, \
+      patch.object(m, 'open_shell', return_value=0) as shell, patch.object(m, 'close_selected') as close:
+      self.assertEqual(m.menu(self.proc), 0)
+      shell.assert_called_once_with(self.row, self.proc)
+      close.assert_not_called()
+      self.assertEqual(choose.call_args_list[1].args[1][0], 'Back')
+      self.assertIn('Attach existing harness', choose.call_args_list[1].args[1])
+
+  def test_shell_picker_distinguishes_projects_and_retains_selected_identity(self):
+    other = {**self.row, 'instance': '99999999-2222-4333-8444-555555555555',
+      'container_id': 'b'*64, 'started_at': '2026-10-27',
+      'project': {**self.row['project'], 'host_path': '/fixture/other-project'}}
+    def pick(header, choices):
+      if choices[0] == 'Exit':
+        self.assertIn('/fixture/project', choices[-2])
+        self.assertIn('2026-10-26', choices[-2])
+        self.assertIn('/fixture/other-project', choices[-1])
+        self.assertIn('2026-10-27', choices[-1])
+        return choices[-1]
+      self.assertEqual(choices, ['Back', 'Open shell'])
+      return 'Open shell'
+    with patch.object(m.sessions, 'inventory', return_value=[self.row, other]), \
+      patch.object(m, 'choose') as choose, \
+      patch.object(m, 'open_shell', return_value=0) as shell, patch.object(m, 'close_selected') as close:
+      responses = iter([pick, pick, lambda *_: 'Back', lambda *_: 'Exit'])
+      choose.side_effect = lambda header, choices: next(responses)(header, choices)
+      self.assertEqual(m.menu(self.proc, shell_only=True), 0)
+      shell.assert_called_once_with(other, self.proc)
+      close.assert_not_called()
+
+  def test_shell_picker_cancellation_never_executes(self):
+    for response in (None, 'Exit'):
+      with self.subTest(response=response), patch.object(m, 'choose', return_value=response), \
+        patch.object(m, 'open_shell') as shell, patch.object(m, 'close_selected') as close:
+        self.assertEqual(m.menu(self.proc, shell_only=True), 0)
+        shell.assert_not_called(); close.assert_not_called()
+
+  def test_menu_shell_failure_does_not_retry_or_close(self):
+    with patch.object(m, 'choose', side_effect=[self.label(), 'Open shell', 'Back', 'Exit']), \
+      patch.object(m, 'open_shell', return_value=127) as shell, patch.object(m, 'close_selected') as close, \
+      patch('builtins.input', return_value=''):
+      self.assertEqual(m.menu(self.proc, shell_only=True), 0)
+      shell.assert_called_once_with(self.row, self.proc)
+      close.assert_not_called()
+
+  def test_shell_command_help_routes_without_execution(self):
+    env = {**os.environ, 'OMARCHY_PATH': str(ROOT), 'OMARCHY_LANGUAGE_FILE': str(ROOT/'test/.no-language')}
+    result = subprocess.run([str(ROOT/'bin/omarchy'), 'agent', 'shell', '--help'],
+      env=env, capture_output=True, text=True, timeout=10)
+    self.assertEqual(result.returncode, 0, result.stderr)
+    self.assertIn('omarchy-agent-shell', result.stdout)
+    self.assertIn('[instance-uuid-or-prefix] [--check]', result.stdout)
+
   def test_unknown_menu_result_is_rejected(self):
     with patch.object(m.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, stdout='untrusted\n')):
       with self.assertRaises(m.Unavailable): m.choose('fixture', ['Exit'])

@@ -3,6 +3,7 @@ import argparse
 import importlib.util
 from pathlib import Path
 import re
+import signal
 import subprocess
 import sys
 import json
@@ -16,13 +17,13 @@ Unavailable = sessions.status.Unavailable
 
 def terminal_required():
   if not all(stream.isatty() for stream in (sys.stdin, sys.stdout, sys.stderr)):
-    raise Unavailable('Run this command in an interactive host terminal; no attachment was attempted')
+    raise Unavailable('Run this command in an interactive host terminal; no terminal access was attempted')
   try:
     foreground = os.tcgetpgrp(sys.stdin.fileno()) == os.getpgrp()
   except OSError:
     foreground = False
   if not foreground:
-    raise Unavailable('A foreground controlling terminal is required for reliable detach keys; no attachment was attempted')
+    raise Unavailable('A foreground controlling terminal is required; no terminal access was attempted')
 
 
 def screen():
@@ -83,6 +84,56 @@ def attach(before, proc, check=False):
   return result.returncode
 
 
+def verify_shell(before, proc):
+  query = sessions.status.Query()
+  current = sessions.select(sessions.inventory(query, proc, diagnostics=False), before['instance'])
+  if sessions.fingerprint(current) != sessions.fingerprint(before):
+    raise Unavailable('Selected instance changed; refresh before opening a shell')
+  cid = current['container_id']
+  if not re.fullmatch(r'[a-f0-9]{64}', cid):
+    raise Unavailable('A full immutable container ID is required')
+  template = '\t'.join(('{{json .ID}}', '{{json .State.Pid}}', '{{json .State.Running}}'))
+  data = query(['podman', '--remote=false', 'inspect', '--format', template, cid], json_output=False)
+  try:
+    observed_id, pid, running = [json.loads(field) for field in data.strip().split('\t')]
+  except (ValueError, TypeError):
+    raise Unavailable('Shell target metadata unavailable; no shell was requested') from None
+  if observed_id != cid or type(pid) is not int or pid != current['pid'] or running is not True:
+    raise Unavailable('Shell target is no longer the verified running instance')
+  if (proc.boot_id != current['identity']['boot_id']
+      or proc.identity(pid)['start_ticks'] != current['identity']['start_ticks']
+      or proc.namespace(pid) != tuple(current['namespaces'])):
+    raise Unavailable('Instance identity changed before shell execution')
+  return current
+
+
+def open_shell(before, proc, check=False):
+  if not check:
+    terminal_required()
+  current = verify_shell(before, proc)
+  if check:
+    print('Shell target verified: '+current['instance']+'; Bash availability was not checked; no command executed.')
+    return 0
+  details(current)
+  print('\nOpen an independent shell in this EXISTING container, not the harness terminal.')
+  print('Project files and the container home are shared with the harness; concurrent writes can conflict.')
+  print('Container Bash startup files may run. This is not read-only access.')
+  print('Use exit or Ctrl+D to leave the shell. Harness exit still stops the container and its shells.', flush=True)
+  env = dict(os.environ)
+  for name in ('CONTAINER_HOST', 'CONTAINER_CONNECTION'):
+    env.pop(name, None)
+  # Keep Ctrl+C from unwinding this waiting controller. The exec child receives
+  # normal terminal signals; caught handlers reset on exec, unlike SIG_IGN.
+  previous = signal.signal(signal.SIGINT, lambda *_: None)
+  try:
+    result = subprocess.run(['podman', '--remote=false', 'exec', '--interactive', '--tty',
+      current['container_id'], '/bin/bash', '-i'], env=env, check=False)
+  finally:
+    signal.signal(signal.SIGINT, previous)
+  print('\nShell ended (exit '+str(result.returncode)+'). No container stop or restart was requested.', flush=True)
+  return result.returncode
+
+
 def choose(header, choices):
   result = subprocess.run(['gum', 'choose', '--header', header, '--', *choices],
     stdout=subprocess.PIPE, text=True, check=False)
@@ -112,7 +163,7 @@ def close_selected(before, proc, force):
   return True
 
 
-def menu(proc):
+def menu(proc, shell_only=False):
   terminal_required()
   while True:
     screen()
@@ -122,7 +173,8 @@ def menu(proc):
       directory = sessions.status.display(row['project']['host_path'])
       if len(directory) > 48:
         directory = '…'+directory[-47:]
-      label = row['agent'][:16]+' | '+row['instance'][:8]+' | PID '+str(row['pid'])+' | '+directory
+      label = (row['agent'][:16]+' | '+row['instance'][:8]+' | PID '+str(row['pid'])+' | '+directory
+        +' | '+sessions.status.display(row['started_at']))
       if label in labels:
         raise Unavailable('Ambiguous instance list; no action attempted')
       labels[label] = row
@@ -137,14 +189,18 @@ def menu(proc):
     while True:
       screen()
       details(before)
-      action = choose('Exact selected instance — attach shares input; closing can discard work',
-        ['Back', 'Attach existing harness', 'Close (10-second grace)', 'Force close'])
+      actions = (['Back', 'Open shell'] if shell_only else
+        ['Back', 'Attach existing harness', 'Open shell', 'Close (10-second grace)', 'Force close'])
+      action = choose('Exact selected instance — shell shares files; attach shares input; close can discard work', actions)
       if action in (None, 'Back'):
         break
       try:
         if action == 'Attach existing harness':
           if attach(before, proc):
             input('Attachment did not confirm success. Press Enter to return to the selected instance. ')
+        elif action == 'Open shell':
+          if open_shell(before, proc):
+            input('Shell did not confirm success. Press Enter to return to the selected instance. ')
         elif action in ('Close (10-second grace)', 'Force close'):
           if close_selected(before, proc, action == 'Force close'):
             break
@@ -161,13 +217,22 @@ def main():
   command = sub.add_parser('attach')
   command.add_argument('instance')
   command.add_argument('--check', action='store_true', help='Validate the target without opening its terminal stream')
+  command = sub.add_parser('shell')
+  command.add_argument('instance', nargs='?')
+  command.add_argument('--check', action='store_true', help='Validate target metadata only; do not execute Bash')
   args = parser.parse_args()
+  if args.operation == 'shell' and args.check and args.instance is None:
+    parser.error('shell --check requires an instance UUID or prefix')
   proc = sessions.status.Proc()
   if args.operation == 'menu':
     return menu(proc)
+  if args.operation == 'shell' and args.instance is None:
+    return menu(proc, shell_only=True)
   if not args.check:
     terminal_required()
   before = sessions.select(sessions.inventory(sessions.status.Query(), proc, diagnostics=False), args.instance)
+  if args.operation == 'shell':
+    return open_shell(before, proc, args.check)
   return attach(before, proc, args.check)
 
 
@@ -177,4 +242,4 @@ if __name__ == '__main__':
   except Unavailable as error:
     sys.exit(str(error))
   except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
-    sys.exit('Harness attachment unavailable. No new agent, automatic restart, or broader retry was attempted.')
+    sys.exit('Harness terminal access unavailable. No new agent, automatic restart, or broader retry was attempted.')
