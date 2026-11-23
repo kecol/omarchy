@@ -6,6 +6,84 @@ source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/base-test.sh"
 require_command python3
 require_command jq
 
+# Both direct and aggregate runs need private process inventory. Never skip or
+# fall back to the host: unknown-home refusal in the real scanner stays intact.
+source_files=(
+  test/shell.d/agent-account-copy-test.sh
+  test/shell.d/base-test.sh
+  bin/omarchy-agent-account-copy
+  bin/omarchy-agent-account-transfer
+  bin/omarchy-agent-account-state
+)
+if [[ -n ${OMARCHY_TEST_ACCOUNT_COPY_ISOLATED:-} ]]; then
+  [[ $OMARCHY_TEST_ACCOUNT_COPY_ISOLATED == "1" ]] || fail "account-copy fixture isolation marker is valid"
+  # A marker selects verification, not permission to run the body. Compare
+  # kernel namespaces with the outer observations before any account operation.
+  /usr/bin/python3 -I -B - "${source_files[@]}" <<'PYISOLATION'
+import os
+import re
+import sys
+from pathlib import Path
+
+def require(condition, message):
+  if not condition:
+    raise RuntimeError(message)
+
+try:
+  for kind, key in (("pid", "PID"), ("mnt", "MNT"), ("net", "NET")):
+    outer = os.environ["OMARCHY_TEST_ACCOUNT_COPY_OUTER_" + key]
+    current = os.readlink("/proc/self/ns/" + kind)
+    require(re.fullmatch(kind + r":\[\d+\]", outer), "missing or invalid outer namespace observation")
+    require(current != outer, kind + " namespace is not private")
+  require(os.readlink("/proc/1/ns/pid") == os.readlink("/proc/self/ns/pid"), "/proc does not match the private PID namespace")
+  mounts = [line.split(" - ", 1) for line in Path("/proc/self/mountinfo").read_text().splitlines()]
+  require(any(left.split()[4] == "/proc" and right.split()[0] == "proc" for left, right in mounts), "private /proc is not mounted")
+  require(os.environ["ROOT"] == "/src" and os.environ["OMARCHY_PATH"] == "/src", "source root is not the isolated checkout")
+  for path in (Path("/src"), *(Path("/src") / name for name in sys.argv[1:])):
+    require(os.statvfs(path).f_flag & os.ST_RDONLY, "source binding is not read-only")
+  require(os.environ["HOME"] == "/scratch/home" and os.environ["TMPDIR"] == "/tmp", "scratch environment is invalid")
+  require(not Path("/home").exists() and not Path("/run/user").exists(), "host home or session runtime is exposed")
+except (KeyError, OSError, RuntimeError) as error:
+  sys.exit("account-copy fixture isolation verification failed: " + str(error))
+PYISOLATION
+  unset OMARCHY_TEST_ACCOUNT_COPY_ISOLATED OMARCHY_TEST_ACCOUNT_COPY_OUTER_PID OMARCHY_TEST_ACCOUNT_COPY_OUTER_MNT OMARCHY_TEST_ACCOUNT_COPY_OUTER_NET
+else
+  require_command bwrap
+  require_command timeout
+  require_command readlink
+  require_command env
+  outer_pid=$(readlink /proc/self/ns/pid)
+  outer_mnt=$(readlink /proc/self/ns/mnt)
+  outer_net=$(readlink /proc/self/ns/net)
+  sandbox=(
+    /usr/bin/bwrap --unshare-all --die-with-parent --new-session --cap-drop ALL
+    --ro-bind /usr /usr
+    --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib /lib64
+    --dir /etc --ro-bind /etc/ld.so.cache /etc/ld.so.cache
+    --proc /proc --dev /dev --tmpfs /tmp --tmpfs /scratch --dir /scratch/home
+    --tmpfs /src
+  )
+  for file in "${source_files[@]}"; do
+    sandbox+=(--ro-bind "$ROOT/$file" "/src/$file")
+  done
+  sandbox+=(
+    --remount-ro /src --clearenv
+    --setenv HOME /scratch/home --setenv TMPDIR /tmp
+    --setenv PATH /usr/bin:/bin --setenv LANG C --setenv LC_ALL C
+    --setenv PYTHONDONTWRITEBYTECODE 1
+    --setenv OMARCHY_TEST_ACCOUNT_COPY_ISOLATED 1
+    --setenv OMARCHY_TEST_ACCOUNT_COPY_OUTER_PID "$outer_pid"
+    --setenv OMARCHY_TEST_ACCOUNT_COPY_OUTER_MNT "$outer_mnt"
+    --setenv OMARCHY_TEST_ACCOUNT_COPY_OUTER_NET "$outer_net"
+    --chdir /scratch/home
+    /bin/bash --noprofile --norc /src/test/shell.d/agent-account-copy-test.sh
+  )
+  # Replace the outer entry so the runner receives the original timeout/child
+  # status. All writable state dies with the private namespaces, even on failure.
+  printf '%s\n' "account-copy fixture: private PID/proc/network isolation required; no fallback" >&2
+  exec /usr/bin/env -i PATH=/usr/bin:/bin /usr/bin/timeout --kill-after=3s 45s "${sandbox[@]}"
+fi
+
 test_tmp=$(mktemp -d)
 trap 'rm -rf "$test_tmp"' EXIT
 mkdir -p "$test_tmp/bin"
