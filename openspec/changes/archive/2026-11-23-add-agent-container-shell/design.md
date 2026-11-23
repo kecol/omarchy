@@ -8,7 +8,7 @@ See [proposal.md](proposal.md) for motivation and scope. This design is warrante
 
 `verify_attach()` additionally requires the container init to have a terminal and open standard input. Those flags are attachment requirements, not exec requirements. `status.Query` bounds metadata collection and removes ambient engine selectors in a child environment. Interactive attach currently uses a separate direct subprocess; its environment handling must not be copied unchanged into the new shell action.
 
-`bin/omarchy-agent-run-podman` retains the harness as entrypoint, `--rm`, a read-only root, private temporary filesystems and existing workspace/home mounts. The [control-plane draft](../../../plans/agent-control-plane.md) proposes stronger durable-session behavior; this change does not implement that draft. The [work ledger](../../history/work-ledger.md) preserves earlier delivered identity and availability safeguards without qualifying this new action.
+`bin/omarchy-agent-run-podman` retains the harness as entrypoint, `--rm`, a read-only root, private temporary filesystems and existing workspace/home mounts. The [control-plane draft](../../../../plans/agent-control-plane.md) proposes stronger durable-session behavior; this change does not implement that draft. The [work ledger](../../../history/work-ledger.md) preserves earlier delivered identity and availability safeguards without qualifying this new action.
 
 ## Goals / Non-Goals
 

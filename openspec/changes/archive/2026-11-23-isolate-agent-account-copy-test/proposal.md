@@ -22,7 +22,7 @@ The approved native verification scope is now one complete isolated fixture invo
 
 ### Non-goals and unverified assumptions
 
-Do not change `bin/omarchy-agent-account-transfer`, `bin/omarchy-agent-account-state`, the shared runners, CI workflow, package lists or unrelated fixtures. Do not add a generic execution framework, mark this test exclusive as a substitute for isolation, install prerequisites during tests, launch providers or use real SSH/accounts. The actual CI image's namespace admission remains to be checked by a separately approved new-head CI run. The failed run remains failed. Shell-feature spec synchronization/archive, Herdr, upstream catch-up and historical VM/storage/executor investigations are outside this change.
+Do not change `bin/omarchy-agent-account-transfer`, `bin/omarchy-agent-account-state`, the shared runners, CI workflow, package lists or unrelated fixtures. Do not add a generic execution framework, mark this test exclusive as a substitute for isolation, install prerequisites during tests, launch providers or use real SSH/accounts. Feature-head Tests `45098956445` and post-merge Tests `45171286751` subsequently verified admission and all six existing fixture checks in those CI snapshots. Other platforms and timeout enforcement/cleanup remain unqualified; see [outcome.md](outcome.md). The failed run remains failed. Shell-feature spec synchronization/archive, Herdr, upstream catch-up and historical VM/storage/executor investigations are outside this change.
 
 ## Capabilities
 

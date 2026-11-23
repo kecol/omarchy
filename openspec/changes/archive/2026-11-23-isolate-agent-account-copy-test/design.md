@@ -70,6 +70,6 @@ Keep the verification envelope at no more than the baseline's 512 MiB memory, ze
 
 ## Migration Plan
 
-No user-data migration or runtime activation is required by the implementation. The one-file change is implemented in an inactive candidate; [outcome.md](outcome.md) records source review, unchanged production detector bindings and bounded evidence. Local native validation, commit, publication/new-head CI and any active-checkout integration require their separately scoped approvals.
+No user-data migration or runtime activation is required by the implementation. The one-file change was prepared in an inactive candidate and subsequently committed, published, merged and source-integrated through separate approvals. [outcome.md](outcome.md) records exact delivery identities, feature/merge CI, unchanged production detector bindings and bounded evidence. The owner approved this documentation-only archive separately. Archive placement grants no new runtime permission; additional checks and publication of the closeout need their own approvals.
 
 Rollback restores only the fixture entry logic. It restores exposure to shared process inventory and does not repair or weaken production account handling. No account homes, sessions, images or settings are created for delivery or removed by rollback. Shell-feature synchronization/archive remains a separate change and approval.
