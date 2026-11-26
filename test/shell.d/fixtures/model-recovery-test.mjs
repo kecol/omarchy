@@ -90,6 +90,48 @@ try {
 }
 pass('unset Pi placeholder leaves managed startup open; real defaults, CLI providers and model references stay guarded');
 
+const previousContainer = process.env.OMARCHY_AGENT_IN_CONTAINER;
+const ttyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
+const originalWrite = process.stdout.write;
+const terminalOutput = [];
+try {
+  process.env.OMARCHY_AGENT_IN_CONTAINER = '1';
+  process.env.OMARCHY_AGENT_MANAGED = 'true';
+  Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: true });
+  process.stdout.write = (text) => { terminalOutput.push(text); return true; };
+  f = fixture({ draft: 'keep this draft', models: [] });
+  f.ctx.model = unsetModel;
+  const detach = f.commands.get('container-detach');
+  assert.ok(detach, 'container Pi offers an explicit detach preparation command');
+  await detach.handler('', f.ctx);
+  assert.deepEqual(terminalOutput, ['\x1b[=0u\x1b[>4;0m']);
+  assert.equal(f.draft(), 'keep this draft');
+  assert.equal(f.counts.shutdown, 0);
+  assert.equal(f.counts.select, 0);
+  assert.equal(f.counts.refresh, 0);
+  terminalOutput.length = 0;
+  await detach.handler('', f.ctx);
+  assert.deepEqual(terminalOutput, ['\x1b[=0u\x1b[>4;0m'], 'preparation can be repeated after Pi restarts its UI');
+  terminalOutput.length = 0;
+  f.ctx.mode = 'print';
+  await detach.handler('', f.ctx);
+  f.ctx.mode = 'tui';
+  Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: false });
+  await detach.handler('', f.ctx);
+  assert.deepEqual(terminalOutput, [], 'batch and non-terminal contexts never change keyboard encoding');
+  delete process.env.OMARCHY_AGENT_IN_CONTAINER;
+  assert.equal(fixture().commands.has('container-detach'), false, 'host Pi is unchanged');
+} finally {
+  process.stdout.write = originalWrite;
+  if (ttyDescriptor) Object.defineProperty(process.stdout, 'isTTY', ttyDescriptor);
+  else delete process.stdout.isTTY;
+  if (previousContainer === undefined) delete process.env.OMARCHY_AGENT_IN_CONTAINER;
+  else process.env.OMARCHY_AGENT_IN_CONTAINER = previousContainer;
+  if (previousManaged === undefined) delete process.env.OMARCHY_AGENT_MANAGED;
+  else process.env.OMARCHY_AGENT_MANAGED = previousManaged;
+}
+pass('explicit container detach preparation changes only terminal output, not the model, draft or workload');
+
 for (const choice of ['Choose a model for this session', 'Choose and save a new default']) {
   f = fixture({ settings, choices: [choice] });
   await f.emit('session_start');
