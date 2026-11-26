@@ -3,6 +3,8 @@ import { pathToFileURL } from 'node:url';
 const { default: install, classifyModelError, startupIssue, saveDefaultModel } = await import(pathToFileURL(process.argv[2]));
 const old = { provider: 'openai', id: 'retired-model' };
 const good = { provider: 'openai', id: 'available-model' };
+// Pi 1.5.2 Agent's DEFAULT_MODEL when initial model resolution returns undefined.
+const unsetModel = { provider: 'unknown', id: 'unknown', api: 'unknown', contextWindow: 0 };
 const key = (m) => `${m.provider}/${m.id}`;
 function fixture({ mode = 'tui', choices = [], draft = '', settings = {}, branch = [], models = [good], auth = true, sdk = true } = {}) {
   const events = new Map(), commands = new Map();
@@ -60,6 +62,33 @@ assert.equal(startupIssue(f.ctx, {}, []).id, old.id);
 f = fixture({ settings: { defaultProvider: good.provider, defaultModel: good.id }, auth: false });
 assert.equal(startupIssue(f.ctx, { defaultProvider: good.provider, defaultModel: good.id }, []).reason, 'authentication');
 pass('resumed model and absent authentication are diagnosed separately');
+
+f = fixture({ models: [] });
+f.ctx.model = unsetModel;
+assert.equal(startupIssue(f.ctx, {}, []), undefined);
+assert.equal(startupIssue(f.ctx, settings, []).reason, 'catalog');
+assert.equal(startupIssue(f.ctx, { defaultProvider: 'unknown', defaultModel: 'unknown' }, []).reason, 'catalog');
+assert.equal(startupIssue(f.ctx, { defaultProvider: 'unknown' }, ['--provider', 'unknown']).reason, 'catalog');
+f = fixture({ auth: false });
+f.ctx.model = unsetModel;
+assert.equal(startupIssue(f.ctx, { defaultProvider: good.provider, defaultModel: good.id }, []).reason, 'authentication');
+f.ctx.model = { ...unsetModel, api: 'openai-completions', contextWindow: 16000 };
+assert.equal(startupIssue(f.ctx, {}, []).reason, 'catalog');
+const previousManaged = process.env.OMARCHY_AGENT_MANAGED;
+process.env.OMARCHY_AGENT_MANAGED = 'true';
+try {
+  f = fixture({ models: [] });
+  f.ctx.model = unsetModel;
+  await f.emit('session_start');
+  assert.equal(f.counts.shutdown, 0);
+  assert.equal(f.counts.select, 0);
+  assert.equal(process.exitCode ?? 0, 0);
+} finally {
+  if (previousManaged === undefined) delete process.env.OMARCHY_AGENT_MANAGED;
+  else process.env.OMARCHY_AGENT_MANAGED = previousManaged;
+  process.exitCode = 0;
+}
+pass('unset Pi placeholder leaves managed startup open; real defaults, CLI providers and model references stay guarded');
 
 for (const choice of ['Choose a model for this session', 'Choose and save a new default']) {
   f = fixture({ settings, choices: [choice] });
