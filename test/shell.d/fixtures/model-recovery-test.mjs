@@ -3,6 +3,8 @@ import { pathToFileURL } from 'node:url';
 const { default: install, classifyModelError, startupIssue, saveDefaultModel } = await import(pathToFileURL(process.argv[2]));
 const old = { provider: 'openai', id: 'retired-model' };
 const good = { provider: 'openai', id: 'available-model' };
+// Pi 1.5.2 Agent's DEFAULT_MODEL when initial model resolution returns undefined.
+const unsetModel = { provider: 'unknown', id: 'unknown', api: 'unknown', contextWindow: 0 };
 const key = (m) => `${m.provider}/${m.id}`;
 function fixture({ mode = 'tui', choices = [], draft = '', settings = {}, branch = [], models = [good], auth = true, sdk = true } = {}) {
   const events = new Map(), commands = new Map();
@@ -60,6 +62,75 @@ assert.equal(startupIssue(f.ctx, {}, []).id, old.id);
 f = fixture({ settings: { defaultProvider: good.provider, defaultModel: good.id }, auth: false });
 assert.equal(startupIssue(f.ctx, { defaultProvider: good.provider, defaultModel: good.id }, []).reason, 'authentication');
 pass('resumed model and absent authentication are diagnosed separately');
+
+f = fixture({ models: [] });
+f.ctx.model = unsetModel;
+assert.equal(startupIssue(f.ctx, {}, []), undefined);
+assert.equal(startupIssue(f.ctx, settings, []).reason, 'catalog');
+assert.equal(startupIssue(f.ctx, { defaultProvider: 'unknown', defaultModel: 'unknown' }, []).reason, 'catalog');
+assert.equal(startupIssue(f.ctx, { defaultProvider: 'unknown' }, ['--provider', 'unknown']).reason, 'catalog');
+f = fixture({ auth: false });
+f.ctx.model = unsetModel;
+assert.equal(startupIssue(f.ctx, { defaultProvider: good.provider, defaultModel: good.id }, []).reason, 'authentication');
+f.ctx.model = { ...unsetModel, api: 'openai-completions', contextWindow: 16000 };
+assert.equal(startupIssue(f.ctx, {}, []).reason, 'catalog');
+const previousManaged = process.env.OMARCHY_AGENT_MANAGED;
+process.env.OMARCHY_AGENT_MANAGED = 'true';
+try {
+  f = fixture({ models: [] });
+  f.ctx.model = unsetModel;
+  await f.emit('session_start');
+  assert.equal(f.counts.shutdown, 0);
+  assert.equal(f.counts.select, 0);
+  assert.equal(process.exitCode ?? 0, 0);
+} finally {
+  if (previousManaged === undefined) delete process.env.OMARCHY_AGENT_MANAGED;
+  else process.env.OMARCHY_AGENT_MANAGED = previousManaged;
+  process.exitCode = 0;
+}
+pass('unset Pi placeholder leaves managed startup open; real defaults, CLI providers and model references stay guarded');
+
+const previousContainer = process.env.OMARCHY_AGENT_IN_CONTAINER;
+const ttyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
+const originalWrite = process.stdout.write;
+const terminalOutput = [];
+try {
+  process.env.OMARCHY_AGENT_IN_CONTAINER = '1';
+  process.env.OMARCHY_AGENT_MANAGED = 'true';
+  Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: true });
+  process.stdout.write = (text) => { terminalOutput.push(text); return true; };
+  f = fixture({ draft: 'keep this draft', models: [] });
+  f.ctx.model = unsetModel;
+  const detach = f.commands.get('container-detach');
+  assert.ok(detach, 'container Pi offers an explicit detach preparation command');
+  await detach.handler('', f.ctx);
+  assert.deepEqual(terminalOutput, ['\x1b[=0u\x1b[>4;0m']);
+  assert.equal(f.draft(), 'keep this draft');
+  assert.equal(f.counts.shutdown, 0);
+  assert.equal(f.counts.select, 0);
+  assert.equal(f.counts.refresh, 0);
+  terminalOutput.length = 0;
+  await detach.handler('', f.ctx);
+  assert.deepEqual(terminalOutput, ['\x1b[=0u\x1b[>4;0m'], 'preparation can be repeated after Pi restarts its UI');
+  terminalOutput.length = 0;
+  f.ctx.mode = 'print';
+  await detach.handler('', f.ctx);
+  f.ctx.mode = 'tui';
+  Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: false });
+  await detach.handler('', f.ctx);
+  assert.deepEqual(terminalOutput, [], 'batch and non-terminal contexts never change keyboard encoding');
+  delete process.env.OMARCHY_AGENT_IN_CONTAINER;
+  assert.equal(fixture().commands.has('container-detach'), false, 'host Pi is unchanged');
+} finally {
+  process.stdout.write = originalWrite;
+  if (ttyDescriptor) Object.defineProperty(process.stdout, 'isTTY', ttyDescriptor);
+  else delete process.stdout.isTTY;
+  if (previousContainer === undefined) delete process.env.OMARCHY_AGENT_IN_CONTAINER;
+  else process.env.OMARCHY_AGENT_IN_CONTAINER = previousContainer;
+  if (previousManaged === undefined) delete process.env.OMARCHY_AGENT_MANAGED;
+  else process.env.OMARCHY_AGENT_MANAGED = previousManaged;
+}
+pass('explicit container detach preparation changes only terminal output, not the model, draft or workload');
 
 for (const choice of ['Choose a model for this session', 'Choose and save a new default']) {
   f = fixture({ settings, choices: [choice] });

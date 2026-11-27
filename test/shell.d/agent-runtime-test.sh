@@ -42,6 +42,30 @@ cat >"$mock_bin/podman" <<'SH'
 #!/bin/bash
 [[ ${1:-} != "--remote=false" ]] || shift
 case "$1 ${2:-}" in
+  "info ")
+    ;;
+  "ps --no-trunc")
+    if [[ ${OMARCHY_TEST_RUNTIME_STATE:-absent} == "unavailable" ]]; then
+      exit 125
+    elif [[ ${OMARCHY_TEST_RUNTIME_STATE:-absent} != "absent" ]]; then
+      printf '%064d\n' 0
+    fi
+    ;;
+  "inspect "*)
+    mapfile -d '' -t run_args <"$OMARCHY_TEST_PODMAN_RUN_LOG"
+    labels=()
+    for arg in "${run_args[@]}"; do
+      [[ $arg != --label=* ]] || labels+=("${arg#--label=}")
+    done
+    jq -nc --arg state "$OMARCHY_TEST_RUNTIME_STATE" --args '
+      ($ARGS.positional | reduce .[] as $label ({};
+        ($label | index("=")) as $i | .[$label[:$i]] = $label[$i+1:])) as $labels
+      | [{Id: ("0" * 64), Name: "test-agent", ImageName: "test/pi", ImageDigest: null,
+          Config: {User: "1000", Labels: $labels},
+          State: {Status: $state, Pid: 42, StartedAt: "2026-01-01T00:00:00Z"},
+          Mounts: [], HostConfig: {NetworkMode: "private", UsernsMode: "keep-id"},
+          NetworkSettings: {Ports: {}, Networks: {}}}]' "${labels[@]}"
+    ;;
   "info --format")
     printf '%s\n' "${OMARCHY_TEST_PODMAN_ROOTLESS:-true}"
     ;;
@@ -62,6 +86,7 @@ case "$1 ${2:-}" in
     ;;
   "run --rm")
     printf '%s\0' "$@" >"$OMARCHY_TEST_PODMAN_RUN_LOG"
+    exit "${OMARCHY_TEST_RUN_EXIT:-0}"
     ;;
   *)
     echo "unexpected podman call: $*" >&2
@@ -253,6 +278,29 @@ for expected in \
   grep -Fxq -- "$expected" <<<"$run_joined" || fail "managed Podman launch includes $expected" "$run_joined"
 done
 pass "Podman adapter gives managed assignments task-scoped state and identity"
+
+for sample in running:0 running:17 paused:0 paused:17 unavailable:0 unavailable:17; do
+  observed=${sample%:*}
+  client_exit=${sample#*:}
+  : >"$state_log"
+  if (
+    cd "$workspace"
+    env "${common_env[@]}" PATH="$mock_bin:$ROOT/bin:/usr/bin" \
+      OMARCHY_AGENT_MANAGED=true OMARCHY_AGENT_PROJECT_ID="$managed_project" \
+      OMARCHY_AGENT_TASK_ID="$managed_task" OMARCHY_AGENT_ASSIGNMENT_ID="$managed_assignment" \
+      OMARCHY_AGENT_ROLE=coder OMARCHY_AGENT_WORKSPACE="$workspace" \
+      OMARCHY_TEST_RUNTIME_STATE="$observed" OMARCHY_TEST_RUN_EXIT="$client_exit" \
+      "$ROOT/bin/omarchy-agent-run-podman" pi pi -- pi
+  ) >"$test_tmp/postflight-$observed-$client_exit" 2>&1; then
+    actual_exit=0
+  else
+    actual_exit=$?
+  fi
+  (( actual_exit == client_exit )) || fail "runtime observation must not replace client exit status"
+  ! grep -Fq $'finish\t' "$state_log" || fail "$observed runtime must not be recorded as finished" "$(<"$state_log")"
+  ! grep -Fq $'assignment-status\t' "$state_log" || fail "$observed runtime must not finish its assignment"
+done
+pass "client return does not finish a live, paused or unobservable workload or assignment"
 
 mkdir -p "$test_home/.config/omarchy/agents"
 printf '%s\n' '{"resources":{"memory":"6g","pids":512,"cpus":2}}' >"$test_home/.config/omarchy/agents/policy.json"

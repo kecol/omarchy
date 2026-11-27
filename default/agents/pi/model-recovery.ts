@@ -43,7 +43,14 @@ export function startupIssue(ctx: ExtensionContext, settings: any, argv: string[
   } else if (!ctx.scopedModels?.length) {
     requested = reference({ provider: settings.defaultProvider, id: settings.defaultModel });
   }
-  requested ??= reference(ctx.model);
+  if (!requested) {
+    const current = ctx.model;
+    // Pi 1.5 uses this placeholder when no model is selected. It is not a
+    // requested model; explicit defaults, history and CLI providers still apply.
+    if (!provider && !ctx.scopedModels?.length && current?.provider === "unknown" &&
+        current.id === "unknown" && current.api === "unknown" && current.contextWindow === 0) return;
+    requested = reference(current);
+  }
   if (!requested) return;
   const found = ctx.modelRegistry.find(requested.provider, requested.id);
   if (!found) return { ...requested, reason: "catalog" };
@@ -171,6 +178,24 @@ export default function modelRecovery(pi: ExtensionAPI) {
       recovering = false;
     }
   };
+
+  if (process.env.OMARCHY_AGENT_IN_CONTAINER === "1") {
+    pi.registerCommand("container-detach", {
+      description: "Prepare this terminal for Podman's Ctrl+P, Ctrl+Q detach sequence",
+      handler: async (_args, ctx) => {
+        if (ctx.mode !== "tui" || !process.stdout.isTTY ||
+            ["1", "true"].includes(process.env.OMARCHY_AGENT_ONESHOT ?? "")) {
+          ctx.ui.notify("Container detach preparation needs an interactive terminal.", "error");
+          return;
+        }
+        // Podman matches legacy control bytes, not Kitty/modifyOtherKeys events.
+        // Change output-side encoding only when explicitly preparing to detach;
+        // normal editing keeps Pi's enhanced keyboard support, including after $ commands.
+        process.stdout.write("\x1b[=0u\x1b[>4;0m");
+        ctx.ui.notify("Press Ctrl+P, then Ctrl+Q to detach. Pi keeps running. Do not use Ctrl+C or Ctrl+D.", "info");
+      },
+    });
+  }
 
   pi.registerCommand("model-recovery", {
     description: "Choose an available model or refresh Pi's catalog without resending a prompt",

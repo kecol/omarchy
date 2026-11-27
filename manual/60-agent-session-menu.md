@@ -28,13 +28,17 @@ Exit is the default list choice. Refresh fetches new metadata on demand. There i
 
 **Attachment shares input and terminal resizing with any terminal already attached. Your keystrokes can change the agent's state. Ctrl+C may interrupt the agent even though the controller disables host-signal proxying.**
 
-Select Attach existing harness only when you intend to inspect that session. Detach without stopping it with **Ctrl+P, then Ctrl+Q**. The menu then returns to the same selected instance. Choose Back to refresh the list or explicitly select a close action after inspection.
+Select Attach existing harness only when you intend to inspect that session. Detach without stopping it with **Ctrl+P, then Ctrl+Q**. In container Pi, first enter **`/container-detach`**. This command prepares the current terminal's keyboard encoding so Podman can recognize the detach keys. It does not submit a model prompt, stop Pi, or detach by itself. Normal editing retains Pi's enhanced keyboard support until you run the command. Run it again before each detach, including after a `$` shell command or another UI restart.
+
+The menu returns to the same selected instance after detachment. Choose Back to refresh the list or explicitly select a close action after inspection. A direct attachment returns to its caller. A terminal launched with `--hold` can remain visible without accepting input after its caller exits; that held screen is not a live attachment.
 
 Attachment connects to the existing process. It does not start another Codex/Pi process, execute a new shell, restart a stopped container, replay stored logs, or scrape a screen. The screen might not redraw immediately; a blank or incomplete display is not proof of abandonment. Detaching is not a close action. A nonzero attach exit does not trigger a fallback or retry.
 
 The harness stream goes directly to your terminal, without controller output capture or recording. Your terminal's own scrollback behavior still applies. Do not share screenshots or pasted output containing device codes, credentials, prompts, or other private content.
 
 A running container with an allocated terminal is not proof that it already has an attached host terminal. Authentication state and work state are not inferred from attachment capabilities.
+
+The launcher checks a fresh local runtime snapshot when its client returns. It does not record the instance or assignment as finished while that instance remains active, or while runtime observation is unavailable. A retained registry state is only the last known state, not proof of current liveness. Use `omarchy agent status` for a fresh observation. The launcher preserves the client's exit status and does not start a background watcher or restart the workload.
 
 ## Open an independent maintenance shell
 

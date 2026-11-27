@@ -39,6 +39,10 @@ def stub():
     pass
   elif name == 'podman' and args[:3] == ['--remote=false', 'run', '--rm']:
     return int(os.environ.get('OFFLINE_EXIT', '0'))
+  elif name == 'podman' and args == ['--remote=false', 'info']:
+    pass
+  elif name == 'podman' and args == ['--remote=false', 'ps', '--no-trunc', '--filter', 'label=org.omarchy.managed=agent', '--format', '{{.ID}}']:
+    pass
   else:
     print('Unexpected offline operation: '+name, file=sys.stderr)
     return 99
@@ -53,7 +57,7 @@ class InlineTests(unittest.TestCase):
     self.stage = self.root/'source'
     self.bin = self.stage/'bin'
     self.bin.mkdir(parents=True)
-    for name in ('omarchy', 'omarchy-agent', 'omarchy-agent-exec', 'omarchy-agent-run-podman'):
+    for name in ('omarchy', 'omarchy-agent', 'omarchy-agent-exec', 'omarchy-agent-run-podman', 'omarchy-agent-runtime-snapshot', 'omarchy-cmd-missing'):
       shutil.copy2(ROOT/'bin'/name, self.bin/name)
     for asset in ('definitions/pi.json', 'pi/model-recovery.ts'):
       target = self.stage/'default/agents'/asset
